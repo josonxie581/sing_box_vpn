@@ -1,5 +1,7 @@
 # Gsou - Sing-box VPN 客户端
 
+![应用主界面](Doc/main.png)
+
 一个基于 Flutter 开发的现代化 sing-box VPN 客户端，支持 Windows 平台。
 
 ## 项目简介
