@@ -5,7 +5,7 @@ import '../models/proxy_mode.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
-import 'add_config_page.dart';
+// import 'add_config_page.dart';
 import 'connection_status_page.dart';
 import 'routing_rules_page.dart';
 import 'dns_settings_page.dart';
@@ -181,8 +181,8 @@ class SimpleModernHome extends StatelessWidget {
                                 alignment: Alignment.center,
                                 child: AnimatedConnectionButton(
                                   isConnected: provider.isConnected,
-                                  // 使用精准标记而不是通过状态字符串匹配
-                                  isConnecting: provider.isBusy,
+                                  isConnecting: provider.isConnecting,
+                                  isDisconnecting: provider.isDisconnecting,
                                   size: 80,
                                   onTap: () async {
                                     if (provider.isConnected) {
@@ -200,7 +200,6 @@ class SimpleModernHome extends StatelessWidget {
                                           provider.configs.first,
                                         );
                                       } else {
-                                        // ignore: use_build_context_synchronously
                                         ScaffoldMessenger.of(
                                           context,
                                         ).showSnackBar(
@@ -291,16 +290,18 @@ class SimpleModernHome extends StatelessWidget {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 18),
 
-                        const SizedBox(height: 16),
-
-                        // 节点配置和DNS设置 (闪连风格简化)
+                        // 节点配置 & DNS
                         Row(
                           children: [
                             Expanded(
                               child: GestureDetector(
                                 onTap: () => _showConfigManagementPage(context),
-                                child: _buildFeatureButton('节点配置', Icons.list),
+                                child: _buildFeatureButton(
+                                  '节点配置',
+                                  Icons.list_alt,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 16),
@@ -315,17 +316,7 @@ class SimpleModernHome extends StatelessWidget {
 
                         const SizedBox(height: 18),
 
-                        // 守护进程模式（闪连风格，全宽显示）
-                        _buildDaemonCard(context, provider),
-
-                        const SizedBox(height: 12),
-
-                        // 系统代理开关
-                        _buildSystemProxyToggle(provider),
-
-                        const SizedBox(height: 18),
-
-                        // 日志和分流功能
+                        // 日志 & 分流规则
                         Row(
                           children: [
                             Expanded(
@@ -339,7 +330,7 @@ class SimpleModernHome extends StatelessWidget {
                               child: GestureDetector(
                                 onTap: () => _showRoutingRulesPage(context),
                                 child: Container(
-                                  height: 80, // 统一高度
+                                  height: 80,
                                   padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
                                     color: AppTheme.bgCard,
@@ -370,7 +361,7 @@ class SimpleModernHome extends StatelessWidget {
                                               CrossAxisAlignment.start,
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
-                                          children: [
+                                          children: const [
                                             Text(
                                               '分流',
                                               style: TextStyle(
@@ -379,7 +370,7 @@ class SimpleModernHome extends StatelessWidget {
                                                 color: AppTheme.textPrimary,
                                               ),
                                             ),
-                                            const SizedBox(height: 2),
+                                            SizedBox(height: 2),
                                             Text(
                                               '路由规则',
                                               style: TextStyle(
@@ -403,7 +394,17 @@ class SimpleModernHome extends StatelessWidget {
                           ],
                         ),
 
-                        const SizedBox(height: 24), // 底部间距
+                        const SizedBox(height: 18),
+
+                        // TUN / 守护进程 卡片（这里用 TUN 模式卡片）
+                        _buildDaemonCard(context, provider),
+
+                        const SizedBox(height: 12),
+
+                        // 系统代理开关
+                        _buildSystemProxyToggle(provider),
+
+                        const SizedBox(height: 24),
                       ],
                     ),
                   );
@@ -421,57 +422,6 @@ class SimpleModernHome extends StatelessWidget {
     final type = config.type.toUpperCase();
     // 简化展示：直接返回协议名，必要时可拼接子信息
     return type;
-  }
-
-  // 构建状态卡片
-  Widget _buildStatusCard(IconData icon, String title, String value) {
-    return Container(
-      height: 90,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-            spreadRadius: 0,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: AppTheme.primaryNeon),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.textPrimary,
-              height: 1.2,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
   }
 
   // 简洁统计卡片（仅主值）
@@ -553,7 +503,7 @@ class SimpleModernHome extends StatelessWidget {
     );
   }
 
-  // 简洁流量卡片（主值 + 次值：速度）
+  // 简洁流量卡片（主值 + 次值：累计字节）
   Widget _buildMiniTrafficCard({
     required IconData icon,
     required String label,
@@ -616,70 +566,6 @@ class SimpleModernHome extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 构建连接状态卡片（含连接数）
-  Widget _buildConnectionStatusCard(VPNProvider provider) {
-    return Container(
-      height: 90,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-            spreadRadius: 0,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.computer, size: 18, color: AppTheme.primaryNeon),
-              const SizedBox(width: 8),
-              Text(
-                '连接状态',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          // 连接数显示（在连接状态上方）
-          if (provider.isConnected) ...[
-            Text(
-              '${provider.activeConnections} 个连接',
-              style: const TextStyle(
-                fontSize: 10,
-                color: AppTheme.textSecondary,
-                height: 1.0,
-              ),
-            ),
-            const SizedBox(height: 2),
-          ],
-          // 连接状态显示
-          Text(
-            provider.status,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.textPrimary,
-              height: 1.2,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -1071,30 +957,6 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 显示添加服务器页面
-  void _showAddServerDialog(BuildContext context) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const AddConfigPage(),
-        transitionDuration: const Duration(milliseconds: 300),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          const curve = Curves.ease;
-
-          var tween = Tween(
-            begin: begin,
-            end: end,
-          ).chain(CurveTween(curve: curve));
-
-          return SlideTransition(
-            position: animation.drive(tween),
-            child: child,
-          );
-        },
-      ),
-    );
-  }
 
   // 显示连接状态页面
   // 显示连接状态页面
@@ -1234,7 +1096,6 @@ class SimpleModernHome extends StatelessWidget {
     }
 
     final config = provider.currentConfig!;
-    final ping = provider.getConfigPing(config.id);
     final pingLevel = provider.getConfigPingLevel(config.id);
     final pingText = provider.getConfigPingText(config.id);
 

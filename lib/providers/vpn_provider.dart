@@ -950,6 +950,9 @@ class VPNProvider extends ChangeNotifier {
           } else {
             _addLog('开启系统代理失败 (轻量)');
           }
+          // 异步后台再进行多次确认与必要的重试，提升启动后立即可用的成功率
+          // 不阻塞主连接流程
+          unawaited(_ensureSystemProxyEnabled());
         } else {
           if (_useTun) {
             _addLog('TUN 模式下跳过系统代理 (轻量)');
@@ -1156,6 +1159,37 @@ class VPNProvider extends ChangeNotifier {
     }
   }
 
+  // 确保系统代理真正启用：针对启动后首次 enable 可能因 WinINET 刷新/注册表传播延迟导致读取未及时更新
+  // - attempts: 最大尝试次数
+  // 策略：首次延迟 ~120ms，然后指数递增 (150ms, 320ms, 600ms...) 再试 enable + 读取状态
+  Future<void> _ensureSystemProxyEnabled({int attempts = 3}) async {
+    if (!_autoSystemProxy || _useTun || !_proxyManager.isSupported) return;
+    // 给予 sing-box 端口 listen 与注册表写入一个最小缓冲
+    await Future.delayed(const Duration(milliseconds: 120));
+    for (var i = 1; i <= attempts; i++) {
+      try {
+        final ok = await _proxyManager.enableProxy(port: _localPort);
+        _updateSystemProxyStatus();
+        final statusOk = _systemProxyEnabled;
+        if (ok && statusOk) {
+          _addLog('系统代理确认启用成功 (attempt $i/$attempts)');
+          return;
+        } else {
+          _addLog('系统代理尝试 $i/$attempts: enable=$ok status=$statusOk');
+        }
+      } catch (e) {
+        _addLog('系统代理尝试 $i/$attempts 异常: $e');
+      }
+      if (i < attempts) {
+        final delay = Duration(milliseconds: 150 + (i * i) * 170);
+        await Future.delayed(delay);
+      }
+    }
+    if (!_systemProxyEnabled) {
+      _addLog('系统代理多次尝试后仍未确认启用，必要时手动切换一次开关。');
+    }
+  }
+
   /// 设置 Clash API 开�?
   Future<void> setEnableClashApi(bool enabled) async {
     _enableClashApi = enabled;
@@ -1264,8 +1298,29 @@ class VPNProvider extends ChangeNotifier {
         }
       }
     } else if (!enabled) {
-      // 关闭 TUN 后，如用户之前启用了自动系统代理（flag 仍为 false? 只有互斥关闭时才会为 false）不做自动恢复；
-      // 设计：让用户手动重新打开“系统代理”开关，更直观。若希望自动恢复，可在此处记录先前状态再恢复
+      // 从 TUN 模式关闭 -> 自动打开系统代理
+      if (_proxyManager.isSupported) {
+        _autoSystemProxy = true;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('auto_system_proxy', true);
+        } catch (_) {}
+        _addLog('关闭 TUN -> 自动启用系统代理');
+        try {
+          final ok = await _proxyManager.enableProxy(port: _localPort);
+          if (ok) {
+            _addLog('系统代理已自动开启 (TUN关闭) 127.0.0.1:$_localPort');
+            // 后台再做一次确认重试
+            unawaited(_ensureSystemProxyEnabled());
+          } else {
+            _addLog('系统代理自动开启失败 (TUN关闭)');
+          }
+        } catch (e) {
+          _addLog('系统代理自动开启异常 (TUN关闭): $e');
+        }
+      } else {
+        _addLog('关闭 TUN 后尝试启用系统代理，但平台不支持');
+      }
     }
 
     // 更新系统代理状态缓存并通知 UI
