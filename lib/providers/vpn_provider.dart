@@ -35,6 +35,9 @@ class VPNProvider extends ChangeNotifier {
   List<VPNConfig> _configs = [];
   VPNConfig? _currentConfig;
   bool _isConnected = false;
+  // 细粒度阶段标记：用于驱动动画（避免通过 status 文本模糊判断）
+  bool _isConnecting = false; // 连接发起到成功/失败期间
+  bool _isDisconnecting = false; // 断开发起到完成期间
   String _status = '未连接';
   List<String> _logs = [];
   // 日志降噪：系统代理模式下
@@ -232,6 +235,9 @@ class VPNProvider extends ChangeNotifier {
   List<VPNConfig> get configs => _configs;
   VPNConfig? get currentConfig => _currentConfig;
   bool get isConnected => _isConnected;
+  bool get isConnecting => _isConnecting;
+  bool get isDisconnecting => _isDisconnecting;
+  bool get isBusy => _isConnecting || _isDisconnecting;
   String get status => _status;
   List<String> get logs => _logs;
   bool get autoSystemProxy => _autoSystemProxy;
@@ -298,7 +304,7 @@ class VPNProvider extends ChangeNotifier {
   bool _disposed = false; // 供后台异步任务检测，避免已释放后继续操作
 
   /// 初始化服务（智能选择集成版本或回退版本）
-  /// 
+  ///
   void _initService() {
     // 仅使用集成版本（必须有 singbox.dll）
     _singBoxService = SingBoxNativeService();
@@ -401,8 +407,9 @@ class VPNProvider extends ChangeNotifier {
           if ((enabled && _isOurProxy(server)) ||
               (autoUrl.isNotEmpty && autoUrl.contains(_pacManager.pacUrl))) {
             final p = _parseLoopbackPort(server);
-            _addLog("检测到系统代理遗留 (server=$server, pac=$autoUrl, localPort=${p ?? 'n/a'})，已自动清理");
-
+            _addLog(
+              "检测到系统代理遗留 (server=$server, pac=$autoUrl, localPort=${p ?? 'n/a'})，已自动清理",
+            );
 
             await _proxyManager.disableProxy();
           }
@@ -416,7 +423,6 @@ class VPNProvider extends ChangeNotifier {
       _updateSystemProxyStatus();
     } catch (_) {}
   }
-
 
   /// 计算 Windows 管理员权限（进程是否提升）
   Future<void> _computeWindowsAdmin() async {
@@ -486,7 +492,6 @@ class VPNProvider extends ChangeNotifier {
     }
     _scheduleNotify(); // 替换直接 notify，提高性能
   }
-
 
   /// 加载配置
   Future<void> loadConfigs() async {
@@ -728,6 +733,8 @@ class VPNProvider extends ChangeNotifier {
       _addLog(
         'CONNECT: 环境快照 useDaemon=$_useDaemon isAdmin=$_isWindowsAdmin strictRoute=$_tunStrictRoute',
       );
+      _isConnecting = true;
+      _isDisconnecting = false; // 避免残留
       // 只有当需要使用 TUN 模式且启用了守护进程时，才走守护进程分支
       if (Platform.isWindows && _useTun && _useDaemon) {
         // 提前设置“正在连接”状态（之前缺失导致 UI 中央按钮第一次不变）
@@ -741,6 +748,8 @@ class VPNProvider extends ChangeNotifier {
           // 失败恢复标记，允许后续本地模式再次尝试
           _sessionViaDaemon = false;
         }
+        _isConnecting = false;
+        notifyListeners();
         return ok;
       }
       // 早期阶段标记
@@ -768,8 +777,9 @@ class VPNProvider extends ChangeNotifier {
       notifyListeners();
       final swInit = Stopwatch()..start();
       if (!await _singBoxService.initialize()) {
-         _status = '初始化失败';
+        _status = '初始化失败';
         notifyListeners();
+        _isConnecting = false;
         return false;
       }
       _addLog('CONNECT: 初始化完成 ${swInit.elapsedMilliseconds}ms');
@@ -781,6 +791,7 @@ class VPNProvider extends ChangeNotifier {
         _addLog('sing-box 未安装，请下载 sing-box.exe');
         _status = 'sing-box 未安装';
         notifyListeners();
+        _isConnecting = false;
         return false;
       }
 
@@ -792,6 +803,7 @@ class VPNProvider extends ChangeNotifier {
           _status = '需要管理员权限以启用 TUN';
           _addLog('TUN 模式需要管理员权限，请在UI中选择自动提权或手动以管理员身份运行');
           notifyListeners();
+          _isConnecting = false;
           return false;
         }
         _addLog('TUN 模式：使用管理员权限直接运行');
@@ -884,6 +896,7 @@ class VPNProvider extends ChangeNotifier {
       if (!await _singBoxService.testConfig(singBoxConfig)) {
         _status = '配置无效';
         notifyListeners();
+        _isConnecting = false;
         return false;
       }
       _addLog('CONNECT: **配置验证通过 ${swTest.elapsedMilliseconds}ms');
@@ -918,7 +931,7 @@ class VPNProvider extends ChangeNotifier {
         }
         _currentConfig = config;
         _isConnected = true;
-  _status = '已连接';
+        _status = '已连接';
         final totalMs = swTotal.elapsedMilliseconds;
         // 持久化当前配置 ID，确保断开或重启后仍保持当前选择
         try {
@@ -957,6 +970,8 @@ class VPNProvider extends ChangeNotifier {
         _addLog(
           'CONNECT: 启动成功 用时 start=${swStart.elapsedMilliseconds}ms total=${totalMs}ms',
         );
+        _isConnecting = false;
+        _isConnecting = false;
         notifyListeners();
 
         // ========== TUN 连通性探�?& MTU 回退逻辑 ==========
@@ -1009,6 +1024,7 @@ class VPNProvider extends ChangeNotifier {
         } catch (_) {}
         _status = '连接失败';
         notifyListeners();
+        _isConnecting = false;
         return false;
       }
     } catch (e) {
@@ -1018,6 +1034,7 @@ class VPNProvider extends ChangeNotifier {
       } catch (_) {}
       _status = '连接失败';
       notifyListeners();
+      _isConnecting = false;
       return false;
     }
   }
@@ -1067,7 +1084,9 @@ class VPNProvider extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 350));
         final ok = await _reconnectWithTunMtu(cfg, mtu: mtu);
         if (!ok) {
-          _addLog('[TUN探测] 使用 MTU=${mtuPlan[attempt]} 失败，尝试回退到 ${mtuPlan[attempt - 1]}');
+          _addLog(
+            '[TUN探测] 使用 MTU=${mtuPlan[attempt]} 失败，尝试回退到 ${mtuPlan[attempt - 1]}',
+          );
           attempt++;
           continue;
         }
@@ -1123,7 +1142,7 @@ class VPNProvider extends ChangeNotifier {
       if (started) {
         _currentConfig = cfg;
         _isConnected = true;
-  _status = '已连接';
+        _status = '已连接';
         _startTrafficStatsTimer();
         _startStatusMonitor();
         if (_enableClashApi) _openClashTrafficStream();
@@ -1298,6 +1317,8 @@ class VPNProvider extends ChangeNotifier {
   /// 断开 VPN
   Future<bool> disconnect() async {
     try {
+      _isDisconnecting = true;
+      _isConnecting = false; // 防止并发
       _status = '正在断开...';
       notifyListeners();
 
@@ -1325,30 +1346,33 @@ class VPNProvider extends ChangeNotifier {
           }
         }
         _isConnected = false;
-         _status = '未连接';
+        _status = '未连接';
         // _currentConfig = null; // 保留当前配置，不要清�?
         _connectionStartTime = null;
         _sessionViaDaemon = false;
         // 停止流量统计定时器和状态监控
         _stopTrafficStatsTimer();
         _stopStatusMonitor();
+        _isDisconnecting = false;
         notifyListeners();
         return true;
       } else {
         _status = '断开失败';
+        _isDisconnecting = false;
         notifyListeners();
         return false;
       }
     } catch (e) {
       _addLog('断开失败: $e');
       _status = '断开失败';
+      _isDisconnecting = false;
       notifyListeners();
       return false;
     }
   }
 
   /// 重置所有应用偏好设置（不删除已导入的配置，可选参数控制）
-  /// [includeConfigs] 
+  /// [includeConfigs]
   Future<void> resetPreferences({bool includeConfigs = false}) async {
     try {
       _addLog('正在重置偏好设置...');
@@ -1604,6 +1628,7 @@ class VPNProvider extends ChangeNotifier {
     _connections.clear(); // 清空连接列表
     _closeClashTrafficStream();
   }
+
   /// 更新流量统计（优先使用真实数据）
   void _updateTrafficStats() {
     if (!_isConnected) return;
@@ -1755,6 +1780,7 @@ class VPNProvider extends ChangeNotifier {
       }
     } catch (_) {}
   }
+
   /// 从守护进程更新流量统计
   Future<void> _updateTrafficFromDaemon() async {
     try {
@@ -1792,6 +1818,7 @@ class VPNProvider extends ChangeNotifier {
       debugPrint('从守护进程获取流量统计失败: $e');
     }
   }
+
   /// Directly update traffic statistics from Clash API
   Future<void> _updateTrafficFromClashAPI() async {
     // If WS real-time stream is enabled, do not execute HTTP polling to avoid duplicate statistics
@@ -2108,6 +2135,7 @@ class VPNProvider extends ChangeNotifier {
 
     return updatedConnection;
   }
+
   /// 计算稳定的速度值（用于 TUN 模式）
   int _calculateStableSpeed(
     int increment,
@@ -2959,5 +2987,3 @@ class VPNProvider extends ChangeNotifier {
     }
   }
 }
-
-

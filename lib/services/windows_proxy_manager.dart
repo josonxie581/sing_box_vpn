@@ -7,6 +7,18 @@ import 'package:win32/win32.dart' as w;
 /// - 使用用户级别 IE/WinINET 代理设置 (HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings)
 /// - 通过 InternetSetOption 通知系统变更
 class WindowsProxyManager {
+  // ======= 全局阻断（用户要求：可完全禁止修改系统代理） =======
+  // 1. 运行时可通过 WindowsProxyManager.setBlocked(true/false) 切换
+  // 2. 构建时可通过 --dart-define=DISABLE_SYSTEM_PROXY=true 强制阻断
+  static bool _blocked = const bool.fromEnvironment(
+    'DISABLE_SYSTEM_PROXY',
+    defaultValue: false,
+  );
+  static bool get blocked => _blocked;
+  static void setBlocked(bool value) {
+    _blocked = value;
+  }
+
   static const String _regSubKey =
       r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
@@ -15,15 +27,26 @@ class WindowsProxyManager {
   static const int _INTERNET_OPTION_SETTINGS_CHANGED = 39;
 
   // 绑定 InternetSetOptionW
-  late final ffi.DynamicLibrary _wininet =
-      ffi.DynamicLibrary.open('wininet.dll');
+  late final ffi.DynamicLibrary _wininet = ffi.DynamicLibrary.open(
+    'wininet.dll',
+  );
 
-  late final int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>, int)
-      _internetSetOptionW = _wininet.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer<ffi.Void>, ffi.Uint32, ffi.Pointer<ffi.Void>, ffi.Uint32),
-          int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>, int)>(
-        'InternetSetOptionW',
-      );
+  late final int Function(
+    ffi.Pointer<ffi.Void>,
+    int,
+    ffi.Pointer<ffi.Void>,
+    int,
+  )
+  _internetSetOptionW = _wininet
+      .lookupFunction<
+        ffi.Int32 Function(
+          ffi.Pointer<ffi.Void>,
+          ffi.Uint32,
+          ffi.Pointer<ffi.Void>,
+          ffi.Uint32,
+        ),
+        int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>, int)
+      >('InternetSetOptionW');
 
   bool get isSupported => Platform.isWindows;
 
@@ -49,7 +72,7 @@ class WindowsProxyManager {
       w.RegCloseKey(hKey);
     }
   }
-  
+
   /// 获取当前自动配置脚本 URL
   String getAutoConfigURL() {
     final hKey = _openKeyForRead();
@@ -60,7 +83,7 @@ class WindowsProxyManager {
       w.RegCloseKey(hKey);
     }
   }
-  
+
   /// 获取系统代理的完整状态（用于调试）
   Map<String, dynamic> getProxyStatus() {
     final hKey = _openKeyForRead();
@@ -81,7 +104,16 @@ class WindowsProxyManager {
   Map<String, dynamic>? _backup; // 备份注册表值
 
   /// 启用系统代理
-  Future<bool> enableProxy({required int port}) async {
+  /// [useSimpleFormat] = true 时按图示使用 "127.0.0.1:port" 简单格式（WinINET 会自动用于 http/https)
+  /// 为兼容旧行为，可传 false 使用多协议映射字符串
+  Future<bool> enableProxy({
+    required int port,
+    bool useSimpleFormat = true,
+  }) async {
+    if (_blocked) {
+      // 被阻断时直接返回，但仍保持“未修改”语义
+      return false;
+    }
     if (!isSupported) return false;
     final hKey = _openOrCreateKey();
     if (hKey == 0) return false;
@@ -89,11 +121,30 @@ class WindowsProxyManager {
       await _backupIfNeeded(hKey);
 
       final server = '127.0.0.1:$port';
-      final serverMapping = 'http=$server;https=$server;socks=$server';
+      final proxyValue = useSimpleFormat
+          ? server // 简单模式
+          : 'http=$server;https=$server;socks=$server'; // 旧兼容模式
+
+      // 常见直连网段/域名（顺序不会影响功能）
+      const overrideList = [
+        '<-loopback>', // WinINET 特殊关键字：loopback + localhost
+        'localhost',
+        '*.local',
+        '127.*',
+        '10.*',
+        '172.16.*',
+        '172.17.*',
+        '172.18.*',
+        '172.19.*',
+        '172.2*', // 覆盖到 172.20-29 (简单写法，严格可枚举)
+        '172.30.*',
+        '172.31.*',
+        '192.168.*',
+      ];
 
       _setDword(hKey, 'ProxyEnable', 1);
-      _setString(hKey, 'ProxyServer', serverMapping);
-      _setString(hKey, 'ProxyOverride', '<local>');
+      _setString(hKey, 'ProxyServer', proxyValue);
+      _setString(hKey, 'ProxyOverride', overrideList.join(';'));
       // 关闭自动检测与 PAC
       _setDword(hKey, 'AutoDetect', 0);
       _deleteValue(hKey, 'AutoConfigURL');
@@ -107,32 +158,40 @@ class WindowsProxyManager {
 
   /// 启用 PAC 文件代理
   Future<bool> enableProxyWithPac(String pacUrl) async {
+    if (_blocked) {
+      return false;
+    }
     if (!isSupported) return false;
     final hKey = _openOrCreateKey();
     if (hKey == 0) return false;
     try {
       await _backupIfNeeded(hKey);
-      
+
       print('设置PAC文件代理: $pacUrl');
-      
+
       // 禁用手动代理
       _setDword(hKey, 'ProxyEnable', 0);
       _deleteValue(hKey, 'ProxyServer');
-      
+
       // 启用自动配置脚本
       _setString(hKey, 'AutoConfigURL', pacUrl);
       _setDword(hKey, 'AutoDetect', 0); // 禁用自动检测
-      
+
       // 验证设置是否成功
       final verifyUrl = _getString(hKey, 'AutoConfigURL');
       final verifyEnable = _getDword(hKey, 'ProxyEnable');
       print('验证PAC设置 - URL: $verifyUrl, ProxyEnable: $verifyEnable');
-      
+
       _notifySettingsChanged();
-      
+
       // 额外的系统通知
-      _internetSetOptionW(ffi.nullptr, _INTERNET_OPTION_REFRESH, ffi.nullptr, 0);
-      
+      _internetSetOptionW(
+        ffi.nullptr,
+        _INTERNET_OPTION_REFRESH,
+        ffi.nullptr,
+        0,
+      );
+
       return verifyUrl == pacUrl && verifyEnable == 0;
     } finally {
       w.RegCloseKey(hKey);
@@ -141,6 +200,9 @@ class WindowsProxyManager {
 
   /// 禁用系统代理（恢复备份或直接关闭）
   Future<bool> disableProxy() async {
+    if (_blocked) {
+      return false;
+    }
     if (!isSupported) return false;
     final hKey = _openOrCreateKey();
     if (hKey == 0) return false;
@@ -160,8 +222,8 @@ class WindowsProxyManager {
 
   // --- Registry helpers ---
   int _openKeyForRead() {
-  final subKey = _toUtf16(_regSubKey);
-  final phKey = pkgffi.calloc<ffi.IntPtr>();
+    final subKey = _toUtf16(_regSubKey);
+    final phKey = pkgffi.calloc<ffi.IntPtr>();
     final result = w.RegOpenKeyEx(
       w.HKEY_CURRENT_USER,
       subKey,
@@ -170,15 +232,15 @@ class WindowsProxyManager {
       phKey,
     );
     final hKey = result == w.ERROR_SUCCESS ? phKey.value : 0;
-  pkgffi.calloc.free(subKey);
-  pkgffi.calloc.free(phKey);
+    pkgffi.calloc.free(subKey);
+    pkgffi.calloc.free(phKey);
     return hKey;
   }
 
   int _openOrCreateKey() {
-  final subKey = _toUtf16(_regSubKey);
-  final phKey = pkgffi.calloc<ffi.IntPtr>();
-  final lpdwDisposition = pkgffi.calloc<ffi.Uint32>();
+    final subKey = _toUtf16(_regSubKey);
+    final phKey = pkgffi.calloc<ffi.IntPtr>();
+    final lpdwDisposition = pkgffi.calloc<ffi.Uint32>();
     final result = w.RegCreateKeyEx(
       w.HKEY_CURRENT_USER,
       subKey,
@@ -191,9 +253,9 @@ class WindowsProxyManager {
       lpdwDisposition,
     );
     final hKey = result == w.ERROR_SUCCESS ? phKey.value : 0;
-  pkgffi.calloc.free(subKey);
-  pkgffi.calloc.free(phKey);
-  pkgffi.calloc.free(lpdwDisposition);
+    pkgffi.calloc.free(subKey);
+    pkgffi.calloc.free(phKey);
+    pkgffi.calloc.free(lpdwDisposition);
     return hKey;
   }
 
@@ -247,7 +309,9 @@ class WindowsProxyManager {
       ffi.nullptr,
       lpcbData,
     );
-    if (result != w.ERROR_SUCCESS || lpType.value != w.REG_DWORD || lpcbData.value != 4) {
+    if (result != w.ERROR_SUCCESS ||
+        lpType.value != w.REG_DWORD ||
+        lpcbData.value != 4) {
       pkgffi.calloc.free(lpType);
       pkgffi.calloc.free(lpcbData);
       pkgffi.calloc.free(namePtr);
@@ -283,7 +347,8 @@ class WindowsProxyManager {
       ffi.nullptr,
       lpcbData,
     );
-    if (result != w.ERROR_SUCCESS || (lpType.value != w.REG_SZ && lpType.value != w.REG_EXPAND_SZ)) {
+    if (result != w.ERROR_SUCCESS ||
+        (lpType.value != w.REG_SZ && lpType.value != w.REG_EXPAND_SZ)) {
       pkgffi.calloc.free(lpType);
       pkgffi.calloc.free(lpcbData);
       pkgffi.calloc.free(namePtr);
@@ -320,14 +385,7 @@ class WindowsProxyManager {
     final namePtr = _toUtf16(name);
     final data = pkgffi.calloc<ffi.Uint32>();
     data.value = value;
-    w.RegSetValueEx(
-      hKey,
-      namePtr,
-      0,
-      w.REG_DWORD,
-      data.cast<ffi.Uint8>(),
-      4,
-    );
+    w.RegSetValueEx(hKey, namePtr, 0, w.REG_DWORD, data.cast<ffi.Uint8>(), 4);
     pkgffi.calloc.free(namePtr);
     pkgffi.calloc.free(data);
   }
@@ -356,9 +414,15 @@ class WindowsProxyManager {
   }
 
   void _notifySettingsChanged() {
-    _internetSetOptionW(ffi.nullptr, _INTERNET_OPTION_SETTINGS_CHANGED, ffi.nullptr, 0);
+    _internetSetOptionW(
+      ffi.nullptr,
+      _INTERNET_OPTION_SETTINGS_CHANGED,
+      ffi.nullptr,
+      0,
+    );
     _internetSetOptionW(ffi.nullptr, _INTERNET_OPTION_REFRESH, ffi.nullptr, 0);
   }
 
-  ffi.Pointer<pkgffi.Utf16> _toUtf16(String s) => s.toNativeUtf16(allocator: pkgffi.calloc);
+  ffi.Pointer<pkgffi.Utf16> _toUtf16(String s) =>
+      s.toNativeUtf16(allocator: pkgffi.calloc);
 }

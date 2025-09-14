@@ -181,9 +181,8 @@ class SimpleModernHome extends StatelessWidget {
                                 alignment: Alignment.center,
                                 child: AnimatedConnectionButton(
                                   isConnected: provider.isConnected,
-                                  isConnecting:
-                                      provider.status.contains('正在连接') ||
-                                      provider.status.contains('正在断开'),
+                                  // 使用精准标记而不是通过状态字符串匹配
+                                  isConnecting: provider.isBusy,
                                   size: 80,
                                   onTap: () async {
                                     if (provider.isConnected) {
@@ -1389,9 +1388,11 @@ class SimpleModernHome extends StatelessWidget {
 
       case TunAvailability.needElevation:
         // 需要管理员权限，提示用户重启应用
-        _showError(context, '需要管理员权限',
+        _showError(
+          context,
+          '需要管理员权限',
           'TUN 模式需要管理员权限才能运行。\n'
-          '请关闭应用后，右键选择"以管理员身份运行"重新启动。'
+              '请关闭应用后，右键选择"以管理员身份运行"重新启动。',
         );
         break;
 
