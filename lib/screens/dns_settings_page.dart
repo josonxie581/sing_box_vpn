@@ -1,0 +1,695 @@
+import 'package:flutter/material.dart';
+import '../utils/navigation.dart';
+import 'package:provider/provider.dart';
+import '../providers/vpn_provider.dart';
+import '../theme/app_theme.dart';
+import '../services/dns_manager.dart';
+import 'dns_servers_page.dart';
+import 'static_ip_mapping_page.dart';
+import 'dns_test_page.dart';
+
+/// DNS 设置页面
+class DnsSettingsPage extends StatefulWidget {
+  const DnsSettingsPage({super.key});
+
+  @override
+  State<DnsSettingsPage> createState() => _DnsSettingsPageState();
+}
+
+class _DnsSettingsPageState extends State<DnsSettingsPage> {
+  final DnsManager _dnsManager = DnsManager(); // 使用单例，确保与VPNProvider同步
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.bgDark,
+      appBar: AppBar(
+        backgroundColor: AppTheme.bgCard,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+          onPressed: () => safePop(context),
+        ),
+        title: const Text(
+          'DNS',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: Consumer<VPNProvider>(
+        builder: (context, provider, _) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // TUN HijackDNS
+                _buildSwitchCard(
+                  'TUN HijackDNS',
+                  '拦截所有DNS请求并重定向到本地DNS服务器',
+                  _dnsManager.tunHijackDns,
+                  (value) => setState(() => _dnsManager.tunHijackDns = value),
+                  hasInfo: true,
+                ),
+
+                const SizedBox(height: 16),
+
+                // 静态IP
+                _buildStaticIpCard(),
+
+                const SizedBox(height: 16),
+
+                // 解析入站域名
+                _buildSwitchCard(
+                  '解析入站域名',
+                  '自动解析入站连接的域名以提高路由准确性',
+                  _dnsManager.resolveInboundDomains,
+                  (value) =>
+                      setState(() => _dnsManager.resolveInboundDomains = value),
+                  hasInfo: true,
+                ),
+
+                const SizedBox(height: 16),
+
+                // 测试域名
+                _buildTestDomainCard(),
+
+                const SizedBox(height: 16),
+
+                // TTL
+                _buildTtlCard(),
+
+                const SizedBox(height: 16),
+
+                // 启用DNS分流规则
+                _buildSwitchCard(
+                  '启用DNS分流规则',
+                  '根据域名规则分流DNS查询以优化解析速度',
+                  _dnsManager.enableDnsRouting,
+                  (value) =>
+                      setState(() => _dnsManager.enableDnsRouting = value),
+                  hasInfo: true,
+                ),
+
+                const SizedBox(height: 16),
+
+                // DNS严格路由
+                _buildSwitchCard(
+                  'DNS严格路由',
+                  '确保DNS查询严格按照路由规则进行，提高安全性',
+                  _dnsManager.strictRoute,
+                  (value) => setState(() => _dnsManager.strictRoute = value),
+                  hasInfo: true,
+                ),
+
+                // 直连流量启用ECS
+                _buildSwitchCard(
+                  '直连流量启用ECS',
+                  '为直连流量启用EDNS客户端子网以获得更精确的CDN定位',
+                  _dnsManager.enableEcs,
+                  (value) => setState(() => _dnsManager.enableEcs = value),
+                  hasInfo: true,
+                ),
+
+                const SizedBox(height: 16),
+
+                // 代理流量解析通道
+                _buildProxyResolverCard(),
+
+                const SizedBox(height: 16),
+
+                // 服务器
+                _buildServerCard(),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 构建开关卡片
+  Widget _buildSwitchCard(
+    String title,
+    String description,
+    bool value,
+    ValueChanged<bool> onChanged, {
+    bool hasInfo = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+      ),
+      child: Row(
+        children: [
+          if (hasInfo) ...[
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNeon.withAlpha(50),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.info_outline,
+                size: 12,
+                color: AppTheme.primaryNeon,
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                if (description.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            thumbColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) => states.contains(WidgetState.selected)
+                  ? AppTheme.primaryNeon
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建静态IP卡片
+  Widget _buildStaticIpCard() {
+    final mappingCount = _dnsManager.staticIpMappings.length;
+    final enabledCount = _dnsManager.staticIpMappings.where((m) => m.enabled).length;
+
+    return GestureDetector(
+      onTap: () => _navigateToStaticIpMapping(),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            // 图标
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNeon.withAlpha(30),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.dns_outlined,
+                color: AppTheme.primaryNeon,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '静态IP映射',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    mappingCount > 0
+                        ? '已配置 $mappingCount 条规则，$enabledCount 条启用中'
+                        : '域名到IP地址的静态映射配置',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            if (mappingCount > 0) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNeon.withAlpha(20),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$enabledCount',
+                  style: const TextStyle(
+                    color: AppTheme.primaryNeon,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+
+            const Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建测试域名卡片
+  Widget _buildTestDomainCard() {
+    return Row(
+      children: [
+        // 测试域名设置
+        Expanded(
+          child: GestureDetector(
+            onTap: () => _showTestDomainDialog(),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.bgCard,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+              ),
+              child: Row(
+                children: [
+                  // 图标
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryNeon.withAlpha(30),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.settings_outlined,
+                      color: AppTheme.primaryNeon,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '测试域名',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _dnsManager.testDomain,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Icon(Icons.expand_more, color: AppTheme.textSecondary, size: 20),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(width: 12),
+
+        // DNS测试按钮
+        GestureDetector(
+          onTap: () => _navigateToDnsTest(),
+          child: Container(
+            width: 56,
+            height: 72,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNeon,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.network_check,
+                  color: Colors.black,
+                  size: 24,
+                ),
+                SizedBox(height: 4),
+                Text(
+                  '测试',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建TTL卡片
+  Widget _buildTtlCard() {
+    return GestureDetector(
+      onTap: () => _showTtlDialog(),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'TTL',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'DNS缓存存活时间，控制DNS记录的缓存时长',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              _dnsManager.ttl,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建代理流量解析通道卡片
+  Widget _buildProxyResolverCard() {
+    return GestureDetector(
+      onTap: () => _showProxyResolverDialog(),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNeon.withAlpha(50),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.info_outline,
+                size: 12,
+                color: AppTheme.primaryNeon,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '代理流量解析通道',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'FakeIP可减少DNS泄漏，Remote使用真实IP',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              _dnsManager.proxyResolver,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.expand_more, color: AppTheme.textSecondary, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建服务器卡片
+  Widget _buildServerCard() {
+    return GestureDetector(
+      onTap: () => _showServerDialog(),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '服务器',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '管理DNS服务器列表，配置上游DNS解析器',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 导航到静态IP映射页面
+  void _navigateToStaticIpMapping() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const StaticIpMappingPage()),
+    ).then((_) {
+      // 页面返回后刷新状态
+      setState(() {});
+    });
+  }
+
+  /// 导航到DNS测试页面
+  void _navigateToDnsTest() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DnsTestPage()),
+    );
+  }
+
+  /// 显示测试域名对话框
+  void _showTestDomainDialog() {
+    final controller = TextEditingController(text: _dnsManager.testDomain);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text(
+          '测试域名',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: AppTheme.textPrimary),
+          decoration: const InputDecoration(
+            hintText: '输入测试域名',
+            hintStyle: TextStyle(color: AppTheme.textSecondary),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => safePop(context),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => _dnsManager.testDomain = controller.text);
+              safePop(context);
+            },
+            child: const Text(
+              '确定',
+              style: TextStyle(color: AppTheme.primaryNeon),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示TTL对话框
+  void _showTtlDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text(
+          'TTL设置',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildTtlOption('1 min', '1m'),
+            _buildTtlOption('5 min', '5m'),
+            _buildTtlOption('12 h', '12h'),
+            _buildTtlOption('24 h', '24h'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTtlOption(String display, String value) {
+    return ListTile(
+      title: Text(display, style: const TextStyle(color: AppTheme.textPrimary)),
+      trailing: _dnsManager.ttl == display
+          ? const Icon(Icons.check, color: AppTheme.primaryNeon)
+          : null,
+      onTap: () {
+        setState(() => _dnsManager.ttl = display);
+        safePop(context);
+      },
+    );
+  }
+
+  /// 显示代理解析器对话框
+  void _showProxyResolverDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text(
+          '代理流量解析通道',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildProxyResolverOption('Auto', 'auto'),
+            _buildProxyResolverOption('FakeIP', 'fakeip'),
+            _buildProxyResolverOption('Remote', 'remote'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProxyResolverOption(String display, String value) {
+    return ListTile(
+      title: Text(display, style: const TextStyle(color: AppTheme.textPrimary)),
+      trailing: _dnsManager.proxyResolver == display
+          ? const Icon(Icons.check, color: AppTheme.primaryNeon)
+          : null,
+      onTap: () {
+        setState(() => _dnsManager.proxyResolver = display);
+        safePop(context);
+      },
+    );
+  }
+
+  /// 显示服务器配置页面
+  void _showServerDialog() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DnsServersPage()),
+    );
+  }
+}
