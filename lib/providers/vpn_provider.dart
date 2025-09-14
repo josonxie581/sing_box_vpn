@@ -977,7 +977,7 @@ class VPNProvider extends ChangeNotifier {
         _isConnecting = false;
         notifyListeners();
 
-        // ========== TUN 连通性探�?& MTU 回退逻辑 ==========
+        // ========== TUN 连通性探测 & MTU 回退逻辑 ==========
         if (_useTun) {
           unawaited(_postTunConnectivityProbe(config));
         }
@@ -2763,6 +2763,8 @@ class VPNProvider extends ChangeNotifier {
 
       await PingService.pingConfigsWithProgress(
         _configs,
+        isConnected: _isConnected,
+        currentConfig: _currentConfig,
         onEach: (cfg, ping) {
           _configPings[cfg.id] = ping;
           if (ping > 0) successCount++;
@@ -2797,7 +2799,7 @@ class VPNProvider extends ChangeNotifier {
   /// 检测单个配置的延时
   Future<void> _pingSingleConfig(VPNConfig config) async {
     try {
-      final ping = await PingService.pingConfig(config);
+      final ping = await PingService.pingConfig(config, isConnected: _isConnected, currentConfig: _currentConfig);
       _configPings[config.id] = ping;
       notifyListeners();
 
@@ -2991,6 +2993,8 @@ class VPNProvider extends ChangeNotifier {
       _addLog(
         '自动选择最佳服务器: ${bestConfig.name} (${getConfigPingText(bestConfig.id)})',
       );
+
+      // 仅更新当前配置，不强制断开重连
       _currentConfig = bestConfig;
 
       // 保存当前配置ID到 SharedPreferences
@@ -3003,12 +3007,10 @@ class VPNProvider extends ChangeNotifier {
 
       notifyListeners();
 
-      // 如果当前已连接，自动切换到新的最佳服务器
+      // 只记录检测到更优服务器，但不自动切换连接
+      // 用户下次手动连接时会使用新的最佳服务器
       if (_isConnected) {
-        _addLog('检测到更优服务器，正在自动切换连接...');
-        await disconnect();
-        await Future.delayed(const Duration(milliseconds: 500)); // 短暂延迟确保断开完成
-        await connect(bestConfig);
+        _addLog('检测到更优服务器 ${bestConfig.name}，下次连接时将自动使用');
       }
     }
   }
