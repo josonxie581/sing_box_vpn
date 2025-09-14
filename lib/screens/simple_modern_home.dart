@@ -12,6 +12,7 @@ import 'dns_settings_page.dart';
 import 'config_management_page.dart';
 import 'logs_page.dart';
 import '../widgets/animated_connection_button.dart';
+import '../widgets/hover_scale.dart';
 import 'package:gsou/utils/privilege_manager.dart';
 
 class SimpleModernHome extends StatelessWidget {
@@ -42,177 +43,183 @@ class SimpleModernHome extends StatelessWidget {
                       children: [
                         const SizedBox(height: 8),
                         // 当前配置显示（小卡片 + 绝对居中按钮）
-                        Container(
-                          width: double.infinity,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: AppTheme.bgCard,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: AppTheme.borderColor.withAlpha(80),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                offset: const Offset(0, 4),
-                                blurRadius: 12,
-                                spreadRadius: 0,
+                        HoverScale(
+                          enabled: true,
+                          scale: 1.04,
+                          child: Container(
+                            width: double.infinity,
+                            height: 120,
+                            decoration: BoxDecoration(
+                              color: AppTheme.bgCard,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: AppTheme.borderColor.withAlpha(80),
                               ),
-                              BoxShadow(
-                                color: AppTheme.primaryNeon.withOpacity(0.05),
-                                offset: const Offset(0, 1),
-                                blurRadius: 3,
-                                spreadRadius: 0,
-                              ),
-                            ],
-                          ),
-                          child: Stack(
-                            children: [
-                              // 顶部标题与状态点
-                              Positioned(
-                                top: 10,
-                                left: 12,
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.list_alt,
-                                      color: AppTheme.primaryNeon,
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '当前配置',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    if (provider.currentConfig != null)
-                                      Container(
-                                        width: 6,
-                                        height: 6,
-                                        decoration: BoxDecoration(
-                                          color: provider.isConnected
-                                              ? AppTheme.successGreen
-                                              : AppTheme.warningOrange,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                  ],
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  offset: const Offset(0, 4),
+                                  blurRadius: 12,
+                                  spreadRadius: 0,
                                 ),
-                              ),
-
-                              // 顶部右侧连接状态文字
-                              // Positioned(
-                              //   top: 10,
-                              //   right: 12,
-                              //   child: Text(
-                              //     provider.isConnected ? '已连接' : '未连接',
-                              //     style: TextStyle(
-                              //       fontSize: 11,
-                              //       color: provider.isConnected
-                              //           ? AppTheme.successGreen
-                              //           : AppTheme.textSecondary,
-                              //       fontWeight: FontWeight.w500,
-                              //     ),
-                              //   ),
-                              // ),
-
-                              // 名称与类型（靠上，避免遮挡中心按钮）
-                              if (provider.currentConfig != null)
+                                BoxShadow(
+                                  color: AppTheme.primaryNeon.withOpacity(0.05),
+                                  offset: const Offset(0, 1),
+                                  blurRadius: 3,
+                                  spreadRadius: 0,
+                                ),
+                              ],
+                            ),
+                            child: Stack(
+                              children: [
+                                // 顶部标题与状态点
                                 Positioned(
+                                  top: 10,
                                   left: 12,
-                                  right: 12,
-                                  top: 36,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                  child: Row(
                                     children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              provider.currentConfig!.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w500,
-                                                color: AppTheme.textPrimary,
-                                              ),
-                                            ),
-                                          ),
-                                          // 延时显示
-                                          _buildCurrentConfigPing(provider),
-                                        ],
+                                      Icon(
+                                        Icons.list_alt,
+                                        color: AppTheme.primaryNeon,
+                                        size: 18,
                                       ),
-                                      const SizedBox(height: 2),
+                                      const SizedBox(width: 8),
                                       Text(
-                                        _getConfigTypeDisplay(
-                                          provider.currentConfig!,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppTheme.textSecondary,
+                                        '当前配置',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textPrimary,
                                         ),
                                       ),
+                                      const SizedBox(width: 8),
+                                      if (provider.currentConfig != null)
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: BoxDecoration(
+                                            color: provider.isConnected
+                                                ? AppTheme.successGreen
+                                                : AppTheme.warningOrange,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
                                     ],
                                   ),
-                                )
-                              else
-                                const Positioned(
-                                  left: 12,
-                                  top: 40,
-                                  child: Text(
-                                    '暂无配置',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
                                 ),
 
-                              // 中央连接/断开按钮（水平+垂直居中）
-                              Align(
-                                alignment: Alignment.center,
-                                child: AnimatedConnectionButton(
-                                  isConnected: provider.isConnected,
-                                  isConnecting: provider.isConnecting,
-                                  isDisconnecting: provider.isDisconnecting,
-                                  size: 80,
-                                  onTap: () async {
-                                    if (provider.isConnected) {
-                                      provider.disconnect();
-                                    } else {
-                                      if (provider.currentConfig != null) {
-                                        provider.connect(
-                                          provider.currentConfig!,
-                                        );
-                                      } else if (provider.configs.isNotEmpty) {
-                                        await provider.setCurrentConfig(
-                                          provider.configs.first,
-                                        );
-                                        provider.connect(
-                                          provider.configs.first,
-                                        );
-                                      } else {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('请先添加服务器配置'),
+                                // 顶部右侧连接状态文字
+                                // Positioned(
+                                //   top: 10,
+                                //   right: 12,
+                                //   child: Text(
+                                //     provider.isConnected ? '已连接' : '未连接',
+                                //     style: TextStyle(
+                                //       fontSize: 11,
+                                //       color: provider.isConnected
+                                //           ? AppTheme.successGreen
+                                //           : AppTheme.textSecondary,
+                                //       fontWeight: FontWeight.w500,
+                                //     ),
+                                //   ),
+                                // ),
+
+                                // 名称与类型（靠上，避免遮挡中心按钮）
+                                if (provider.currentConfig != null)
+                                  Positioned(
+                                    left: 12,
+                                    right: 12,
+                                    top: 36,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                provider.currentConfig!.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: AppTheme.textPrimary,
+                                                ),
+                                              ),
+                                            ),
+                                            // 延时显示
+                                            _buildCurrentConfigPing(provider),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _getConfigTypeDisplay(
+                                            provider.currentConfig!,
                                           ),
-                                        );
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  const Positioned(
+                                    left: 12,
+                                    top: 40,
+                                    child: Text(
+                                      '暂无配置',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+
+                                // 中央连接/断开按钮（水平+垂直居中）
+                                Align(
+                                  alignment: Alignment.center,
+                                  child: AnimatedConnectionButton(
+                                    isConnected: provider.isConnected,
+                                    isConnecting: provider.isConnecting,
+                                    isDisconnecting: provider.isDisconnecting,
+                                    size: 80,
+                                    onTap: () async {
+                                      if (provider.isConnected) {
+                                        provider.disconnect();
+                                      } else {
+                                        if (provider.currentConfig != null) {
+                                          provider.connect(
+                                            provider.currentConfig!,
+                                          );
+                                        } else if (provider
+                                            .configs
+                                            .isNotEmpty) {
+                                          await provider.setCurrentConfig(
+                                            provider.configs.first,
+                                          );
+                                          provider.connect(
+                                            provider.configs.first,
+                                          );
+                                        } else {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('请先添加服务器配置'),
+                                            ),
+                                          );
+                                        }
                                       }
-                                    }
-                                  },
+                                    },
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
 
@@ -221,16 +228,20 @@ class SimpleModernHome extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showConnectionStatusPage(context),
-                                child: _buildMiniStatCard(
-                                  icon: Icons.timer,
-                                  label: '连接时长',
-                                  value: VPNProvider.formatDuration(
-                                    provider.connectionDuration,
+                              child: HoverScale(
+                                scale: 1.05,
+                                child: GestureDetector(
+                                  onTap: () =>
+                                      _showConnectionStatusPage(context),
+                                  child: _buildMiniStatCard(
+                                    icon: Icons.timer,
+                                    label: '连接时长',
+                                    value: VPNProvider.formatDuration(
+                                      provider.connectionDuration,
+                                    ),
+                                    rightValue: '${provider.activeConnections}',
+                                    rightLabel: '连接数',
                                   ),
-                                  rightValue: '${provider.activeConnections}',
-                                  rightLabel: '连接数',
                                 ),
                               ),
                             ),
@@ -296,19 +307,24 @@ class SimpleModernHome extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showConfigManagementPage(context),
-                                child: _buildFeatureButton(
-                                  '节点配置',
-                                  Icons.list_alt,
+                              child: HoverScale(
+                                child: GestureDetector(
+                                  onTap: () =>
+                                      _showConfigManagementPage(context),
+                                  child: _buildFeatureButton(
+                                    '节点配置',
+                                    Icons.list_alt,
+                                  ),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showDnsSettingsPage(context),
-                                child: _buildDnsCard(),
+                              child: HoverScale(
+                                child: GestureDetector(
+                                  onTap: () => _showDnsSettingsPage(context),
+                                  child: _buildDnsCard(),
+                                ),
                               ),
                             ),
                           ],
@@ -320,73 +336,79 @@ class SimpleModernHome extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showLogsPage(context, provider),
-                                child: _buildLogsCard(context, provider),
+                              child: HoverScale(
+                                child: GestureDetector(
+                                  onTap: () => _showLogsPage(context, provider),
+                                  child: _buildLogsCard(context, provider),
+                                ),
                               ),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () => _showRoutingRulesPage(context),
-                                child: Container(
-                                  height: 80,
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.bgCard,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: AppTheme.borderColor.withAlpha(80),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.06),
-                                        offset: const Offset(0, 2),
-                                        blurRadius: 6,
-                                        spreadRadius: 0,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.route,
-                                        color: AppTheme.primaryNeon,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: const [
-                                            Text(
-                                              '分流',
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: AppTheme.textPrimary,
-                                              ),
-                                            ),
-                                            SizedBox(height: 2),
-                                            Text(
-                                              '路由规则',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: AppTheme.textSecondary,
-                                              ),
-                                            ),
-                                          ],
+                              child: HoverScale(
+                                child: GestureDetector(
+                                  onTap: () => _showRoutingRulesPage(context),
+                                  child: Container(
+                                    height: 80,
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.bgCard,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: AppTheme.borderColor.withAlpha(
+                                          80,
                                         ),
                                       ),
-                                      Icon(
-                                        Icons.chevron_right,
-                                        color: AppTheme.textSecondary,
-                                        size: 18,
-                                      ),
-                                    ],
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.06),
+                                          offset: const Offset(0, 2),
+                                          blurRadius: 6,
+                                          spreadRadius: 0,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.route,
+                                          color: AppTheme.primaryNeon,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: const [
+                                              Text(
+                                                '分流',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.textPrimary,
+                                                ),
+                                              ),
+                                              SizedBox(height: 2),
+                                              Text(
+                                                '路由规则',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: AppTheme.textSecondary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.chevron_right,
+                                          color: AppTheme.textSecondary,
+                                          size: 18,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

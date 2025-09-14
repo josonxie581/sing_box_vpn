@@ -176,7 +176,9 @@ class PingService {
 
     // 并行测试高优先级端口，取最快的成功结果
     final results = await Future.wait(
-      highPriorityPorts.map((port) => _tryTcpWithTimeout(host, port, quickTimeout)),
+      highPriorityPorts.map(
+        (port) => _tryTcpWithTimeout(host, port, quickTimeout),
+      ),
     );
 
     // 查找第一个成功的结果
@@ -194,7 +196,11 @@ class PingService {
   }
 
   /// 带超时的TCP连接测试
-  static Future<int> _tryTcpWithTimeout(String host, int port, Duration timeout) async {
+  static Future<int> _tryTcpWithTimeout(
+    String host,
+    int port,
+    Duration timeout,
+  ) async {
     try {
       final sw = Stopwatch()..start();
       final socket = await Socket.connect(host, port, timeout: timeout);

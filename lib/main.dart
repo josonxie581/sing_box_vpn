@@ -31,7 +31,7 @@ void main() async {
 
         // 直接请求UAC提权
         final bool elevated = await PrivilegeManager.instance.requestElevation(
-          reason: '应用启动需要管理员权限以支持TUN模式和系统代理功能'
+          reason: '应用启动需要管理员权限以支持TUN模式和系统代理功能',
         );
 
         if (!elevated) {
@@ -41,7 +41,8 @@ void main() async {
 
       // 重新检查权限状态并记录
       final bool finalElevated = PrivilegeManager.instance.isElevated();
-      final TunAvailability tunStatus = PrivilegeManager.instance.checkTunAvailability();
+      final TunAvailability tunStatus = PrivilegeManager.instance
+          .checkTunAvailability();
 
       print('=== 权限状态检查 ===');
       print('管理员权限: ${finalElevated ? "已获取" : "未获取"}');
@@ -53,8 +54,8 @@ void main() async {
   }
 
   const windowOptions = WindowOptions(
-    size: Size(600, 730),
-    minimumSize: Size(600, 730),
+    size: Size(600, 760),
+    minimumSize: Size(600, 760),
     maximumSize: Size(600, 12000),
     center: true,
     backgroundColor: Colors.transparent,
@@ -68,7 +69,7 @@ void main() async {
     await windowManager.focus();
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(false);
-    await windowManager.setMinimumSize(const Size(600, 730));
+    await windowManager.setMinimumSize(const Size(600, 760));
     await windowManager.setMaximumSize(const Size(600, 12000));
     await windowManager.setPreventClose(true); // 防止直接关闭
   });
@@ -285,9 +286,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
     await windowManager.setClosable(true);
 
     // 恢复窗口大小
-    await windowManager.setMinimumSize(const Size(600, 700));
+    await windowManager.setMinimumSize(const Size(600, 760));
     await windowManager.setMaximumSize(const Size(600, 12000));
-    await windowManager.setSize(const Size(600, 700));
+    await windowManager.setSize(const Size(600, 760));
 
     // 居中并显示
     await windowManager.center();
