@@ -19,6 +19,7 @@ class DnsManager {
   String _proxyResolver = 'FakeIP'; // 代理侧解析策略 (FakeIP / Remote 等)
   bool _strictRoute = false; // DNS严格路由，确保DNS查询严格按照路由规则进行
   bool _enableIpv6 = false; // 是否启用IPv6支持（影响TUN接口配置）
+  int _localPort = 7890; // 本地混合代理端口
 
   // 静态IP映射配置
   List<StaticIpMapping> _staticIpMappings = [];
@@ -66,6 +67,7 @@ class DnsManager {
   String get proxyResolver => _proxyResolver;
   bool get strictRoute => _strictRoute;
   bool get enableIpv6 => _enableIpv6;
+  int get localPort => _localPort;
   List<DnsServer> get dnsServers => List.unmodifiable(_dnsServers);
   List<StaticIpMapping> get staticIpMappings =>
       List.unmodifiable(_staticIpMappings);
@@ -116,6 +118,12 @@ class DnsManager {
     _saveSettings();
   }
 
+  set localPort(int value) {
+    if (value < 1024 || value > 65535) return; // 端口范围验证
+    _localPort = value;
+    _saveSettings();
+  }
+
   /// 初始化 DNS 配置（从 SharedPreferences 读取）
   Future<void> init() async {
     try {
@@ -129,6 +137,7 @@ class DnsManager {
       _proxyResolver = prefs.getString('dns_proxy_resolver') ?? 'FakeIP';
       _strictRoute = prefs.getBool('dns_strict_route') ?? false;
       _enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
+      _localPort = prefs.getInt('dns_local_port') ?? 7890;
 
       // 加载DNS服务器配置
       await _loadDnsServers();
@@ -153,6 +162,7 @@ class DnsManager {
       await prefs.setString('dns_proxy_resolver', _proxyResolver);
       await prefs.setBool('dns_strict_route', _strictRoute);
       await prefs.setBool('dns_enable_ipv6', _enableIpv6);
+      await prefs.setInt('dns_local_port', _localPort);
 
       // 保存DNS服务器配置
       await _saveDnsServers();
@@ -209,11 +219,18 @@ class DnsManager {
 
     // 添加启用的 DNS 服务器
     for (final server in _dnsServers.where((s) => s.enabled)) {
-      servers.add({
+      final serverConfig = {
         'tag': server.name.toLowerCase(),
         'address': _buildServerAddress(server),
         'detour': server.detour,
-      });
+      };
+
+      // 对于代理DNS服务器，添加额外的稳定性配置
+      if (server.detour == 'proxy') {
+        serverConfig['address_resolver'] = 'local';  // 使用本地解析器解析DNS服务器地址
+      }
+
+      servers.add(serverConfig);
     }
 
     // 添加拦截（空响应）服务器（用于广告或无效域）
@@ -372,7 +389,7 @@ class DnsManager {
 
     // TODO: 下一步补上 enableRoutingNow 变量逻辑，并基于其决定是否插入强制代理域名列表
 
-    // 当未开启 DNS 分流时，为关键境外域名强制使用代理 DNS，减少被污染及首包等待
+    // 当未开启 DNS 分流时，为关键境外域名强制使用代理 DNS，但添加备用策略提高稳定性
     if (!enableRoutingNow && proxyDNSTag != null) {
       final alwaysProxyDomains = <String>{
         'google.com',
@@ -387,6 +404,8 @@ class DnsManager {
         'anthropic.com',
         'cloudflare.com',
       };
+
+      // 为这些关键域名添加DNS规则
       rules.insert(0, {
         'domain_suffix': alwaysProxyDomains.toList(),
         'server': proxyDNSTag,
@@ -398,11 +417,11 @@ class DnsManager {
       'rules': rules,
       'final': defaultServerTag,
       'independent_cache': true,
-      'strategy': (useTun ? 'ipv4_only' : _getResolverStrategy()),
+      'strategy': (useTun ? 'prefer_ipv4' : _getResolverStrategy()),  // 改为prefer_ipv4提高稳定性
       'disable_cache': false,
       'disable_expire': false,
       'reverse_mapping': _resolveInboundDomains,
-      // 添加超时配置，防止DNS查询卡死
+      // 保持兼容的配置
       'client_subnet': '0.0.0.0/0',
     };
 

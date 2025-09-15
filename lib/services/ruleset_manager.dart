@@ -159,19 +159,35 @@ class RulesetManager {
       inbounds.add({
         "tag": "tun-in",
         "type": "tun",
-        if (Platform.isWindows) "interface_name": "Gsou Adapter Tunnel",
-        // 官方规范：使用address字段，根据配置决定是否包含IPv6
+        // 使用稳定的接口名称
+        if (Platform.isWindows) "interface_name": "sing-box",
+        // IPv4地址配置，仅在明确启用IPv6且VPS支持时才添加IPv6
         "address": enableIpv6
           ? ["172.19.0.1/30", "2001:db8::1/128"]
           : ["172.19.0.1/30"],
 
-        // 可根据探测回退，默认较大 MTU
-        "mtu": tunMtu ?? 4064,
+        // 使用稳定的MTU设置，避免频繁调整导致连接中断
+        "mtu": tunMtu ?? 1500,  // 标准以太网MTU，最稳定
         "auto_route": true,
         "strict_route": tunStrictRoute,
-        // route_exclude_address 在 v1.8.0 不支持，暂不设置
+
+        // 保守的嗅探配置，避免影响DNS
+        "sniff": true,
+
+        // 添加稳定性配置
+        "domain_strategy": "prefer_ipv4",  // 优先IPv4提高稳定性
+
         // 默认使用 system（Windows 下 Wintun），必要时可切换 gvisor
         "stack": Platform.isWindows ? 'system' : 'system',
+
+        // Windows平台稳定性配置
+        if (Platform.isWindows) "endpoint_independent_nat": false,
+
+        // 路由表配置，减少路由冲突
+        "inet4_route_address": [
+          "0.0.0.0/1",
+          "128.0.0.0/1"
+        ],
       });
     }
 

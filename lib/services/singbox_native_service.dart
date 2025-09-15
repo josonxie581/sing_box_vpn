@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -60,20 +59,19 @@ class SingBoxNativeService {
       });
       int result = -999;
       try {
-        result = await Isolate.run<int>(() {
-          final ffi = SingBoxFFI.instance; // 这里触发动态库加载
-          return ffi.init();
-        }).timeout(const Duration(seconds: 5)); // 从10秒优化到5秒
-      } on TimeoutException {
-        onLog?.call('INIT: 超时 (>=5s) 可能 DLL 初始化被安全软件拦截');
-        _earlyFileLog('TIMEOUT >=5s (疑似拦截)');
-        return false;
-      } finally {
+        // 在主线程中直接初始化，避免Isolate导致的重复加载
+        _ffi = SingBoxFFI.instance;
+        result = _ffi!.init();
         finished = true;
+      } catch (e) {
+        onLog?.call('初始化失败: $e');
+        _earlyFileLog('INIT EXCEPTION: $e');
+        finished = true;
+        return false;
       }
+
       if (result == 0) {
         _initialized = true;
-        _ffi = SingBoxFFI.instance;
         onLog?.call('sing-box 初始化成功 (${sw.elapsedMilliseconds}ms)');
         _earlyFileLog('SUCCESS init ${sw.elapsedMilliseconds}ms');
         _ffi!.setLogCallback((logLine) {
@@ -173,7 +171,7 @@ class SingBoxNativeService {
               onLog?.call('TUN 适配器状态(预启动): gVisor 模式跳过物理适配器探测');
             } else {
               try {
-                final ifaceName = (tun['interface_name'] ?? 'Wintun Gsou')
+                final ifaceName = (tun['interface_name'] ?? 'sing-box')
                     .toString();
                 final ps = await Process.run('powershell.exe', [
                   '-NoProfile',
@@ -209,12 +207,9 @@ class SingBoxNativeService {
       // 将配置转换为 JSON
       final configJson = jsonEncode(config);
 
-      // 启动服务（放到后台 Isolate，避免阻塞 UI），并设置超时保护
+      // 直接在主线程启动服务，避免Isolate导致DLL重复加载
       Future<int> _startOnce(String json, {Duration? timeout}) async {
-        return await Isolate.run<int>(() {
-          final ffi = SingBoxFFI.instance;
-          return ffi.start(json);
-        }).timeout(timeout ?? const Duration(seconds: 8)); // 从20秒优化到8秒
+        return _ffi!.start(json);
       }
 
       final startSw = Stopwatch()..start();
@@ -368,10 +363,7 @@ class SingBoxNativeService {
             tun['auto_route'] = true;
             onLog?.call('第二次回退: 关闭 strict_route 以提高兼容性');
             final retryJson = jsonEncode(config);
-            final result = await Isolate.run<int>(() {
-              final ffi = SingBoxFFI.instance;
-              return ffi.start(retryJson);
-            }).timeout(const Duration(seconds: 8)); // 优化停止超时
+            final result = _ffi!.start(retryJson);
             if (result == 0) {
               onLog?.call('回退 gvisor 后启动成功');
               onStatusChanged?.call(true);
@@ -445,11 +437,8 @@ class SingBoxNativeService {
     try {
       _ffi ??= SingBoxFFI.instance;
       final configJson = jsonEncode(config);
-      // 在后台 Isolate 执行验证并设置超时，避免阻塞 UI 线程
-      final result = await Isolate.run<int>(() {
-        final ffi = SingBoxFFI.instance;
-        return ffi.testConfig(configJson);
-      }).timeout(const Duration(seconds: 5)); // 优化配置测试超时
+      // 直接在主线程执行验证，避免Isolate导致DLL重复加载
+      final result = _ffi!.testConfig(configJson);
 
       if (result == 0) {
         onLog?.call('-配置验证通过');

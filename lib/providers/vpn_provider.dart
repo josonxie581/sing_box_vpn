@@ -250,6 +250,23 @@ class VPNProvider extends ChangeNotifier {
   bool get useTun => _useTun;
   bool get tunStrictRoute => _tunStrictRoute;
   int get localPort => _localPort;
+
+  /// 同步DNS管理器的端口设置
+  void syncLocalPortFromDnsManager() {
+    final newPort = _dnsManager.localPort;
+    if (_localPort != newPort) {
+      _localPort = newPort;
+      notifyListeners();
+    }
+  }
+
+  void syncStrictRouteFromDnsManager() {
+    final newStrictRoute = _dnsManager.strictRoute;
+    if (_tunStrictRoute != newStrictRoute) {
+      _tunStrictRoute = newStrictRoute;
+      notifyListeners();
+    }
+  }
   bool get isWindowsAdmin => _isWindowsAdmin;
   bool get useDaemon => _useDaemon;
   bool get enableClashApi => _enableClashApi;
@@ -337,6 +354,12 @@ class VPNProvider extends ChangeNotifier {
     // 初始化 DNS 管理器
     await _dnsManager.init();
 
+    // 从DNS管理器同步本地端口设置
+    _localPort = _dnsManager.localPort;
+
+    // 从DNS管理器同步strictRoute设置
+    _tunStrictRoute = _dnsManager.strictRoute;
+
     // 加载配置
     await loadConfigs();
 
@@ -374,7 +397,8 @@ class VPNProvider extends ChangeNotifier {
         _useTun = prefs.getBool('use_tun') ?? false;
         _addLog('已加载 TUN 开关状态 use_tun=${_useTun ? 'on' : 'off'}');
       }
-      _tunStrictRoute = prefs.getBool('dns_strict_route') ?? false;
+      // strictRoute和localPort已在DNS Manager初始化后同步，这里不再重复读取
+      // _tunStrictRoute = prefs.getBool('dns_strict_route') ?? false;  // 已移至DNS Manager同步
       _localPort = prefs.getInt('local_port') ?? _defaultLocalPort;
       // 守护进程模式已移除：强制关闭，避免走 daemon 分支
       _useDaemon = false;
