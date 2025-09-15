@@ -187,7 +187,7 @@ class SingBoxNativeService {
                 if (txt.isNotEmpty) {
                   onLog?.call('TUN 适配器状态(预启动): ' + txt.replaceAll('\n', ' | '));
                 } else {
-                  onLog?.call('TUN 适配器状态(预启动): 未找到 ' + ifaceName);
+                  // onLog?.call('TUN 适配器状态(预启动): 未找到 ' + ifaceName);
                 }
               } catch (_) {}
             }

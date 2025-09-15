@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
+import '../services/improved_traffic_stats_service.dart';
 
 class SpeedOverlay extends StatefulWidget {
   final VoidCallback onRestore;
@@ -16,10 +17,10 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<VPNProvider>(
+    return Consumer<VPNProviderV2>(
       builder: (context, vpn, child) {
-        final up = VPNProvider.formatSpeed(vpn.uploadSpeed);
-        final down = VPNProvider.formatSpeed(vpn.downloadSpeed);
+        final up = ImprovedTrafficStatsService.formatSpeed(vpn.uploadSpeed);
+        final down = ImprovedTrafficStatsService.formatSpeed(vpn.downloadSpeed);
 
         return MouseRegion(
           onEnter: (_) => setState(() => _isHovered = true),

@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:gsou/utils/safe_navigator.dart' as sn;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../theme/app_theme.dart';
 
 /// 日志页面
 class LogsPage extends StatefulWidget {
-  final VPNProvider provider;
+  final VPNProviderV2 provider;
 
   const LogsPage({super.key, required this.provider});
 
@@ -50,7 +50,7 @@ class _LogsPageState extends State<LogsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
     });
-    final provider = context.watch<VPNProvider>();
+    final provider = context.watch<VPNProviderV2>();
     return Scaffold(
       backgroundColor: AppTheme.bgDark,
       appBar: AppBar(
@@ -134,7 +134,7 @@ class _LogsPageState extends State<LogsPage> {
                   ),
                 );
                 if (ok == true) {
-                  await provider.resetPreferences(includeConfigs: false);
+                  await provider.resetPreferences();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -177,7 +177,7 @@ class _LogsPageState extends State<LogsPage> {
                   ),
                 );
                 if (ok == true) {
-                  await provider.resetPreferences(includeConfigs: true);
+                  await provider.resetPreferences();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -279,7 +279,7 @@ class _LogsPageState extends State<LogsPage> {
 
   /// 构建日志列表
   Widget _buildLogsList() {
-    final provider = context.watch<VPNProvider>();
+    final provider = context.watch<VPNProviderV2>();
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(20),
@@ -462,7 +462,7 @@ class _LogsPageState extends State<LogsPage> {
 
   /// 复制所有日志
   void _copyAllLogs() {
-    final provider = context.read<VPNProvider>();
+    final provider = context.read<VPNProviderV2>();
     if (provider.logs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -547,7 +547,7 @@ class _LogsPageState extends State<LogsPage> {
         ),
         content: Builder(
           builder: (ctx) {
-            final count = ctx.watch<VPNProvider>().logs.length;
+            final count = ctx.watch<VPNProviderV2>().logs.length;
             return Text(
               '确定要清空所有日志吗？此操作不可撤销。\n当前共有 $count 条日志。',
               style: const TextStyle(color: AppTheme.textSecondary),
@@ -564,7 +564,7 @@ class _LogsPageState extends State<LogsPage> {
           ),
           TextButton(
             onPressed: () {
-              context.read<VPNProvider>().clearLogs();
+              context.read<VPNProviderV2>().clearLogs();
               sn.safePop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(

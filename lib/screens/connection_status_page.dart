@@ -3,7 +3,8 @@ import '../utils/navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
+import '../services/improved_traffic_stats_service.dart';
 import '../services/connection_stats_service.dart';
 
 class ConnectionStatusPage extends StatefulWidget {
@@ -47,10 +48,10 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
       info += '${i + 1}. ${conn['host']}\n';
       info += '   ${conn['localPort']} ${conn['process']}\n';
       info +=
-          '   ${conn['protocol']} ↑${_formatBytes(conn['uploadBytes'])} ↓${_formatBytes(conn['downloadBytes'])}\n';
+          '   ${conn['protocol']} ↑${ImprovedTrafficStatsService.formatBytes(conn['uploadBytes'])} ↓${ImprovedTrafficStatsService.formatBytes(conn['downloadBytes'])}\n';
       info += '   ${conn['rule']}\n';
       info += '   ${conn['target']}\n';
-      info += '   时长: ${_formatDuration(conn['duration'])}\n\n';
+      info += '   时长: ${ImprovedTrafficStatsService.formatDuration(conn['duration'])}\n\n';
     }
 
     Clipboard.setData(ClipboardData(text: info));
@@ -105,26 +106,14 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Consumer<VPNProvider>(
+                      Consumer<VPNProviderV2>(
                         builder: (context, provider, _) {
                           if (!provider.isConnected) return Container();
                           
-                          String sourceText;
-                          Color sourceColor;
-                          IconData sourceIcon;
-                          
-                          switch (provider.connectionSource) {
-                            case ConnectionSource.clashAPI:
-                              sourceText = 'Clash API';
-                              sourceColor = AppTheme.successGreen;
-                              sourceIcon = Icons.api;
-                              break;
-                            case ConnectionSource.system:
-                              sourceText = '系统';
-                              sourceColor = AppTheme.primaryNeon;
-                              sourceIcon = Icons.computer;
-                              break;
-                          }
+                          // 由于 connectionSource 现在返回字符串，直接使用
+                          final sourceText = provider.connectionSource;
+                          final sourceColor = AppTheme.successGreen;
+                          final sourceIcon = Icons.api;
                           
                           return Container(
                             padding: const EdgeInsets.symmetric(
@@ -165,7 +154,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                   ),
                 ),
                 // 菜单按钮
-                Consumer<VPNProvider>(
+                Consumer<VPNProviderV2>(
                   builder: (context, provider, _) {
                     if (!provider.isConnected) return Container();
 
@@ -284,7 +273,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
 
           // 连接列表
           Expanded(
-            child: Consumer<VPNProvider>(
+            child: Consumer<VPNProviderV2>(
               builder: (context, provider, _) {
                 if (!provider.isConnected) {
                   // VPN未连接时显示提示
@@ -377,7 +366,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                 ),
                               ),
                               Text(
-                                _formatDuration(connection['duration']),
+                                ImprovedTrafficStatsService.formatDuration(connection['duration']),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
@@ -427,7 +416,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  '↑${_formatBytes(connection['uploadBytes'])}',
+                                  '↑${ImprovedTrafficStatsService.formatBytes(connection['uploadBytes'])}',
                                   style: const TextStyle(
                                     fontSize: 10,
                                     color: AppTheme.successGreen,
@@ -446,7 +435,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  '↓${_formatBytes(connection['downloadBytes'])}',
+                                  '↓${ImprovedTrafficStatsService.formatBytes(connection['downloadBytes'])}',
                                   style: const TextStyle(
                                     fontSize: 10,
                                     color: AppTheme.primaryNeon,
@@ -467,7 +456,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '↑${_formatSpeed(connection['uploadSpeed'])}',
+                                    '↑${ImprovedTrafficStatsService.formatSpeed(connection['uploadSpeed'])}',
                                     style: const TextStyle(
                                       fontSize: 9,
                                       color: AppTheme.textHint,
@@ -488,7 +477,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '↓${_formatSpeed(connection['downloadSpeed'])}',
+                                    '↓${ImprovedTrafficStatsService.formatSpeed(connection['downloadSpeed'])}',
                                     style: const TextStyle(
                                       fontSize: 9,
                                       color: AppTheme.textHint,
@@ -534,27 +523,4 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
     );
   }
 
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '${bytes}B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
-  }
-
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds % 60;
-    return '${minutes.toString().padLeft(1, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
-
-  String _formatSpeed(int bytesPerSecond) {
-    if (bytesPerSecond < 1024) return '${bytesPerSecond}B/s';
-    if (bytesPerSecond < 1024 * 1024) return '${(bytesPerSecond / 1024).toStringAsFixed(1)}KB/s';
-    if (bytesPerSecond < 1024 * 1024 * 1024) {
-      return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(1)}MB/s';
-    }
-    return '${(bytesPerSecond / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB/s';
-  }
 }

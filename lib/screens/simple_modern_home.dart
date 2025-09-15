@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
+import '../services/improved_traffic_stats_service.dart';
 import '../models/proxy_mode.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
@@ -20,7 +21,7 @@ class SimpleModernHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<VPNProvider>(
+    return Consumer<VPNProviderV2>(
       builder: (context, provider, _) {
         return Scaffold(
           body: Container(
@@ -149,7 +150,14 @@ class SimpleModernHome extends StatelessWidget {
                                               ),
                                             ),
                                             // 延时显示
-                                            _buildCurrentConfigPing(provider),
+                                            Builder(
+                                              builder: (context) {
+                                                // 构建延时显示组件
+                                                return _buildCurrentConfigPing(
+                                                  provider,
+                                                );
+                                              },
+                                            ),
                                           ],
                                         ),
                                         const SizedBox(height: 2),
@@ -236,9 +244,10 @@ class SimpleModernHome extends StatelessWidget {
                                   child: _buildMiniStatCard(
                                     icon: Icons.timer,
                                     label: '连接时长',
-                                    value: VPNProvider.formatDuration(
-                                      provider.connectionDuration,
-                                    ),
+                                    value:
+                                        ImprovedTrafficStatsService.formatDuration(
+                                          provider.connectionDuration,
+                                        ),
                                     rightValue: '${provider.activeConnections}',
                                     rightLabel: '连接数',
                                   ),
@@ -250,10 +259,10 @@ class SimpleModernHome extends StatelessWidget {
                               child: _buildMiniTrafficCard(
                                 icon: Icons.arrow_upward,
                                 label: '上传',
-                                value: VPNProvider.formatSpeed(
+                                value: ImprovedTrafficStatsService.formatSpeed(
                                   provider.uploadSpeed,
                                 ),
-                                sub: VPNProvider.formatBytes(
+                                sub: ImprovedTrafficStatsService.formatBytes(
                                   provider.uploadBytes,
                                 ),
                               ),
@@ -263,10 +272,10 @@ class SimpleModernHome extends StatelessWidget {
                               child: _buildMiniTrafficCard(
                                 icon: Icons.arrow_downward,
                                 label: '下载',
-                                value: VPNProvider.formatSpeed(
+                                value: ImprovedTrafficStatsService.formatSpeed(
                                   provider.downloadSpeed,
                                 ),
-                                sub: VPNProvider.formatBytes(
+                                sub: ImprovedTrafficStatsService.formatBytes(
                                   provider.downloadBytes,
                                 ),
                               ),
@@ -732,7 +741,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 构建日志卡片
-  Widget _buildLogsCard(BuildContext context, VPNProvider provider) {
+  Widget _buildLogsCard(BuildContext context, VPNProviderV2 provider) {
     return Container(
       height: 80, // 统一高度
       padding: const EdgeInsets.all(16),
@@ -811,7 +820,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 构建TUN模式卡片
-  Widget _buildDaemonCard(BuildContext context, VPNProvider provider) {
+  Widget _buildDaemonCard(BuildContext context, VPNProviderV2 provider) {
     return Container(
       height: 80, // 统一高度
       padding: const EdgeInsets.all(16),
@@ -897,7 +906,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 系统代理开关
-  Widget _buildSystemProxyToggle(VPNProvider provider) {
+  Widget _buildSystemProxyToggle(VPNProviderV2 provider) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1097,7 +1106,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 显示日志页面
-  void _showLogsPage(BuildContext context, VPNProvider provider) {
+  void _showLogsPage(BuildContext context, VPNProviderV2 provider) {
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
@@ -1123,42 +1132,69 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   /// 构建当前配置的延时显示
-  Widget _buildCurrentConfigPing(VPNProvider provider) {
+  Widget _buildCurrentConfigPing(VPNProviderV2 provider) {
     if (provider.currentConfig == null) {
       return const SizedBox.shrink();
     }
 
     final config = provider.currentConfig!;
+    final ping = provider.getConfigPing(config.id);
     final pingLevel = provider.getConfigPingLevel(config.id);
     final pingText = provider.getConfigPingText(config.id);
 
     Color pingColor;
     IconData pingIcon;
+    String displayText = pingText;
 
-    switch (pingLevel) {
-      case PingLevel.excellent:
-        pingColor = AppTheme.successGreen;
-        pingIcon = Icons.speed;
-        break;
-      case PingLevel.good:
-        pingColor = const Color(0xFF7DD3FC); // 浅蓝
-        pingIcon = Icons.speed;
-        break;
-      case PingLevel.fair:
-        pingColor = AppTheme.warningOrange;
-        pingIcon = Icons.access_time;
-        break;
-      case PingLevel.poor:
-        pingColor = AppTheme.errorRed;
-        pingIcon = Icons.access_time;
-        break;
-      case PingLevel.timeout:
+    if (!provider.isConnected && ping == -1) {
+      // 未连接且没有延时数据时，显示测试状态
+      pingColor = AppTheme.textSecondary;
+      pingIcon = Icons.pending;
+    } else if (ping > 0) {
+      // 有延时数据时，无论是否连接都显示延时
+      // 有延时数据，准备显示
+      switch (pingLevel) {
+        case PingLevel.excellent:
+          pingColor = AppTheme.successGreen;
+          pingIcon = Icons.speed;
+          break;
+        case PingLevel.good:
+          pingColor = const Color(0xFF7DD3FC); // 浅蓝
+          pingIcon = Icons.speed;
+          break;
+        case PingLevel.fair:
+          pingColor = AppTheme.warningOrange;
+          pingIcon = Icons.access_time;
+          break;
+        case PingLevel.poor:
+          pingColor = AppTheme.errorRed;
+          pingIcon = Icons.access_time;
+          break;
+        default:
+          pingColor = AppTheme.textSecondary;
+          pingIcon = Icons.speed;
+          break;
+      }
+      displayText = pingText;
+      // 显示状态: $displayText
+    } else {
+      // ping == -1 且已经测试过，显示失败状态
+      // 延时测试失败分支
+      if (provider.isConnected) {
         pingColor = AppTheme.textSecondary;
         pingIcon = Icons.close;
-        break;
+        displayText = "超时";
+        // 显示状态: 超时（已连接）
+      } else {
+        // 未连接时测试失败
+        pingColor = AppTheme.errorRed;
+        pingIcon = Icons.error_outline;
+        displayText = "连接失败";
+        // 显示状态: 连接失败（未连接）
+      }
     }
 
-    return Container(
+    final containerWidget = Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: pingColor.withOpacity(0.15),
@@ -1170,7 +1206,7 @@ class SimpleModernHome extends StatelessWidget {
           Icon(pingIcon, size: 25, color: pingColor),
           const SizedBox(width: 3),
           Text(
-            pingText,
+            displayText,
             style: TextStyle(
               //右侧延迟显示文字的字体
               fontSize: 25,
@@ -1181,10 +1217,13 @@ class SimpleModernHome extends StatelessWidget {
         ],
       ),
     );
+
+    // Container组件已创建
+    return containerWidget;
   }
 
   // 获取系统代理状态颜色
-  Color _getProxyStatusColor(VPNProvider provider) {
+  Color _getProxyStatusColor(VPNProviderV2 provider) {
     if (!provider.isSystemProxySupported) {
       return Colors.grey;
     }
@@ -1201,7 +1240,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 获取系统代理状态文本
-  String _getProxyStatusText(VPNProvider provider) {
+  String _getProxyStatusText(VPNProviderV2 provider) {
     if (!provider.isSystemProxySupported) {
       return '不支持';
     }
@@ -1218,7 +1257,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 获取系统代理描述文本
-  String _getProxyDescription(VPNProvider provider) {
+  String _getProxyDescription(VPNProviderV2 provider) {
     if (!provider.isSystemProxySupported) {
       return '当前系统不支持自动代理配置';
     }
@@ -1240,7 +1279,7 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 获取TUN模式描述文本
-  String _getTunDescription(VPNProvider provider) {
+  String _getTunDescription(VPNProviderV2 provider) {
     if (provider.useTun) {
       if (provider.autoSystemProxy) {
         return '全局接管系统流量，已自动关闭系统代理';
@@ -1262,7 +1301,7 @@ class SimpleModernHome extends StatelessWidget {
   /// 处理 TUN 模式开关
   Future<void> _handleTunToggle(
     BuildContext context,
-    VPNProvider provider,
+    VPNProviderV2 provider,
     bool enabled,
   ) async {
     if (!enabled) {

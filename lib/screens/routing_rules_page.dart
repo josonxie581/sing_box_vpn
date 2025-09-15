@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:gsou/utils/safe_navigator.dart';
 import 'package:provider/provider.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../models/proxy_mode.dart';
 import '../models/custom_rule.dart';
 import '../services/custom_rules_service.dart';
@@ -67,7 +67,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
           ),
         ],
       ),
-      body: Consumer<VPNProvider>(
+      body: Consumer<VPNProviderV2>(
         builder: (context, provider, _) {
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -100,7 +100,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
   }
 
   /// 构建代理模式选择部分
-  Widget _buildProxyModeSection(VPNProvider provider) {
+  Widget _buildProxyModeSection(VPNProviderV2 provider) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(

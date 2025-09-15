@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/qr_decoder.dart';
@@ -1208,7 +1208,7 @@ class _AddConfigPageState extends State<AddConfigPage>
         settings: settings,
       );
 
-      final provider = context.read<VPNProvider>();
+      final provider = context.read<VPNProviderV2>();
 
       if (widget.config != null && widget.configIndex != null) {
         // 编辑模式：更新现有配置
@@ -1258,7 +1258,7 @@ class _AddConfigPageState extends State<AddConfigPage>
                     ).showSnackBar(const SnackBar(content: Text('请输入有效链接')));
                     return;
                   }
-                  final provider = context.read<VPNProvider>();
+                  final provider = context.read<VPNProviderV2>();
                   // 支持直接单条分享链接导入
                   final ok = await provider.importFromLink(link);
                   if (!ok) {
@@ -1302,7 +1302,7 @@ class _AddConfigPageState extends State<AddConfigPage>
                     ).showSnackBar(const SnackBar(content: Text('未识别到二维码内容')));
                     return;
                   }
-                  final provider = context.read<VPNProvider>();
+                  final provider = context.read<VPNProviderV2>();
                   // 优先尝试单条链接
                   final ok = await provider.importFromLink(text.trim());
                   if (!ok) {

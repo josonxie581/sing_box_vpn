@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../utils/navigation.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 
 class AddConfigDialog extends StatefulWidget {
@@ -1031,7 +1031,7 @@ class _AddConfigDialogState extends State<AddConfigDialog> {
         settings: settings,
       );
 
-      final provider = context.read<VPNProvider>();
+      final provider = context.read<VPNProviderV2>();
       if (widget.editIndex != null) {
         provider.updateConfig(widget.editIndex!, config);
       } else {

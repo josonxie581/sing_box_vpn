@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:gsou/utils/safe_navigator.dart';
 import 'package:provider/provider.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 
@@ -258,7 +258,7 @@ class _SimpleAddConfigDialogState extends State<SimpleAddConfigDialog> {
         settings: settings,
       );
 
-      final provider = context.read<VPNProvider>();
+      final provider = context.read<VPNProviderV2>();
       provider.addConfig(config);
       safePop(context);
 

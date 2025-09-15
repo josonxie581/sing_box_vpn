@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:gsou/utils/safe_navigator.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
@@ -41,7 +41,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         ),
         actions: [
           // 刷新延时按钮
-          Consumer<VPNProvider>(
+          Consumer<VPNProviderV2>(
             builder: (context, provider, _) => IconButton(
               icon: provider.isPingingAll
                   ? SizedBox(
@@ -68,7 +68,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             tooltip: '导入YAML配置',
           ),
           // 删除所有配置按钮
-          Consumer<VPNProvider>(
+          Consumer<VPNProviderV2>(
             builder: (context, provider, _) => IconButton(
               icon: const Icon(Icons.delete_sweep, color: AppTheme.errorRed),
               onPressed: provider.configs.isEmpty
@@ -83,7 +83,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           ),
         ],
       ),
-      body: Consumer<VPNProvider>(
+      body: Consumer<VPNProviderV2>(
         builder: (context, provider, _) {
           if (provider.configs.isEmpty) {
             return _buildEmptyState();
@@ -174,7 +174,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     int index,
     bool isConnected,
     bool isCurrent,
-    VPNProvider provider,
+    VPNProviderV2 provider,
   ) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -549,7 +549,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 选择配置
-  Future<void> _selectConfig(VPNProvider provider, VPNConfig config) async {
+  Future<void> _selectConfig(VPNProviderV2 provider, VPNConfig config) async {
     if (provider.currentConfig != config) {
       // 设置为当前配置（但不连接）
       await provider.setCurrentConfig(config);
@@ -566,7 +566,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 点击卡片时：未连接 -> 仅选择；已连接 -> 若是其他节点则弹出切换确认
-  Future<void> _selectOrSwitch(VPNProvider provider, VPNConfig config) async {
+  Future<void> _selectOrSwitch(VPNProviderV2 provider, VPNConfig config) async {
     if (!provider.isConnected) {
       await _selectConfig(provider, config);
       return;
@@ -583,7 +583,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   // 已移除切换确认弹窗，点击即切换
 
   /// 连接配置
-  void _connectConfig(VPNProvider provider, VPNConfig config) {
+  void _connectConfig(VPNProviderV2 provider, VPNConfig config) {
     provider.connect(config);
   }
 
@@ -599,7 +599,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   /// 删除配置
   void _deleteConfig(
     BuildContext context,
-    VPNProvider provider,
+    VPNProviderV2 provider,
     int index,
     String name,
   ) {
@@ -693,7 +693,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         if (configs.isNotEmpty) {
           // 添加配置到提供者
-          final provider = Provider.of<VPNProvider>(context, listen: false);
+          final provider = Provider.of<VPNProviderV2>(context, listen: false);
           int successCount = 0;
 
           for (final config in configs) {
@@ -768,7 +768,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建延时指示器
-  Widget _buildPingIndicator(VPNProvider provider, VPNConfig config) {
+  Widget _buildPingIndicator(VPNProviderV2 provider, VPNConfig config) {
     final pingLevel = provider.getConfigPingLevel(config.id);
     final pingText = provider.getConfigPingText(config.id);
 
@@ -853,7 +853,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建延时详情标签
-  Widget _buildPingDetailChip(VPNProvider provider, VPNConfig config) {
+  Widget _buildPingDetailChip(VPNProviderV2 provider, VPNConfig config) {
     final ping = provider.getConfigPing(config.id);
     final pingLevel = provider.getConfigPingLevel(config.id);
     final pingDescription = PingService.getPingDescription(ping);
@@ -904,7 +904,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建自动选择设置
-  Widget _buildAutoSelectSettings(VPNProvider provider) {
+  Widget _buildAutoSelectSettings(VPNProviderV2 provider) {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       padding: const EdgeInsets.all(16),
@@ -1016,7 +1016,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建间隔时间选择器
-  Widget _buildIntervalSelector(VPNProvider provider) {
+  Widget _buildIntervalSelector(VPNProviderV2 provider) {
     final intervals = [1, 2, 3, 5, 10, 15, 20, 30, 60]; // 可选的分钟数
 
     return Container(
@@ -1095,7 +1095,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 显示删除所有配置的确认对话框
-  void _showDeleteAllConfirmDialog(BuildContext context, VPNProvider provider) {
+  void _showDeleteAllConfirmDialog(BuildContext context, VPNProviderV2 provider) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

@@ -3,7 +3,7 @@ import 'package:gsou/utils/safe_navigator.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import '../providers/vpn_provider.dart';
+import '../providers/vpn_provider_v2.dart';
 import 'add_config_dialog.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -29,7 +29,7 @@ class HomeScreen extends StatelessWidget {
 
   /// 构建配置列表
   Widget _buildConfigList(BuildContext context) {
-    return Consumer<VPNProvider>(
+    return Consumer<VPNProviderV2>(
       builder: (context, provider, _) {
         return Column(
           children: [
@@ -119,7 +119,7 @@ class HomeScreen extends StatelessWidget {
 
   /// 构建主内容区域
   Widget _buildMainContent(BuildContext context) {
-    return Consumer<VPNProvider>(
+    return Consumer<VPNProviderV2>(
       builder: (context, provider, _) {
         return Column(
           children: [
@@ -204,7 +204,7 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(width: 16),
                   // 系统代理开关
                   Expanded(
-                    child: Consumer<VPNProvider>(
+                    child: Consumer<VPNProviderV2>(
                       builder: (context, provider, _) {
                         return SwitchListTile(
                           contentPadding: const EdgeInsets.only(left: 8),

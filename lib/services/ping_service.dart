@@ -147,9 +147,20 @@ class PingService {
       return rawDelay;
     }
 
-    // 从原始延时中减去API开销，但确保结果不小于10ms
-    final calibratedDelay = rawDelay - _apiOverhead!;
-    return calibratedDelay > 10 ? calibratedDelay : rawDelay ~/ 2;
+    // VPN连接状态下，API开销更大，需要更多的校准
+    // 根据实际观察，延时值大约需要减少150ms左右
+    final estimatedOverhead = _apiOverhead! + 150;  // 增加固定的VPN通信开销
+
+    // 从原始延时中减去API开销，但确保结果不小于实际延时的一半
+    final calibratedDelay = rawDelay - estimatedOverhead;
+
+    // 确保校准后的延时在合理范围内
+    if (calibratedDelay < 50) {
+      // 如果校准后太小，使用原始值的55%作为估算
+      return (rawDelay * 0.55).round();
+    }
+
+    return calibratedDelay;
   }
 
   /// 手动设置API开销校准值
@@ -177,7 +188,8 @@ class PingService {
 
   /// 检测单个节点配置的网络延时
   ///
-  /// 根据 sing-box 官方文档实现，支持 VPN 连接和直连两种模式
+  /// 使用 sing-box Clash API 规范进行延时测试（已连接时）
+  /// 或直接TCP连接测试（未连接时）
   ///
   /// 参数：
   /// - config: 要测试的 VPN 配置
@@ -191,239 +203,80 @@ class PingService {
     VPNConfig? currentConfig,
   }) async {
     try {
-      // 确保API开销已校准
-      if (!_calibrationCompleted) {
-        await calibrateApiOverhead();
-      }
-
-      final stopwatch = Stopwatch()..start();
-
-      // VPN已连接时，所有配置都测试通过VPN到该服务器的延时
+      // 如果已连接，使用 Clash API 测试
       if (isConnected) {
+        // 确保API开销已校准
+        if (!_calibrationCompleted) {
+          await calibrateApiOverhead();
+        }
         return await _testLatencyThroughVpnTunnel(config);
-      }
-
-      // 未连接时，根据不同协议类型使用不同的测试方法
-      switch (config.type.toLowerCase()) {
-        case 'ss':
-        case 'shadowsocks':
-          return await _testShadowsocks(config, stopwatch);
-        case 'vmess':
-        case 'vless':
-          return await _testVmess(config, stopwatch);
-        case 'trojan':
-          return await _testTrojan(config, stopwatch);
-        case 'hysteria2':
-        case 'hy2':
-          return await _testHysteria2(config, stopwatch);
-        case 'tuic':
-          return await _testTuic(config, stopwatch);
-        default:
-          return await _testGeneric(config, stopwatch);
+      } else {
+        // 未连接时，直接测试服务器的TCP连接延时
+        return await _testDirectServerLatency(config);
       }
     } catch (e) {
       return -1;
     }
   }
 
-  /// 测试VPN连接的真实网络延时
-  /// 使用官方推荐的测试URL和方法
-  static Future<int> _testVpnLatency() async {
-    final List<int> results = [];
 
-    // 1. 优先使用官方推荐的测试URL
-    final officialResult = await _testHttpLatencyThroughVpn(_officialTestUrl);
-    if (officialResult > 0) {
-      results.add(officialResult);
-    }
 
-    // 2. 使用备用测试URL
-    for (final url in _fallbackTestUrls.take(2)) {
-      final result = await _testHttpLatencyThroughVpn(url);
-      if (result > 0) {
-        results.add(result);
-      }
-    }
 
-    // 3. 如果HTTP测试都失败，尝试TCP连接测试
-    if (results.isEmpty) {
-      final tcpResults = await _testTcpConnections();
-      results.addAll(tcpResults);
-    }
 
-    if (results.isEmpty) {
-      return -1;
-    }
 
-    // 返回最佳结果的平均值
-    results.sort();
-    final bestResults = results.take(3).toList();
-    return bestResults.reduce((a, b) => a + b) ~/ bestResults.length;
-  }
 
-  /// 测试TCP连接延时
-  static Future<List<int>> _testTcpConnections() async {
-    final results = <int>[];
+  /// 未连接VPN时，直接测试服务器延时
+  /// 使用TCP连接测试服务器响应时间
+  static Future<int> _testDirectServerLatency(VPNConfig config) async {
+    try {
+      print('[DEBUG] 开始测试服务器直连延时: ${config.name} (${config.server}:${config.port})');
 
-    // 使用标准的测试服务器
-    final testServers = [
-      {'host': '8.8.8.8', 'port': 53}, // Google DNS
-      {'host': '1.1.1.1', 'port': 53}, // Cloudflare DNS
-      {'host': 'www.google.com', 'port': 443}, // Google HTTPS
-    ];
-
-    for (final server in testServers) {
+      // 方法1: 尝试直接连接配置的端口
+      final sw = Stopwatch()..start();
       try {
-        final sw = Stopwatch()..start();
         final socket = await Socket.connect(
-          server['host'] as String,
-          server['port'] as int,
-          timeout: const Duration(milliseconds: 2000),
+          config.server,
+          config.port,
+          timeout: const Duration(seconds: 3),
         );
         sw.stop();
         socket.destroy();
 
         final latency = sw.elapsedMilliseconds;
-        if (latency > 0 && latency < 5000) {
-          results.add(latency);
-        }
-      } catch (_) {
-        continue;
-      }
-    }
-
-    return results;
-  }
-
-  /// 测试VPN连接的服务器延时
-  /// 通过本地代理端口测试到VPS服务器的延时
-  static Future<int> _testVpnConnectedServerLatency(VPNConfig config) async {
-    try {
-      // 方法1: 通过本地代理端口测试连接
-      final localProxyResult = await _testThroughLocalProxy();
-      if (localProxyResult > 0) {
-        return localProxyResult;
+        print('[DEBUG] ✅ 服务器直连测试成功: ${config.name} -> ${latency}ms');
+        return latency;
+      } catch (e) {
+        // 如果配置端口连接失败，尝试常见端口
+        print('[DEBUG] 配置端口 ${config.port} 连接失败，尝试其他端口');
       }
 
-      // 方法2: 如果代理测试失败，使用网络延时作为备用
-      final networkResult = await _testNetworkLatencyThroughVpn();
-      if (networkResult > 0) {
-        return networkResult;
-      }
-
-      return -1;
-    } catch (e) {
-      return -1;
-    }
-  }
-
-  /// 通过本地代理端口测试延时
-  static Future<int> _testThroughLocalProxy() async {
-    try {
-      // 测试本地代理端口的响应延时
-      final sw = Stopwatch()..start();
-
-      // 尝试连接到常见的本地代理端口
-      final ports = [7890, 1080, 8080, 10809]; // 常见的本地代理端口
-
-      for (final port in ports) {
+      // 方法2: 尝试常见的服务端口
+      final commonPorts = [443, 80, 22, 53];
+      for (final port in commonPorts) {
         try {
+          final sw2 = Stopwatch()..start();
           final socket = await Socket.connect(
-            '127.0.0.1',
+            config.server,
             port,
-            timeout: const Duration(milliseconds: 500),
+            timeout: const Duration(milliseconds: 1500),
           );
-          sw.stop();
+          sw2.stop();
           socket.destroy();
 
-          // 连接成功，但需要添加一些基准延时，因为本地连接太快
-          // 通过测试简单HTTP请求来获得更真实的延时
-          return await _testSimpleHttpThroughProxy(port) ??
-              sw.elapsedMilliseconds + 10;
+          final latency = sw2.elapsedMilliseconds;
+          print('[DEBUG] ✅ 服务器端口 $port 测试成功: ${config.name} -> ${latency}ms');
+          return latency;
         } catch (_) {
           continue;
         }
       }
+
+      print('[DEBUG] ❌ 服务器所有端口测试失败: ${config.name}');
       return -1;
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  /// 通过代理测试简单HTTP请求
-  static Future<int?> _testSimpleHttpThroughProxy(int port) async {
-    try {
-      final sw = Stopwatch()..start();
-      final client = http.Client();
-
-      try {
-        // 通过代理测试一个简单的HTTP请求
-        final response = await client
-            .get(Uri.parse('http://httpbin.org/ip'))
-            .timeout(const Duration(milliseconds: 2000));
-
-        sw.stop();
-        if (response.statusCode == 200) {
-          return sw.elapsedMilliseconds;
-        }
-      } finally {
-        client.close();
-      }
-    } catch (_) {
-      // 忽略错误
-    }
-    return null;
-  }
-
-  /// 通过VPN测试网络延时
-  static Future<int> _testNetworkLatencyThroughVpn() async {
-    final List<int> latencies = [];
-
-    // 使用TCP连接测试，比HTTP更快更准确
-    final tcpTargets = [
-      {'host': '8.8.8.8', 'port': 53}, // Google DNS
-      {'host': '1.1.1.1', 'port': 53}, // Cloudflare DNS
-      {'host': '114.114.114.114', 'port': 53}, // 国内DNS
-    ];
-
-    final results = await Future.wait(
-      tcpTargets.map((target) async {
-        try {
-          final sw = Stopwatch()..start();
-          final socket = await Socket.connect(
-            target['host'] as String,
-            target['port'] as int,
-            timeout: const Duration(milliseconds: 800),
-          );
-          sw.stop();
-          socket.destroy();
-          return sw.elapsedMilliseconds;
-        } catch (_) {
-          return -1;
-        }
-      }),
-    );
-
-    for (final result in results) {
-      if (result > 0) {
-        latencies.add(result);
-      }
-    }
-
-    if (latencies.isEmpty) {
+    } catch (e) {
+      print('[DEBUG] 服务器延时测试异常: ${config.name} -> $e');
       return -1;
     }
-
-    // 取平均值，但限制在合理范围内
-    final avg = latencies.reduce((a, b) => a + b) ~/ latencies.length;
-
-    // 如果平均值太高，可能是网络问题，取最小值
-    if (avg > 500) {
-      latencies.sort();
-      return latencies.first;
-    }
-
-    return avg;
   }
 
   /// 测试通过VPN隧道到目标服务器的延时
@@ -446,14 +299,7 @@ class PingService {
         return configBasedResult;
       }
 
-      // 方法3: 使用备用网络测试方法
-      final fallbackResult = await _testNetworkLatencyThroughVpn();
-      if (fallbackResult > 0) {
-        print('[DEBUG] ✅ 备用网络测试成功: ${config.name} -> ${fallbackResult}ms');
-        return fallbackResult;
-      }
-
-      print('[DEBUG] 所有测试方法都失败: ${config.name}');
+      print('[DEBUG] Clash API 测试失败: ${config.name}');
       return -1;
     } catch (e) {
       print('[DEBUG] 测试异常: ${config.name} -> $e');
@@ -743,127 +589,9 @@ class PingService {
     return uniqueTags.toList();
   }
 
-  /// 使用系统命令测试延时
-  static Future<int> _testUsingSystemCommand() async {
-    try {
-      // 测试Google DNS，这在VPN环境下应该显示真实的延时
-      final result = await Process.run(
-        'ping',
-        ['-n', '3', '8.8.8.8'], // Windows ping命令
-      ).timeout(const Duration(seconds: 5));
 
-      if (result.exitCode == 0) {
-        final output = result.stdout as String;
-        // 解析ping输出中的平均延时
-        final avgMatch = RegExp(r'Average = (\d+)ms').firstMatch(output);
-        if (avgMatch != null) {
-          return int.tryParse(avgMatch.group(1)!) ?? -1;
-        }
 
-        // 如果没找到Average，尝试解析单个ping结果
-        final timeMatch = RegExp(r'time=(\d+)ms').firstMatch(output);
-        if (timeMatch != null) {
-          return int.tryParse(timeMatch.group(1)!) ?? -1;
-        }
-      }
-    } catch (e) {
-      // 如果系统命令失败，返回-1
-    }
-    return -1;
-  }
 
-  /// 通过VPN隧道测试TCP连接
-  static Future<int> _testTcpThroughVpn(String host, int port) async {
-    try {
-      final sw = Stopwatch()..start();
-      final socket = await Socket.connect(
-        host,
-        port,
-        timeout: const Duration(milliseconds: 1000),
-      );
-      sw.stop();
-      socket.destroy();
-
-      // 返回实际测量的延时
-      return sw.elapsedMilliseconds;
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  /// 测试到标准服务器的延时（作为备用方案）
-  /// 使用海外服务器确保流量通过VPN隧道
-  static Future<int> _testStandardServersDelay() async {
-    final List<int> results = [];
-
-    // 使用明确需要翻墙的海外服务器，确保流量通过VPN隧道
-    final servers = [
-      {'host': 'www.google.com', 'port': 443}, // Google HTTPS - 需要翻墙
-      {'host': 'www.youtube.com', 'port': 443}, // YouTube - 需要翻墙
-      {'host': 'www.facebook.com', 'port': 443}, // Facebook - 需要翻墙
-      {'host': 'www.twitter.com', 'port': 443}, // Twitter - 需要翻墙
-    ];
-
-    for (final server in servers) {
-      try {
-        final sw = Stopwatch()..start();
-        final socket = await Socket.connect(
-          server['host'] as String,
-          server['port'] as int,
-          timeout: const Duration(milliseconds: 800),
-        );
-        sw.stop();
-        socket.destroy();
-
-        final latency = sw.elapsedMilliseconds;
-        if (latency > 0 && latency < 1000) {
-          // 只接受合理的延时值
-          results.add(latency);
-        }
-      } catch (_) {
-        continue;
-      }
-    }
-
-    if (results.isEmpty) {
-      return -1;
-    }
-
-    // 返回最快的响应时间，这通常代表最优的网络路径
-    results.sort();
-    return results.first;
-  }
-
-  /// 通过VPN测试HTTP延时
-  static Future<int> _testHttpLatencyThroughVpn(String url) async {
-    try {
-      final sw = Stopwatch()..start();
-      final client = http.Client();
-
-      try {
-        final response = await client
-            .head(
-              Uri.parse(url),
-              headers: {
-                'User-Agent': 'SingBox-VPN/1.0',
-                'Accept': '*/*',
-                'Connection': 'close',
-              },
-            )
-            .timeout(const Duration(milliseconds: 1500));
-
-        sw.stop();
-        if (response.statusCode < 400) {
-          return sw.elapsedMilliseconds;
-        }
-      } finally {
-        client.close();
-      }
-    } catch (_) {
-      // 忽略错误
-    }
-    return -1;
-  }
 
   /// 批量检测多个节点配置的延时
   ///
@@ -950,120 +678,6 @@ class PingService {
     await completer.future;
   }
 
-  /// 测试 Shadowsocks 协议节点延时（纯TCP连接测试）
-  static Future<int> _testShadowsocks(
-    VPNConfig config,
-    Stopwatch stopwatch,
-  ) async {
-    // 优先尝试配置指定端口的 TCP 握手
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-
-    // 配置端口连接失败时，尝试常见代理端口
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 测试 VMess/VLess 协议节点延时（纯TCP连接测试）
-  static Future<int> _testVmess(VPNConfig config, Stopwatch stopwatch) async {
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 测试 Trojan 协议节点延时（纯TCP连接测试）
-  static Future<int> _testTrojan(VPNConfig config, Stopwatch stopwatch) async {
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 测试 Hysteria2 协议节点延时（纯TCP连接测试）
-  static Future<int> _testHysteria2(
-    VPNConfig config,
-    Stopwatch stopwatch,
-  ) async {
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 测试 TUIC 协议节点延时（纯TCP连接测试）
-  static Future<int> _testTuic(VPNConfig config, Stopwatch stopwatch) async {
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 通用协议节点延时测试（纯TCP连接测试）
-  static Future<int> _testGeneric(VPNConfig config, Stopwatch stopwatch) async {
-    final direct = await _tryDirectTcp(config.server, config.port);
-    if (direct >= 0) return direct;
-    return await _tryCommonTcpPorts(config.server);
-  }
-
-  /// 尝试直接 TCP 连接指定端口，成功返回耗时，失败返回 -1
-  static Future<int> _tryDirectTcp(String host, int port) async {
-    try {
-      final sw = Stopwatch()..start();
-      final socket = await Socket.connect(host, port, timeout: _timeout);
-      final ms = sw.elapsedMilliseconds;
-      socket.destroy();
-      return ms;
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  /// 尝试常见TCP端口连接测试，替代ICMP ping
-  static Future<int> _tryCommonTcpPorts(String host) async {
-    // 常见端口列表，按优先级排序 (HTTPS, HTTP, SSH, DNS, Alt-HTTP, Alt-HTTPS)
-    const ports = [443, 80, 22, 53, 8080, 8443];
-
-    // 并行测试前3个端口，提升速度
-    const quickTimeout = Duration(milliseconds: 1500); // 更短的超时
-    final highPriorityPorts = ports.take(3);
-
-    // 并行测试高优先级端口，取最快的成功结果
-    final results = await Future.wait(
-      highPriorityPorts.map(
-        (port) => _tryTcpWithTimeout(host, port, quickTimeout),
-      ),
-    );
-
-    // 查找第一个成功的结果
-    for (final result in results) {
-      if (result >= 0) return result;
-    }
-
-    // 如果高优先级端口都失败，顺序测试剩余端口
-    for (int i = 3; i < ports.length; i++) {
-      final result = await _tryTcpWithTimeout(host, ports[i], quickTimeout);
-      if (result >= 0) return result;
-    }
-
-    return -1; // 所有端口都无法连接
-  }
-
-  /// 带超时的TCP连接测试
-  static Future<int> _tryTcpWithTimeout(
-    String host,
-    int port,
-    Duration timeout,
-  ) async {
-    try {
-      final sw = Stopwatch()..start();
-      final socket = await Socket.connect(host, port, timeout: timeout);
-      final ms = sw.elapsedMilliseconds;
-      socket.destroy();
-      return ms;
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  // ICMP ping相关代码已移除，改为使用纯TCP连接测试
-
-  // （已移除未使用的 _testTcpConnection/_testHttpThroughProxy 以减轻分析告警）
 
   /// 格式化延时数值为用户友好的显示文本
   ///

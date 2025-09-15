@@ -7,7 +7,8 @@ import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 
-import 'providers/vpn_provider.dart';
+import 'providers/vpn_provider_v2.dart';
+import 'services/improved_traffic_stats_service.dart';
 import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
@@ -76,7 +77,7 @@ void main() async {
 
   runApp(
     MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => VPNProvider())],
+      providers: [ChangeNotifierProvider(create: (_) => VPNProviderV2())],
       child: const MyApp(),
     ),
   );
@@ -336,12 +337,12 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   Future<void> _updateTaskbarAndTray() async {
     if (!mounted) return;
-    final vpn = Provider.of<VPNProvider>(context, listen: false);
+    final vpn = Provider.of<VPNProviderV2>(context, listen: false);
     const String baseTitle = 'Gsou';
     try {
       if (vpn.isConnected) {
-        final String up = VPNProvider.formatSpeed(vpn.uploadSpeed);
-        final String down = VPNProvider.formatSpeed(vpn.downloadSpeed);
+        final String up = ImprovedTrafficStatsService.formatSpeed(vpn.uploadSpeed);
+        final String down = ImprovedTrafficStatsService.formatSpeed(vpn.downloadSpeed);
         final String tip = 'U ' + up + '  D ' + down;
         if (_lastTrayTip != tip) {
           await _systemTray.setToolTip(tip);
@@ -414,7 +415,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
       themeMode: ThemeMode.dark,
       builder: (context, child) {
         return _isMinimized && !_isRestoringWindow
-            ? Consumer<VPNProvider>(
+            ? Consumer<VPNProviderV2>(
                 builder: (context, vpnProvider, child) => SpeedOverlay(
                   onRestore: () async {
                     if (!_isRestoringWindow) {
