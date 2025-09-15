@@ -269,7 +269,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                 size: 20,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
 
             Expanded(
               child: Column(
@@ -278,10 +278,11 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   const Text(
                     '静态IP映射',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -359,7 +360,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                       size: 20,
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
 
                   Expanded(
                     child: Column(
@@ -368,28 +369,32 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                         const Text(
                           '测试域名',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textPrimary,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           _dnsManager.testDomain,
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             color: AppTheme.textSecondary,
                             height: 1.3,
                           ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ],
                     ),
                   ),
 
+                  const SizedBox(width: 4),
                   const Icon(
                     Icons.expand_more,
                     color: AppTheme.textSecondary,
-                    size: 20,
+                    size: 18,
                   ),
                 ],
               ),
@@ -397,13 +402,13 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           ),
         ),
 
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
 
         // DNS测试按钮
         GestureDetector(
           onTap: () => _navigateToDnsTest(),
           child: Container(
-            width: 56,
+            width: 48,
             height: 72,
             decoration: BoxDecoration(
               color: AppTheme.primaryNeon,
@@ -412,13 +417,13 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
             child: const Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.network_check, color: Colors.black, size: 24),
-                SizedBox(height: 4),
+                Icon(Icons.network_check, color: Colors.black, size: 20),
+                SizedBox(height: 2),
                 Text(
                   '测试',
                   style: TextStyle(
                     color: Colors.black,
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -755,7 +760,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                 size: 20,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
 
             Expanded(
               child: Column(
@@ -764,10 +769,11 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   const Text(
                     '本地端口',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Text(

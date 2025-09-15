@@ -92,10 +92,12 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WindowListener {
   final SystemTray _systemTray = SystemTray();
   final AppWindow _appWindow = AppWindow();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   Timer? _taskbarTimer;
   bool _isMinimized = false;
   bool _isEnteringOverlay = false;
+  bool _isRestoringWindow = false;
   String _lastTrayTip = '';
   String _lastTitle = '';
 
@@ -206,13 +208,19 @@ class _MyAppState extends State<MyApp> with WindowListener {
     _isEnteringOverlay = true;
 
     try {
-      setState(() => _isMinimized = true);
+      // 首先清除所有的导航栈，回到根页面
+      if (_navigatorKey.currentState != null) {
+        _navigatorKey.currentState!.popUntil((route) => route.isFirst);
+      }
+
+      // 短暂延迟确保导航完成
+      await Future.delayed(const Duration(milliseconds: 100));
 
       // 隐藏当前窗口
       await windowManager.hide();
 
       // 短暂延迟确保窗口已隐藏
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 150));
 
       // 设置透明效果
       await acrylic.Window.setEffect(
@@ -244,56 +252,86 @@ class _MyAppState extends State<MyApp> with WindowListener {
       // 设置位置在屏幕右上角
       await windowManager.setPosition(const Offset(100, 50));
 
+      // 更新状态并重建界面
+      setState(() => _isMinimized = true);
+
+      // 等待界面重建完成
+      await Future.delayed(const Duration(milliseconds: 50));
+
       // 显示悬浮窗
       await windowManager.show();
 
       await _updateTaskbarAndTray();
     } catch (e) {
       print('进入悬浮窗模式失败: $e');
-      setState(() => _isMinimized = false);
+      // 如果失败，恢复状态
+      if (mounted) {
+        setState(() => _isMinimized = false);
+      }
+      // 尝试恢复窗口显示
+      try {
+        await _restoreNormalWindow();
+      } catch (restoreError) {
+        print('恢复窗口失败: $restoreError');
+      }
     } finally {
       _isEnteringOverlay = false;
     }
   }
 
   Future<void> _restoreNormalWindow() async {
-    if (!_isMinimized) return;
+    if (!_isMinimized || _isRestoringWindow) return;
+    _isRestoringWindow = true;
 
-    setState(() => _isMinimized = false);
+    try {
+      // 隐藏悬浮窗
+      await windowManager.hide();
 
-    // 隐藏悬浮窗
-    await windowManager.hide();
+      // 短暂延迟
+      await Future.delayed(const Duration(milliseconds: 150));
 
-    // 短暂延迟
-    await Future.delayed(const Duration(milliseconds: 100));
+      // 恢复窗口效果
+      await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
 
-    // 恢复窗口效果
-    await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
+      // 恢复标题栏
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.normal,
+        windowButtonVisibility: true,
+      );
 
-    // 恢复标题栏
-    await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
-    );
+      // 恢复窗口属性
+      await windowManager.setTitle('Gsou');
+      await windowManager.setSkipTaskbar(false);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setResizable(true);
+      await windowManager.setMaximizable(false);
+      await windowManager.setMinimizable(true);
+      await windowManager.setClosable(true);
 
-    // 恢复窗口属性
-    await windowManager.setTitle('Gsou');
-    await windowManager.setSkipTaskbar(false);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setResizable(true);
-    await windowManager.setMaximizable(false);
-    await windowManager.setMinimizable(true);
-    await windowManager.setClosable(true);
+      // 恢复窗口大小
+      await windowManager.setMinimumSize(const Size(600, 760));
+      await windowManager.setMaximumSize(const Size(600, 12000));
+      await windowManager.setSize(const Size(600, 760));
 
-    // 恢复窗口大小
-    await windowManager.setMinimumSize(const Size(600, 760));
-    await windowManager.setMaximumSize(const Size(600, 12000));
-    await windowManager.setSize(const Size(600, 760));
+      // 更新状态并重建界面
+      setState(() => _isMinimized = false);
 
-    // 居中并显示
-    await windowManager.center();
-    await windowManager.show();
-    await windowManager.focus();
+      // 等待界面重建完成
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // 居中并显示
+      await windowManager.center();
+      await windowManager.show();
+      await windowManager.focus();
+    } catch (e) {
+      print('恢复普通窗口失败: $e');
+      // 如果恢复失败，至少确保状态正确
+      if (mounted) {
+        setState(() => _isMinimized = false);
+      }
+    } finally {
+      _isRestoringWindow = false;
+    }
   }
 
   Future<void> _updateTaskbarAndTray() async {
@@ -337,8 +375,13 @@ class _MyAppState extends State<MyApp> with WindowListener {
   void onWindowEvent(String eventName) {
     if (eventName == 'minimize') {
       // 拦截最小化事件，改为进入悬浮窗模式
-      if (!_isMinimized && !_isEnteringOverlay) {
-        _enterOverlayMode();
+      if (!_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
+        // 确保在主线程中执行，并添加延迟以确保状态稳定
+        Future.microtask(() {
+          if (mounted && !_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
+            _enterOverlayMode();
+          }
+        });
       }
     }
   }
@@ -363,18 +406,26 @@ class _MyAppState extends State<MyApp> with WindowListener {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SingBox VPN',
+      title: _isMinimized ? '' : 'SingBox VPN',
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme(),
       darkTheme: AppTheme.darkTheme(),
       themeMode: ThemeMode.dark,
-      home: _isMinimized
-          ? SpeedOverlay(
-              onRestore: () async {
-                await _restoreNormalWindow();
-              },
-            )
-          : const SimpleModernHome(),
+      builder: (context, child) {
+        return _isMinimized && !_isRestoringWindow
+            ? Consumer<VPNProvider>(
+                builder: (context, vpnProvider, child) => SpeedOverlay(
+                  onRestore: () async {
+                    if (!_isRestoringWindow) {
+                      await _restoreNormalWindow();
+                    }
+                  },
+                ),
+              )
+            : child!;
+      },
+      home: const SimpleModernHome(),
     );
   }
 }

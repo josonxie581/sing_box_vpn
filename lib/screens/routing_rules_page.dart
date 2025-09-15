@@ -244,19 +244,22 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
         children: [
           Row(
             children: [
-              Icon(Icons.rule_folder, color: AppTheme.primaryNeon, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Gsou 规则集状态',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
+              Icon(Icons.rule_folder, color: AppTheme.primaryNeon, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Gsou 规则集状态',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 4),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppTheme.successGreen.withAlpha(30),
                   borderRadius: BorderRadius.circular(4),
@@ -264,7 +267,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                 child: Text(
                   '本地集成',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     color: AppTheme.successGreen,
                     fontWeight: FontWeight.w500,
                   ),
@@ -465,35 +468,38 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
         children: [
           Row(
             children: [
-              Icon(Icons.edit_note, color: AppTheme.primaryNeon, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                '自定义规则',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
+              Icon(Icons.edit_note, color: AppTheme.primaryNeon, size: 18),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  '自定义规则',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (_customRules.isNotEmpty) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryNeon.withAlpha(30),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     '${_customRules.length}',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10,
                       color: AppTheme.primaryNeon,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
+                const SizedBox(width: 4),
               ],
-              const Spacer(),
               if (_customRules.isNotEmpty)
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 18),
@@ -665,15 +671,18 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          rule.name,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
+                        Expanded(
+                          child: Text(
+                            rule.name,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         if (!rule.enabled)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
