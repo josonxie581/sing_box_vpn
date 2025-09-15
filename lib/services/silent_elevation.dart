@@ -176,7 +176,7 @@ final tunManager = FlashConnectStyleTunManager();
 final success = await tunManager.startTUN({
   "inbounds": [{
     "type": "tun",
-    "interface_name": "Gsou Tunnel",
+    "interface_name": "Gsou Adapter Tunnel",
     "stack": "system",  // 使用 Wintun
     "auto_route": true,
   }]

@@ -18,6 +18,7 @@ class DnsManager {
   bool _enableEcs = true; // 是否启用 EDNS Client Subnet（当前未显式使用，可预留）
   String _proxyResolver = 'FakeIP'; // 代理侧解析策略 (FakeIP / Remote 等)
   bool _strictRoute = false; // DNS严格路由，确保DNS查询严格按照路由规则进行
+  bool _enableIpv6 = false; // 是否启用IPv6支持（影响TUN接口配置）
 
   // 静态IP映射配置
   List<StaticIpMapping> _staticIpMappings = [];
@@ -64,6 +65,7 @@ class DnsManager {
   bool get enableEcs => _enableEcs;
   String get proxyResolver => _proxyResolver;
   bool get strictRoute => _strictRoute;
+  bool get enableIpv6 => _enableIpv6;
   List<DnsServer> get dnsServers => List.unmodifiable(_dnsServers);
   List<StaticIpMapping> get staticIpMappings =>
       List.unmodifiable(_staticIpMappings);
@@ -109,6 +111,11 @@ class DnsManager {
     _saveSettings();
   }
 
+  set enableIpv6(bool value) {
+    _enableIpv6 = value;
+    _saveSettings();
+  }
+
   /// 初始化 DNS 配置（从 SharedPreferences 读取）
   Future<void> init() async {
     try {
@@ -121,6 +128,7 @@ class DnsManager {
       _enableEcs = prefs.getBool('dns_enable_ecs') ?? true;
       _proxyResolver = prefs.getString('dns_proxy_resolver') ?? 'FakeIP';
       _strictRoute = prefs.getBool('dns_strict_route') ?? false;
+      _enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
 
       // 加载DNS服务器配置
       await _loadDnsServers();
@@ -144,6 +152,7 @@ class DnsManager {
       await prefs.setBool('dns_enable_ecs', _enableEcs);
       await prefs.setString('dns_proxy_resolver', _proxyResolver);
       await prefs.setBool('dns_strict_route', _strictRoute);
+      await prefs.setBool('dns_enable_ipv6', _enableIpv6);
 
       // 保存DNS服务器配置
       await _saveDnsServers();

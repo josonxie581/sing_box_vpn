@@ -116,6 +116,17 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
                 const SizedBox(height: 16),
 
+                // 启用IPv6
+                _buildSwitchCard(
+                  '启用IPv6',
+                  'VPS必须支持IPv6才能启用。若VPS无IPv6支持，请保持关闭',
+                  _dnsManager.enableIpv6,
+                  (value) => setState(() => _dnsManager.enableIpv6 = value),
+                  hasInfo: true,
+                ),
+
+                const SizedBox(height: 16),
+
                 // 代理流量解析通道
                 _buildProxyResolverCard(),
 

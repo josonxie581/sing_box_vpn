@@ -342,7 +342,7 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
   );
   // 统一构建标签（需包含 gVisor 与 Wintun 支持以满足双向回退）
   const buildTags =
-      'with_utls,with_quic,with_clash_api,with_gvisor,with_wintun';
+      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_gvisor,with_tailscale';
   stdout.writeln('使用构建标签: ' + buildTags);
   result = await Process.run(
     goExe,
@@ -456,7 +456,8 @@ Future<void> rewriteMinimalGoMod(
   final useLocalSingTun = localSingTunPath.existsSync();
 
   final goMod = File('$projectRoot/native/go.mod');
-  var content = '''module singbox_native
+  var content =
+      '''module singbox_native
 
 go 1.23.1
 
@@ -470,8 +471,12 @@ replace github.com/sagernet/sing-box => ${absPath}
 
   // 如果local-sing-tun存在，则添加对应的replace指令
   if (useLocalSingTun) {
-    final localSingTunAbsPath = localSingTunPath.absolute.path.replaceAll('\\', '/');
-    content += '''
+    final localSingTunAbsPath = localSingTunPath.absolute.path.replaceAll(
+      '\\',
+      '/',
+    );
+    content +=
+        '''
 // 使用本地的 sing-tun 源码
 replace github.com/sagernet/sing-tun => ${localSingTunAbsPath}
 ''';

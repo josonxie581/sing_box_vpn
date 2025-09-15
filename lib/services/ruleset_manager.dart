@@ -151,6 +151,7 @@ class RulesetManager {
     int clashApiPort = 9090,
     String clashApiSecret = '',
     int? tunMtu,
+    bool enableIpv6 = false,
   }) {
     final inbounds = <Map<String, dynamic>>[];
 
@@ -158,9 +159,11 @@ class RulesetManager {
       inbounds.add({
         "tag": "tun-in",
         "type": "tun",
-        if (Platform.isWindows) "interface_name": "Gsou Tunnel",
-        // 兼容 v1.8.0：使用 inet4_address/inet6_address
-        "inet4_address": "172.19.0.1/30",
+        if (Platform.isWindows) "interface_name": "Gsou Adapter Tunnel",
+        // 官方规范：使用address字段，根据配置决定是否包含IPv6
+        "address": enableIpv6
+          ? ["172.19.0.1/30", "2001:db8::1/128"]
+          : ["172.19.0.1/30"],
 
         // 可根据探测回退，默认较大 MTU
         "mtu": tunMtu ?? 4064,

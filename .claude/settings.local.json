@@ -8,7 +8,8 @@
       "Bash(flutter run:*)",
       "Bash(find:*)",
       "Bash(dir:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "WebFetch(domain:sing-box.sagernet.org)"
     ],
     "deny": [],
     "ask": []

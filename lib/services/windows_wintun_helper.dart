@@ -2,8 +2,8 @@ import 'dart:io';
 
 /// Windows 平台 Wintun 辅助工具
 class WindowsWintunHelper {
-  /// 检测是否存在指定名称的 Wintun 网卡（默认 "Gsou Tunnel"）
-  static Future<bool> isAdapterPresent({String name = 'Gsou Tunnel'}) async {
+  /// 检测是否存在指定名称的 Wintun 网卡（默认 "Gsou Adapter Tunnel"）
+  static Future<bool> isAdapterPresent({String name = 'Gsou Adapter Tunnel'}) async {
     if (!Platform.isWindows) return true;
     try {
       final result = await Process.run('powershell.exe', [

@@ -295,6 +295,7 @@ class SingBoxNativeService {
                   }
                   maybeTun['strict_route'] = false;
                   maybeTun['auto_route'] = true;
+                  onLog?.call('回退策略: 关闭 strict_route 以提高兼容性');
                   // 重新编码并启动
                   final retryJson = jsonEncode(config);
                   result = await _startOnce(
@@ -365,6 +366,7 @@ class SingBoxNativeService {
             tun['stack'] = 'gvisor';
             tun['strict_route'] = false;
             tun['auto_route'] = true;
+            onLog?.call('第二次回退: 关闭 strict_route 以提高兼容性');
             final retryJson = jsonEncode(config);
             final result = await Isolate.run<int>(() {
               final ffi = SingBoxFFI.instance;

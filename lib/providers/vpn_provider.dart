@@ -101,6 +101,10 @@ class VPNProvider extends ChangeNotifier {
   DateTime _lastUpdateTime = DateTime.now();
   Timer? _trafficStatsTimer;
 
+  // 会话级累计流量统计（不会因为重连而重置）
+  int _sessionTotalUploadBytes = 0;
+  int _sessionTotalDownloadBytes = 0;
+
   // ============== WebSocket 实时流量（Clash API）==============
   WebSocket? _clashTrafficSocket;
   StreamSubscription? _clashTrafficSub;
@@ -271,19 +275,19 @@ class VPNProvider extends ChangeNotifier {
   String get systemProxyServer => _systemProxyServer;
   bool get isSystemProxySupported => _proxyManager.isSupported;
 
-  // 流量统计 Getters
-  int get uploadBytes => _uploadBytes;
-  int get downloadBytes => _downloadBytes;
+  // 流量统计 Getters - 返回会话级累计流量 + 当前连接流量
+  int get uploadBytes => _sessionTotalUploadBytes + _uploadBytes;
+  int get downloadBytes => _sessionTotalDownloadBytes + _downloadBytes;
   int get uploadSpeed => _uploadSpeed;
   int get downloadSpeed => _downloadSpeed;
   // 平均速度（会话总字节数 / 时长）
   int get averageUploadSpeed => _connectionDuration.inSeconds > 0
-      ? (_uploadBytes / _connectionDuration.inSeconds).round()
+      ? ((uploadBytes) / _connectionDuration.inSeconds).round()
       : 0;
   int get averageDownloadSpeed => _connectionDuration.inSeconds > 0
-      ? (_downloadBytes / _connectionDuration.inSeconds).round()
+      ? ((downloadBytes) / _connectionDuration.inSeconds).round()
       : 0;
-  int get totalBytes => _uploadBytes + _downloadBytes;
+  int get totalBytes => uploadBytes + downloadBytes;
   Duration get connectionDuration => _connectionDuration;
   int get activeConnections => _activeConnections;
   List<Map<String, dynamic>> get connections => _connections;
@@ -345,6 +349,10 @@ class VPNProvider extends ChangeNotifier {
       final savedMode = prefs.getString('proxy_mode') ?? 'rule';
       _proxyMode = ProxyMode.fromString(savedMode);
 
+      // 加载会话级累计流量统计
+      _sessionTotalUploadBytes = prefs.getInt('session_total_upload') ?? 0;
+      _sessionTotalDownloadBytes = prefs.getInt('session_total_download') ?? 0;
+
       // TUN 模式：检查是否是首次启动
       final isFirstLaunch = prefs.getBool('app_initialized') ?? true;
       if (isFirstLaunch) {
@@ -366,7 +374,7 @@ class VPNProvider extends ChangeNotifier {
         _useTun = prefs.getBool('use_tun') ?? false;
         _addLog('已加载 TUN 开关状态 use_tun=${_useTun ? 'on' : 'off'}');
       }
-      _tunStrictRoute = prefs.getBool('tun_strict_route') ?? false;
+      _tunStrictRoute = prefs.getBool('dns_strict_route') ?? false;
       _localPort = prefs.getInt('local_port') ?? _defaultLocalPort;
       // 守护进程模式已移除：强制关闭，避免走 daemon 分支
       _useDaemon = false;
@@ -821,6 +829,7 @@ class VPNProvider extends ChangeNotifier {
         clashApiPort: _clashApiPort,
         clashApiSecret: _clashApiSecret,
         tunMtu: dynamicTunMtu,
+        enableIpv6: _dnsManager.enableIpv6,
       );
       _addLog(
         'CONNECT: ClashAPI enable=${_enableClashApi} port=${_clashApiPort}',
@@ -859,8 +868,8 @@ class VPNProvider extends ChangeNotifier {
           inboundList.insert(0, {
             'tag': 'tun-in',
             'type': 'tun',
-            if (Platform.isWindows) 'interface_name': 'Gsou Tunnel',
-            'inet4_address': '172.19.0.1/30',
+            if (Platform.isWindows) 'interface_name': 'Gsou Adapter Tunnel',
+            'address': ['172.19.0.1/30'],
             'mtu': 4064,
             'auto_route': true,
             'strict_route': _tunStrictRoute,
@@ -1135,6 +1144,7 @@ class VPNProvider extends ChangeNotifier {
         clashApiPort: _clashApiPort,
         clashApiSecret: _clashApiSecret,
         tunMtu: mtu,
+        enableIpv6: _dnsManager.enableIpv6,
       );
       // 仅测试与启动，无需再次端口分配
       if (!await _singBoxService.testConfig(singBoxConfig)) {
@@ -1341,7 +1351,7 @@ class VPNProvider extends ChangeNotifier {
     _tunStrictRoute = enabled;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('tun_strict_route', enabled);
+      await prefs.setBool('dns_strict_route', enabled);
     } catch (_) {}
     _addLog('已设置 strict_route=${enabled} (重新连接后生效)');
     notifyListeners();
@@ -1678,10 +1688,28 @@ class VPNProvider extends ChangeNotifier {
 
   /// 停止流量统计定时器
   void _stopTrafficStatsTimer() {
+    // 在停止前，将当前流量累加到会话总计中
+    _sessionTotalUploadBytes += _uploadBytes;
+    _sessionTotalDownloadBytes += _downloadBytes;
+
+    // 保存会话级流量统计到本地存储
+    _saveSessionTrafficStats();
+
     _trafficStatsTimer?.cancel();
     _trafficStatsTimer = null;
     _connections.clear(); // 清空连接列表
     _closeClashTrafficStream();
+  }
+
+  /// 保存会话级流量统计到本地存储
+  Future<void> _saveSessionTrafficStats() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('session_total_upload', _sessionTotalUploadBytes);
+      await prefs.setInt('session_total_download', _sessionTotalDownloadBytes);
+    } catch (e) {
+      debugPrint('保存会话流量统计失败: $e');
+    }
   }
 
   /// 更新流量统计（优先使用真实数据）
@@ -2025,8 +2053,9 @@ class VPNProvider extends ChangeNotifier {
                   _clashLastDown = down;
                   return;
                 }
-                _uploadBytes = up;
-                _downloadBytes = down;
+                // 防止数据回退：只有当新值大于当前值时才更新
+                if (up > _uploadBytes) _uploadBytes = up;
+                if (down > _downloadBytes) _downloadBytes = down;
               }
               _aggUp += upDeltaBytes;
               _aggDown += downDeltaBytes;
@@ -2330,9 +2359,9 @@ class VPNProvider extends ChangeNotifier {
               _downloadSpeed = ((downInc * 1000) / dt).round();
             }
           }
-          // 更新累计字节（即使在 WS 模式下也用最新聚合结果校正，防止漂移）
-          _uploadBytes = totalUpload;
-          _downloadBytes = totalDownload;
+          // 更新累计字节（防止回退，只在新值更大时更新）
+          if (totalUpload > _uploadBytes) _uploadBytes = totalUpload;
+          if (totalDownload > _downloadBytes) _downloadBytes = totalDownload;
           _lastUploadBytes = totalUpload;
           _lastDownloadBytes = totalDownload;
         }
@@ -2366,8 +2395,9 @@ class VPNProvider extends ChangeNotifier {
     }
   }
 
-  /// 重置流量统计
+  /// 重置当前连接流量统计（保留会话级累计）
   void resetTrafficStats() {
+    // 重置当前连接的统计（不累加到会话总计，因为_stopTrafficStatsTimer已经处理了）
     _uploadBytes = 0;
     _downloadBytes = 0;
     _uploadSpeed = 0;
@@ -2380,6 +2410,35 @@ class VPNProvider extends ChangeNotifier {
     _activeConnections = 0;
     _connections.clear();
     _connectionHistory.clear(); // 清空连接历史记录
+    notifyListeners();
+  }
+
+  /// 完全重置所有流量统计（包括会话级累计）
+  Future<void> resetAllTrafficStats() async {
+    _uploadBytes = 0;
+    _downloadBytes = 0;
+    _uploadSpeed = 0;
+    _downloadSpeed = 0;
+    _lastUploadBytes = 0;
+    _lastDownloadBytes = 0;
+    _sessionTotalUploadBytes = 0;
+    _sessionTotalDownloadBytes = 0;
+    _connectionDuration = Duration.zero;
+    _connectionStartTime = null;
+    _lastUpdateTime = DateTime.now();
+    _activeConnections = 0;
+    _connections.clear();
+    _connectionHistory.clear();
+
+    // 清除持久化存储中的会话级流量统计
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('session_total_upload');
+      await prefs.remove('session_total_download');
+    } catch (e) {
+      debugPrint('清除会话流量统计失败: $e');
+    }
+
     notifyListeners();
   }
 
@@ -2459,6 +2518,7 @@ class VPNProvider extends ChangeNotifier {
         enableClashApi: _enableClashApi,
         clashApiPort: _clashApiPort,
         clashApiSecret: _clashApiSecret,
+        enableIpv6: _dnsManager.enableIpv6,
       );
       _addLog(
         'CONNECT(daemon): ClashAPI enable=${_enableClashApi} port=${_clashApiPort}',
@@ -2543,8 +2603,8 @@ class VPNProvider extends ChangeNotifier {
         inboundList.insert(0, {
           'tag': 'tun-in',
           'type': 'tun',
-          if (Platform.isWindows) 'interface_name': 'Gsou Tunnel',
-          'inet4_address': '172.19.0.1/30',
+          if (Platform.isWindows) 'interface_name': 'Gsou Adapter Tunnel',
+          'address': ['172.19.0.1/30'],
           'mtu': 4064,
           'auto_route': true,
           'strict_route': _tunStrictRoute,
@@ -2580,6 +2640,7 @@ class VPNProvider extends ChangeNotifier {
           tunStrictRoute: _tunStrictRoute,
           preferredTunStack: _singBoxService.preferredTunStack,
           enableClashApi: false,
+          enableIpv6: _dnsManager.enableIpv6,
         );
         ok = await _vpnManager.startVPN(singBoxConfig);
         if (ok) {

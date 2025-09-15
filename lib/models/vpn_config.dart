@@ -81,6 +81,7 @@ class VPNConfig {
     int clashApiPort = 9090,
     String clashApiSecret = '',
     int? tunMtu,
+    bool enableIpv6 = false,
   }) {
     // 使用规则集管理器生成完整配置
     return RulesetManager.generateSingBoxConfig(
@@ -94,6 +95,7 @@ class VPNConfig {
       clashApiPort: clashApiPort,
       clashApiSecret: clashApiSecret,
       tunMtu: tunMtu,
+      enableIpv6: enableIpv6,
     );
   }
 
