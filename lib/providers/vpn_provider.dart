@@ -17,6 +17,7 @@ import '../services/daemon_client.dart';
 import '../services/pac_file_manager.dart';
 import '../services/ping_service.dart';
 import '../services/connection_stats_service.dart';
+import '../services/improved_traffic_stats_service.dart';
 import '../utils/privilege_manager.dart';
 
 /// 速度样本结构（用于速度平滑）
@@ -104,6 +105,10 @@ class VPNProvider extends ChangeNotifier {
   // 会话级累计流量统计（不会因为重连而重置）
   int _sessionTotalUploadBytes = 0;
   int _sessionTotalDownloadBytes = 0;
+
+  // 改进的流量统计服务
+  final ImprovedTrafficStatsService _improvedTrafficService = ImprovedTrafficStatsService();
+  bool _useImprovedTrafficStats = true;
 
   // ============== WebSocket 实时流量（Clash API）==============
   WebSocket? _clashTrafficSocket;
@@ -309,6 +314,9 @@ class VPNProvider extends ChangeNotifier {
   int get activeConnections => _activeConnections;
   List<Map<String, dynamic>> get connections => _connections;
 
+  // 流量统计设置 Getters
+  bool get useImprovedTrafficStats => _useImprovedTrafficStats;
+
   // 延时相关 Getters
   Map<String, int> get configPings => _configPings;
   bool get isPingingAll => _isPingingAll;
@@ -375,6 +383,9 @@ class VPNProvider extends ChangeNotifier {
       // 加载会话级累计流量统计
       _sessionTotalUploadBytes = prefs.getInt('session_total_upload') ?? 0;
       _sessionTotalDownloadBytes = prefs.getInt('session_total_download') ?? 0;
+
+      // 加载流量统计方式设置
+      _useImprovedTrafficStats = prefs.getBool('use_improved_traffic_stats') ?? true;
 
       // TUN 模式：检查是否是首次启动
       final isFirstLaunch = prefs.getBool('app_initialized') ?? true;
@@ -1694,19 +1705,38 @@ class VPNProvider extends ChangeNotifier {
     _stopTrafficStatsTimer(); // 确保只有一个定时器
     resetTrafficStats(); // 重置统计数据
     _connectionStartTime = DateTime.now(); // 记录连接开始时间
-    _updateConnectionsData(force: true); // 获取真实连接数据（首次可更新速度）
-    // 若用户已开启真实网卡统计且尚未确定接口名，尝试探测
-    if (_useInterfaceCounters && _tunInterfaceName == null) {
-      _detectTunInterfaceName();
-    }
-    _trafficStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      // 定时仅调用统一入口，内部根据是否有 WS 决定是否更新速度
-      _updateTrafficStats();
-    });
 
-    // 若启用 Clash API，尝试建立实时流 (WebSocket)
-    if (_enableClashApi) {
-      _openClashTrafficStream();
+    if (_useImprovedTrafficStats) {
+      // 使用改进的流量统计服务
+      _improvedTrafficService.onTrafficUpdate = (data) {
+        _uploadBytes = data.totalUploadBytes;
+        _downloadBytes = data.totalDownloadBytes;
+        _uploadSpeed = data.uploadSpeed;
+        _downloadSpeed = data.downloadSpeed;
+        _scheduleNotify();
+      };
+
+      _improvedTrafficService.start(
+        clashApiPort: _clashApiPort,
+        clashApiSecret: _clashApiSecret,
+        enableClashApi: _enableClashApi,
+      );
+    } else {
+      // 使用原有的流量统计逻辑
+      _updateConnectionsData(force: true); // 获取真实连接数据（首次可更新速度）
+      // 若用户已开启真实网卡统计且尚未确定接口名，尝试探测
+      if (_useInterfaceCounters && _tunInterfaceName == null) {
+        _detectTunInterfaceName();
+      }
+      _trafficStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        // 定时仅调用统一入口，内部根据是否有 WS 决定是否更新速度
+        _updateTrafficStats();
+      });
+
+      // 若启用 Clash API，尝试建立实时流 (WebSocket)
+      if (_enableClashApi) {
+        _openClashTrafficStream();
+      }
     }
   }
 
@@ -1719,10 +1749,18 @@ class VPNProvider extends ChangeNotifier {
     // 保存会话级流量统计到本地存储
     _saveSessionTrafficStats();
 
-    _trafficStatsTimer?.cancel();
-    _trafficStatsTimer = null;
+    if (_useImprovedTrafficStats) {
+      // 停止改进的流量统计服务
+      _improvedTrafficService.stop();
+      _improvedTrafficService.onTrafficUpdate = null;
+    } else {
+      // 停止原有的流量统计逻辑
+      _trafficStatsTimer?.cancel();
+      _trafficStatsTimer = null;
+      _closeClashTrafficStream();
+    }
+
     _connections.clear(); // 清空连接列表
-    _closeClashTrafficStream();
   }
 
   /// 保存会话级流量统计到本地存储
@@ -2419,8 +2457,38 @@ class VPNProvider extends ChangeNotifier {
     }
   }
 
+  /// 设置流量统计方式
+  Future<void> setUseImprovedTrafficStats(bool useImproved) async {
+    if (_useImprovedTrafficStats == useImproved) return;
+
+    final wasConnected = _isConnected;
+
+    // 如果正在连接，先停止统计
+    if (wasConnected) {
+      _stopTrafficStatsTimer();
+    }
+
+    _useImprovedTrafficStats = useImproved;
+
+    // 保存设置
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_improved_traffic_stats', useImproved);
+
+    // 如果之前已连接，重启统计
+    if (wasConnected) {
+      _startTrafficStatsTimer();
+    }
+
+    notifyListeners();
+  }
+
   /// 重置当前连接流量统计（保留会话级累计）
   void resetTrafficStats() {
+    // 重置改进的流量统计服务
+    if (_useImprovedTrafficStats) {
+      _improvedTrafficService.reset();
+    }
+
     // 重置当前连接的统计（不累加到会话总计，因为_stopTrafficStatsTimer已经处理了）
     _uploadBytes = 0;
     _downloadBytes = 0;
