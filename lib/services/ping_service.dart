@@ -4,38 +4,198 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/vpn_config.dart';
 
-/// 延时检测服务 (纯TCP方式)
+/// sing-box Clash API 配置类
+class SingBoxApiConfig {
+  final String host;
+  final int port;
+  final String secret;
+
+  const SingBoxApiConfig({
+    this.host = '127.0.0.1',
+    this.port = 9090,
+    this.secret = '',
+  });
+
+  String get baseUrl => 'http://$host:$port';
+
+  Map<String, String> get headers => {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    if (secret.isNotEmpty) 'Authorization': 'Bearer $secret',
+  };
+}
+
+/// sing-box 延时检测服务
+/// 根据官方文档规范实现 Clash API 延时测试
 class PingService {
-  static const Duration _timeout = Duration(seconds: 3); // 从5秒优化到3秒
+  static const Duration _timeout = Duration(seconds: 3);
 
-  // 用于测试网络延时的目标URL列表 - 选择不同地理位置的服务
-  static const List<String> _testUrls = [
-    'https://www.google.co.uk', // Google UK - 英国
-    'https://www.amazon.com', // Amazon US - 美国
-    'https://www.netflix.com', // Netflix - 全球CDN
-    'https://httpbin.org/delay/1', // HTTP测试服务（带1秒延时）
-    'https://www.reddit.com', // Reddit - 美国社交平台
+  // sing-box Clash API 配置
+  static SingBoxApiConfig _apiConfig = const SingBoxApiConfig();
+
+  // 根据官方文档推荐的测试URL
+  static const String _officialTestUrl = 'https://www.gstatic.com/generate_204';
+  static const List<String> _fallbackTestUrls = [
+    'https://cp.cloudflare.com', // Cloudflare连通性测试
+    'http://detectportal.firefox.com/success.txt', // Firefox连通性测试
+    'http://www.msftconnecttest.com/connecttest.txt', // Microsoft连通性测试
   ];
 
-  // 用于TCP连接测试的服务器列表 - 选择不同地理位置和网络条件的服务
-  static const List<Map<String, dynamic>> _fastTestServers = [
-    {'host': 'www.google.co.uk', 'port': 443}, // Google UK
-    {'host': 'www.amazon.com', 'port': 443}, // Amazon US
-    {'host': 'www.netflix.com', 'port': 443}, // Netflix
-    {'host': 'www.reddit.com', 'port': 443}, // Reddit
-    {'host': 'httpbin.org', 'port': 443}, // HTTP测试服务
-  ];
+  // 延时校准相关
+  static int? _apiOverhead;
+  static bool _calibrationCompleted = false;
 
-  /// 检测单个配置的延时
-  /// 返回延时毫秒数，-1表示超时或失败
-  /// isConnected: 是否处于VPN连接状态
-  /// currentConfig: 当前连接的配置（VPN连接时用于测试该配置的延时）
+  /// 设置 sing-box API 配置
+  static void setApiConfig({String? host, int? port, String? secret}) {
+    _apiConfig = SingBoxApiConfig(
+      host: host ?? '127.0.0.1',
+      port: port ?? 9090,
+      secret: secret ?? '',
+    );
+  }
+
+  /// 检查 sing-box API 是否可用
+  static Future<bool> isApiAvailable() async {
+    try {
+      final client = http.Client();
+
+      try {
+        final apiUrl = '${_apiConfig.baseUrl}/version';
+
+        final response = await client
+            .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+            .timeout(const Duration(seconds: 2));
+
+        return response.statusCode == 200;
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      print('[DEBUG] API健康检查失败: $e');
+      return false;
+    }
+  }
+
+  /// 校准API调用开销
+  ///
+  /// 通过多次测试本地API调用时间来计算平均开销
+  /// 这个开销将用于校正实际的代理延时测试结果
+  static Future<void> calibrateApiOverhead() async {
+    if (_calibrationCompleted) return;
+
+    try {
+      print('[DEBUG] 开始校准API开销...');
+      final samples = <int>[];
+
+      // 进行5次校准测试
+      for (int i = 0; i < 5; i++) {
+        final stopwatch = Stopwatch()..start();
+
+        final client = http.Client();
+        try {
+          // 测试简单的API调用（获取版本信息）
+          final apiUrl = '${_apiConfig.baseUrl}/version';
+          final response = await client
+              .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+              .timeout(const Duration(seconds: 2));
+
+          stopwatch.stop();
+
+          if (response.statusCode == 200) {
+            samples.add(stopwatch.elapsedMilliseconds);
+          }
+        } finally {
+          client.close();
+        }
+
+        // 校准测试间隔
+        if (i < 4) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      }
+
+      if (samples.isNotEmpty) {
+        // 计算平均API开销，去除异常值
+        samples.sort();
+        // 去除最高和最低值，取中间值的平均
+        final middleSamples = samples.length > 2
+            ? samples.sublist(1, samples.length - 1)
+            : samples;
+
+        _apiOverhead =
+            middleSamples.reduce((a, b) => a + b) ~/ middleSamples.length;
+        _calibrationCompleted = true;
+
+        print('[DEBUG] API开销校准完成: ${_apiOverhead}ms (样本: $samples)');
+      } else {
+        print('[DEBUG] API开销校准失败，使用默认值');
+        _apiOverhead = 50; // 使用默认估算值50ms
+        _calibrationCompleted = true;
+      }
+    } catch (e) {
+      print('[DEBUG] API开销校准异常: $e');
+      _apiOverhead = 170; // 使用默认估算值
+      _calibrationCompleted = true;
+    }
+  }
+
+  /// 应用延时校准
+  ///
+  /// 从API测试结果中减去开销，获得更准确的网络延时
+  static int _applyCalibratedDelay(int rawDelay) {
+    if (!_calibrationCompleted || _apiOverhead == null || rawDelay <= 0) {
+      return rawDelay;
+    }
+
+    // 从原始延时中减去API开销，但确保结果不小于10ms
+    final calibratedDelay = rawDelay - _apiOverhead!;
+    return calibratedDelay > 10 ? calibratedDelay : rawDelay ~/ 2;
+  }
+
+  /// 手动设置API开销校准值
+  ///
+  /// 用于手动指定API调用开销，跳过自动校准过程
+  ///
+  /// 参数：overhead API调用开销毫秒数（建议范围：20-100ms）
+  static void setApiOverhead(int overhead) {
+    _apiOverhead = overhead.clamp(10, 200);
+    _calibrationCompleted = true;
+    print('[DEBUG] 手动设置API开销: ${_apiOverhead}ms');
+  }
+
+  /// 重置校准状态
+  ///
+  /// 清除已有的校准数据，下次测试时重新进行校准
+  static void resetCalibration() {
+    _apiOverhead = null;
+    _calibrationCompleted = false;
+    print('[DEBUG] 延时校准已重置');
+  }
+
+  /// 获取当前API开销值
+  static int? get apiOverhead => _apiOverhead;
+
+  /// 检测单个节点配置的网络延时
+  ///
+  /// 根据 sing-box 官方文档实现，支持 VPN 连接和直连两种模式
+  ///
+  /// 参数：
+  /// - config: 要测试的 VPN 配置
+  /// - isConnected: 是否处于 VPN 连接状态
+  /// - currentConfig: 当前连接的配置（VPN连接时使用）
+  ///
+  /// 返回：延时毫秒数，-1 表示连接超时或测试失败
   static Future<int> pingConfig(
     VPNConfig config, {
     bool isConnected = false,
     VPNConfig? currentConfig,
   }) async {
     try {
+      // 确保API开销已校准
+      if (!_calibrationCompleted) {
+        await calibrateApiOverhead();
+      }
+
       final stopwatch = Stopwatch()..start();
 
       // VPN已连接时，所有配置都测试通过VPN到该服务器的延时
@@ -67,89 +227,72 @@ class PingService {
   }
 
   /// 测试VPN连接的真实网络延时
-  /// 同时使用HTTP和TCP测试，取更稳定的结果
+  /// 使用官方推荐的测试URL和方法
   static Future<int> _testVpnLatency() async {
-    final List<int> allResults = [];
+    final List<int> results = [];
 
-    // 1. 并行进行TCP连接测试（更快、更准确）
-    final tcpResults = await Future.wait(
-      _fastTestServers.map((server) async {
-        try {
-          final sw = Stopwatch()..start();
-          final socket = await Socket.connect(
-            server['host'],
-            server['port'],
-            timeout: const Duration(milliseconds: 2000), // 增加到2秒超时
-          );
-          sw.stop();
-          socket.destroy();
-          return sw.elapsedMilliseconds;
-        } catch (_) {
-          return -1;
-        }
-      }),
-    );
+    // 1. 优先使用官方推荐的测试URL
+    final officialResult = await _testHttpLatencyThroughVpn(_officialTestUrl);
+    if (officialResult > 0) {
+      results.add(officialResult);
+    }
 
-    // 2. 并行进行HTTP测试（作为备用）
-    final httpResults = await Future.wait(
-      _testUrls.take(3).map((url) async {
-        // 只测试前3个URL
-        try {
-          final sw = Stopwatch()..start();
-          final client = http.Client();
-          try {
-            final response = await client
-                .head(
-                  Uri.parse(url),
-                  headers: {
-                    'User-Agent': 'SingBox-VPN/1.0',
-                    'Accept': '*/*',
-                    'Connection': 'close',
-                  },
-                )
-                .timeout(const Duration(milliseconds: 2500)); // 2.5秒超时
-
-            sw.stop();
-            if (response.statusCode < 400) {
-              return sw.elapsedMilliseconds;
-            }
-          } finally {
-            client.close();
-          }
-        } catch (_) {
-          // 忽略错误
-        }
-        return -1;
-      }),
-    );
-
-    // 收集所有有效结果，优先使用TCP结果
-    for (final result in tcpResults) {
+    // 2. 使用备用测试URL
+    for (final url in _fallbackTestUrls.take(2)) {
+      final result = await _testHttpLatencyThroughVpn(url);
       if (result > 0) {
-        allResults.add(result);
+        results.add(result);
       }
     }
 
-    // 如果TCP结果不足，补充HTTP结果
-    if (allResults.length < 3) {
-      for (final result in httpResults) {
-        if (result > 0) {
-          allResults.add(result);
-        }
-      }
+    // 3. 如果HTTP测试都失败，尝试TCP连接测试
+    if (results.isEmpty) {
+      final tcpResults = await _testTcpConnections();
+      results.addAll(tcpResults);
     }
 
-    if (allResults.isEmpty) {
+    if (results.isEmpty) {
       return -1;
     }
 
-    // 排序并取前几个结果的平均值，避免异常值影响
-    allResults.sort();
-    final bestResults = allResults.take(3).toList();
-    final avgLatency =
-        bestResults.reduce((a, b) => a + b) ~/ bestResults.length;
+    // 返回最佳结果的平均值
+    results.sort();
+    final bestResults = results.take(3).toList();
+    return bestResults.reduce((a, b) => a + b) ~/ bestResults.length;
+  }
 
-    return avgLatency;
+  /// 测试TCP连接延时
+  static Future<List<int>> _testTcpConnections() async {
+    final results = <int>[];
+
+    // 使用标准的测试服务器
+    final testServers = [
+      {'host': '8.8.8.8', 'port': 53}, // Google DNS
+      {'host': '1.1.1.1', 'port': 53}, // Cloudflare DNS
+      {'host': 'www.google.com', 'port': 443}, // Google HTTPS
+    ];
+
+    for (final server in testServers) {
+      try {
+        final sw = Stopwatch()..start();
+        final socket = await Socket.connect(
+          server['host'] as String,
+          server['port'] as int,
+          timeout: const Duration(milliseconds: 2000),
+        );
+        sw.stop();
+        socket.destroy();
+
+        final latency = sw.elapsedMilliseconds;
+        if (latency > 0 && latency < 5000) {
+          results.add(latency);
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return results;
   }
 
   /// 测试VPN连接的服务器延时
@@ -284,40 +427,30 @@ class PingService {
   }
 
   /// 测试通过VPN隧道到目标服务器的延时
-  /// 使用'proxy'出站标签测试真正的VPN延时
+  /// 使用sing-box Clash API规范进行延时测试
   static Future<int> _testLatencyThroughVpnTunnel(VPNConfig config) async {
     try {
       print('[DEBUG] 开始测试VPN延时: ${config.name}');
 
-      // 方法1: 直接测试'proxy'出站（这是当前活动的代理）
-      final proxyResult = await _testSpecificProxyTag('proxy');
-      if (proxyResult > 0) {
-        print('[DEBUG] ✅ proxy出站测试成功: ${config.name} -> ${proxyResult}ms');
-        return proxyResult;
+      // 方法1: 测试当前激活的代理出站
+      final activeProxyResult = await _testActiveProxy();
+      if (activeProxyResult > 0) {
+        print('[DEBUG] ✅ 活跃代理测试成功: ${config.name} -> ${activeProxyResult}ms');
+        return activeProxyResult;
       }
 
-      // 方法2: 尝试'GLOBAL'出站
-      final globalResult = await _testSpecificProxyTag('GLOBAL');
-      if (globalResult > 0) {
-        print('[DEBUG] ✅ GLOBAL出站测试成功: ${config.name} -> ${globalResult}ms');
-        return globalResult;
+      // 方法2: 根据配置生成可能的出站标签并测试
+      final configBasedResult = await _testConfigBasedProxy(config);
+      if (configBasedResult > 0) {
+        print('[DEBUG] ✅ 配置代理测试成功: ${config.name} -> ${configBasedResult}ms');
+        return configBasedResult;
       }
 
-      print('[DEBUG] Clash API代理出站都失败，使用备用方法');
-
-      // 方法3: 使用系统命令行ping测试通过VPN的延时
-      final cmdResult = await _testUsingSystemCommand();
-      if (cmdResult > 0) {
-        print('[DEBUG] 系统ping成功: ${config.name} -> ${cmdResult}ms');
-        return cmdResult;
-      }
-      print('[DEBUG] 系统ping失败，使用TCP测试');
-
-      // 方法4: TCP连接测试到被墙网站（确保通过VPN）
-      final tcpResult = await _testStandardServersDelay();
-      if (tcpResult > 0) {
-        print('[DEBUG] 被墙网站TCP测试成功: ${config.name} -> ${tcpResult}ms');
-        return tcpResult;
+      // 方法3: 使用备用网络测试方法
+      final fallbackResult = await _testNetworkLatencyThroughVpn();
+      if (fallbackResult > 0) {
+        print('[DEBUG] ✅ 备用网络测试成功: ${config.name} -> ${fallbackResult}ms');
+        return fallbackResult;
       }
 
       print('[DEBUG] 所有测试方法都失败: ${config.name}');
@@ -328,67 +461,95 @@ class PingService {
     }
   }
 
+  /// 测试当前激活的代理延时
+  static Future<int> _testActiveProxy() async {
+    // 常见的活跃代理标签
+    final activeProxyTags = ['proxy', 'GLOBAL', 'auto', 'select'];
+
+    for (final tag in activeProxyTags) {
+      // 使用重试机制测试
+      final result = await _testProxyWithRetry(tag);
+      if (result > 0) return result;
+
+      // 如果重试失败，尝试备用URL
+      final fallbackResult = await _testProxyWithFallbackUrls(tag);
+      if (fallbackResult > 0) return fallbackResult;
+    }
+
+    return -1;
+  }
+
+  /// 根据配置测试对应的代理
+  static Future<int> _testConfigBasedProxy(VPNConfig config) async {
+    final possibleTags = _generatePossibleOutboundTags(config);
+
+    // 测试前6个最可能的标签，使用重试机制
+    for (int i = 0; i < possibleTags.length && i < 6; i++) {
+      final tag = possibleTags[i];
+
+      // 首先尝试普通测试
+      final result = await _testSpecificProxyTag(tag);
+      if (result > 0) return result;
+
+      // 如果失败，尝试重试
+      final retryResult = await _testProxyWithRetry(tag, maxRetries: 1);
+      if (retryResult > 0) return retryResult;
+    }
+
+    return -1;
+  }
+
   /// 测试指定的代理标签延时
+  /// 根据 sing-box Clash API 规范实现
   static Future<int> _testSpecificProxyTag(String proxyTag) async {
     try {
-      print('[DEBUG] 测试特定代理标签: $proxyTag');
+      print('[DEBUG] 测试代理标签: $proxyTag');
 
       final client = http.Client();
 
-      // 尝试多个更快的测试URL
-      final testUrls = [
-        'http://cp.cloudflare.com', // Cloudflare连通性测试 - 最快
-        'https://www.gstatic.com/generate_204', // Google连通性测试
-        'http://detectportal.firefox.com', // Firefox连通性测试
-        'http://www.msftconnecttest.com/connecttest.txt', // Microsoft连通性测试
-      ];
+      try {
+        // 使用官方推荐的测试URL
+        final testUrl = _officialTestUrl;
+        final timeout = 3000; // 3秒超时
 
-      final timeout = 2000; // 减少到2秒，避免过长等待
+        final apiUrl =
+            '${_apiConfig.baseUrl}/proxies/${Uri.encodeComponent(proxyTag)}/delay'
+            '?timeout=$timeout&url=${Uri.encodeComponent(testUrl)}';
 
-      for (final testUrl in testUrls) {
-        try {
-          final url =
-              'http://127.0.0.1:9090/proxies/${Uri.encodeComponent(proxyTag)}/delay?timeout=$timeout&url=${Uri.encodeComponent(testUrl)}';
+        final response = await client
+            .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+            .timeout(const Duration(seconds: 3));
 
-          final response = await client
-              .get(Uri.parse(url), headers: {'Accept': 'application/json'})
-              .timeout(const Duration(seconds: 2)); // 更短超时
+        if (response.statusCode == 200) {
+          try {
+            final data = json.decode(response.body);
 
-          if (response.statusCode == 200) {
-            //HTTP成功状态码是200
-            try {
-              final data = json.decode(response.body);
-
-              if (data['delay'] != null) {
-                int delay;
-                if (data['delay'] is int) {
-                  delay = data['delay'] as int;
-                } else if (data['delay'] is String) {
-                  delay = int.tryParse(data['delay'] as String) ?? -1;
-                } else {
-                  continue; // 尝试下一个URL
-                }
-
-                if (delay > 0 && delay < 5000) {
-                  client.close();
-                  // 减去API调用和测试开销的估计值 (大约80-120ms)
-                  final adjustedDelay = (delay * 0.58).round(); // 减少42%的开销
-                  print(
-                    '[DEBUG] ✅ $proxyTag 延时测试成功 ($testUrl): 原始${delay}ms -> 调整后${adjustedDelay}ms',
-                  );
-                  return adjustedDelay;
-                }
+            if (data['delay'] != null) {
+              final rawDelay = _parseDelayFromResponse(data['delay']);
+              if (rawDelay > 0 && rawDelay < 10000) {
+                // 应用延时校准
+                final calibratedDelay = _applyCalibratedDelay(rawDelay);
+                print(
+                  '[DEBUG] ✅ $proxyTag 延时测试成功: ${calibratedDelay}ms (原始: ${rawDelay}ms)',
+                );
+                return calibratedDelay;
               }
-            } catch (e) {
-              continue; // JSON解析失败，尝试下一个URL
             }
+          } catch (e) {
+            print('[DEBUG] JSON解析失败: $e');
+            return -1;
           }
-        } catch (e) {
-          continue; // 请求失败，尝试下一个URL
+        } else if (response.statusCode == 404) {
+          print('[DEBUG] 代理标签不存在: $proxyTag');
+          return -1;
+        } else {
+          print('[DEBUG] API错误: ${response.statusCode} - ${response.body}');
+          return -1;
         }
+      } finally {
+        client.close();
       }
 
-      client.close();
       return -1;
     } catch (e) {
       print('[DEBUG] 测试$proxyTag异常: $e');
@@ -396,118 +557,151 @@ class PingService {
     }
   }
 
+  /// 解析延时响应数据
+  static int _parseDelayFromResponse(dynamic delayData) {
+    if (delayData is int) {
+      return delayData;
+    } else if (delayData is String) {
+      return int.tryParse(delayData) ?? -1;
+    } else if (delayData is double) {
+      return delayData.round();
+    }
+    return -1;
+  }
+
   /// 调试：列出所有可用的代理出站
   static Future<void> _debugListAllProxies() async {
     try {
       final client = http.Client();
 
-      // 尝试获取所有代理列表
-      final response = await client
-          .get(
-            Uri.parse('http://127.0.0.1:9090/proxies'),
-            headers: {
-              'Accept': 'application/json',
-              'User-Agent': 'SingBox-VPN/1.0',
-            },
-          )
-          .timeout(const Duration(seconds: 2));
+      try {
+        final apiUrl = '${_apiConfig.baseUrl}/proxies';
 
-      if (response.statusCode == 200) {
-        print('[DEBUG] 所有可用代理:');
-        final data = json.decode(response.body);
-        if (data['proxies'] != null) {
-          final proxies = data['proxies'] as Map<String, dynamic>;
-          for (final proxyName in proxies.keys) {
-            print('[DEBUG] - $proxyName');
+        final response = await client
+            .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+            .timeout(const Duration(seconds: 3));
+
+        if (response.statusCode == 200) {
+          print('[DEBUG] 所有可用代理:');
+          final data = json.decode(response.body);
+          if (data['proxies'] != null) {
+            final proxies = data['proxies'] as Map<String, dynamic>;
+            for (final proxyName in proxies.keys) {
+              print('[DEBUG] - $proxyName');
+            }
           }
+        } else {
+          print('[DEBUG] 获取代理列表失败: ${response.statusCode}');
         }
-      } else {
-        print('[DEBUG] 获取代理列表失败: ${response.statusCode}');
+      } finally {
+        client.close();
       }
-
-      client.close();
     } catch (e) {
       print('[DEBUG] 获取代理列表异常: $e');
     }
   }
 
-  /// 通过sing-box控制API测试指定出站的延时
-  /// 既然知道API在9090端口，重点测试这个端口
-  static Future<int> _testThroughSingBoxControlApi(VPNConfig config) async {
+  /// 获取所有可用的代理出站列表
+  static Future<List<String>> getAvailableProxies() async {
     try {
-      print('[DEBUG] 尝试Clash API (端口9090): ${config.name}');
-
       final client = http.Client();
-      final testUrl = 'https://www.gstatic.com/generate_204';
-      final timeout = 3000;
 
       try {
-        // 尝试多种可能的出站标签格式
-        final possibleTags = _generatePossibleOutboundTags(config);
-        print('[DEBUG] 生成的标签数量: ${possibleTags.length}');
+        final apiUrl = '${_apiConfig.baseUrl}/proxies';
 
-        for (int i = 0; i < possibleTags.length && i < 8; i++) {
-          // 尝试前8个最可能的标签
-          final outboundTag = possibleTags[i];
-          print('[DEBUG] 测试标签 [$i]: $outboundTag');
+        final response = await client
+            .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+            .timeout(const Duration(seconds: 3));
 
-          try {
-            final url =
-                'http://127.0.0.1:9090/proxies/${Uri.encodeComponent(outboundTag)}/delay?timeout=$timeout&url=${Uri.encodeComponent(testUrl)}';
-
-            final response = await client
-                .get(Uri.parse(url), headers: {'Accept': 'application/json'})
-                .timeout(const Duration(seconds: 2)); // 减少到2秒超时
-
-            print('[DEBUG] 状态码: ${response.statusCode} 标签: $outboundTag');
-
-            if (response.statusCode == 200) {
-              try {
-                final data = json.decode(response.body);
-                if (data['delay'] != null) {
-                  int delay;
-                  if (data['delay'] is int) {
-                    delay = data['delay'] as int;
-                  } else if (data['delay'] is String) {
-                    delay = int.tryParse(data['delay'] as String) ?? -1;
-                  } else {
-                    print('[DEBUG] 延时数据格式错误: ${data['delay']}');
-                    continue;
-                  }
-
-                  if (delay > 0 && delay < 10000) {
-                    client.close();
-                    print('[DEBUG] ✅ 成功！标签: $outboundTag, 延时: ${delay}ms');
-                    return delay;
-                  }
-                }
-              } catch (e) {
-                print('[DEBUG] JSON解析失败: $e, 内容: ${response.body}');
-                continue;
-              }
-            } else if (response.statusCode == 404) {
-              continue; // 标签不存在，尝试下一个
-            } else {
-              print(
-                '[DEBUG] 错误状态码: ${response.statusCode}, 内容: ${response.body}',
-              );
-              continue;
-            }
-          } catch (e) {
-            print('[DEBUG] 请求异常 $outboundTag: $e');
-            continue;
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['proxies'] != null) {
+            final proxies = data['proxies'] as Map<String, dynamic>;
+            return proxies.keys.toList();
           }
         }
       } finally {
         client.close();
       }
-
-      print('[DEBUG] ❌ 所有标签都失败');
-      return -1;
     } catch (e) {
-      print('[DEBUG] Clash API整体异常: $e');
-      return -1;
+      print('[DEBUG] 获取代理列表异常: $e');
     }
+    return [];
+  }
+
+  /// 使用重试机制测试代理延时
+  static Future<int> _testProxyWithRetry(
+    String proxyTag, {
+    int maxRetries = 2,
+  }) async {
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        // 等待重试间隔
+        await Future.delayed(Duration(milliseconds: 500 * attempt));
+        print('[DEBUG] 重试测试代理: $proxyTag (第${attempt + 1}次)');
+      }
+
+      final result = await _testSpecificProxyTag(proxyTag);
+      if (result > 0) return result;
+    }
+
+    return -1;
+  }
+
+  /// 使用备用URL测试代理延时
+  static Future<int> _testProxyWithFallbackUrls(String proxyTag) async {
+    // 首先尝试官方推荐URL
+    int result = await _testSpecificProxyTag(proxyTag);
+    if (result > 0) return result;
+
+    // 如果失败，尝试备用URL
+    for (final testUrl in _fallbackTestUrls) {
+      result = await _testSpecificProxyTagWithUrl(proxyTag, testUrl);
+      if (result > 0) {
+        print('[DEBUG] 使用备用URL成功: $testUrl');
+        return result;
+      }
+    }
+
+    return -1;
+  }
+
+  /// 使用指定URL测试代理延时
+  static Future<int> _testSpecificProxyTagWithUrl(
+    String proxyTag,
+    String testUrl,
+  ) async {
+    try {
+      final client = http.Client();
+
+      try {
+        final timeout = 3000;
+        final apiUrl =
+            '${_apiConfig.baseUrl}/proxies/${Uri.encodeComponent(proxyTag)}/delay'
+            '?timeout=$timeout&url=${Uri.encodeComponent(testUrl)}';
+
+        final response = await client
+            .get(Uri.parse(apiUrl), headers: _apiConfig.headers)
+            .timeout(const Duration(seconds: 3));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['delay'] != null) {
+            final rawDelay = _parseDelayFromResponse(data['delay']);
+            if (rawDelay > 0 && rawDelay < 10000) {
+              // 应用延时校准
+              return _applyCalibratedDelay(rawDelay);
+            }
+          }
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      // 静默处理异常，由调用方处理重试逻辑
+    }
+
+    return -1;
   }
 
   /// 生成多种可能的出站标签格式
@@ -671,7 +865,9 @@ class PingService {
     return -1;
   }
 
-  /// 批量检测配置延时
+  /// 批量检测多个节点配置的延时
+  ///
+  /// 返回配置ID到延时毫秒数的映射表
   static Future<Map<String, int>> pingConfigs(
     List<VPNConfig> configs, {
     bool isConnected = false,
@@ -687,11 +883,17 @@ class PingService {
     return results;
   }
 
-  /// 自适应并发的批量检测，提供进度与逐项回调
-  /// onEach: 单个节点完成时回调
-  /// onProgress: (done, total) 进度回调
-  /// isConnected: 是否处于VPN连接状态
-  /// currentConfig: 当前连接的配置
+  /// 自适应并发批量延时检测，支持进度回调
+  ///
+  /// 根据节点数量自动调整并发数，优化性能表现
+  ///
+  /// 参数：
+  /// - configs: 要测试的 VPN 配置列表
+  /// - onEach: 单个节点完成时的回调函数 (config, 延时ms)
+  /// - onProgress: 整体进度回调函数 (已完成数, 总数)
+  /// - concurrency: 自定义并发数（可选）
+  /// - isConnected: 是否处于VPN连接状态
+  /// - currentConfig: 当前连接的配置
   static Future<void> pingConfigsWithProgress(
     List<VPNConfig> configs, {
     void Function(VPNConfig config, int ping)? onEach,
@@ -748,34 +950,34 @@ class PingService {
     await completer.future;
   }
 
-  /// 测试 Shadowsocks 延时 (纯TCP)
+  /// 测试 Shadowsocks 协议节点延时（纯TCP连接测试）
   static Future<int> _testShadowsocks(
     VPNConfig config,
     Stopwatch stopwatch,
   ) async {
-    // 优先尝试配置端口 TCP 握手
+    // 优先尝试配置指定端口的 TCP 握手
     final direct = await _tryDirectTcp(config.server, config.port);
     if (direct >= 0) return direct;
 
-    // TCP失败时尝试常见端口
+    // 配置端口连接失败时，尝试常见代理端口
     return await _tryCommonTcpPorts(config.server);
   }
 
-  /// 测试 VMess/VLess 延时 (纯TCP)
+  /// 测试 VMess/VLess 协议节点延时（纯TCP连接测试）
   static Future<int> _testVmess(VPNConfig config, Stopwatch stopwatch) async {
     final direct = await _tryDirectTcp(config.server, config.port);
     if (direct >= 0) return direct;
     return await _tryCommonTcpPorts(config.server);
   }
 
-  /// 测试 Trojan 延时 (纯TCP)
+  /// 测试 Trojan 协议节点延时（纯TCP连接测试）
   static Future<int> _testTrojan(VPNConfig config, Stopwatch stopwatch) async {
     final direct = await _tryDirectTcp(config.server, config.port);
     if (direct >= 0) return direct;
     return await _tryCommonTcpPorts(config.server);
   }
 
-  /// 测试 Hysteria2 延时 (纯TCP)
+  /// 测试 Hysteria2 协议节点延时（纯TCP连接测试）
   static Future<int> _testHysteria2(
     VPNConfig config,
     Stopwatch stopwatch,
@@ -785,14 +987,14 @@ class PingService {
     return await _tryCommonTcpPorts(config.server);
   }
 
-  /// 测试 TUIC 延时 (纯TCP)
+  /// 测试 TUIC 协议节点延时（纯TCP连接测试）
   static Future<int> _testTuic(VPNConfig config, Stopwatch stopwatch) async {
     final direct = await _tryDirectTcp(config.server, config.port);
     if (direct >= 0) return direct;
     return await _tryCommonTcpPorts(config.server);
   }
 
-  /// 通用测试方法 (纯TCP)
+  /// 通用协议节点延时测试（纯TCP连接测试）
   static Future<int> _testGeneric(VPNConfig config, Stopwatch stopwatch) async {
     final direct = await _tryDirectTcp(config.server, config.port);
     if (direct >= 0) return direct;
@@ -863,12 +1065,13 @@ class PingService {
 
   // （已移除未使用的 _testTcpConnection/_testHttpThroughProxy 以减轻分析告警）
 
-  /// 格式化延时显示
+  /// 格式化延时数值为用户友好的显示文本
+  ///
+  /// 参数：ping 延时毫秒数，-1表示超时
+  /// 返回：格式化的延时字符串
   static String formatPing(int ping) {
     if (ping < 0) {
       return '超时';
-    } else if (ping < 100) {
-      return '${ping}ms';
     } else if (ping < 1000) {
       return '${ping}ms';
     } else {
@@ -876,7 +1079,10 @@ class PingService {
     }
   }
 
-  /// 获取延时等级颜色
+  /// 根据延时数值获取网络质量等级
+  ///
+  /// 参数：ping 延时毫秒数
+  /// 返回：对应的网络质量等级枚举
   static PingLevel getPingLevel(int ping) {
     if (ping < 0) return PingLevel.timeout;
     if (ping < 100) return PingLevel.excellent;
@@ -885,7 +1091,10 @@ class PingService {
     return PingLevel.poor;
   }
 
-  /// 获取延时描述
+  /// 获取延时等级的中文描述
+  ///
+  /// 参数：ping 延时毫秒数
+  /// 返回：网络质量的中文描述文本
   static String getPingDescription(int ping) {
     final level = getPingLevel(ping);
     switch (level) {
@@ -903,11 +1112,22 @@ class PingService {
   }
 }
 
-/// 延时等级枚举
+/// 网络延时质量等级枚举
+///
+/// 根据延时范围划分网络连接质量等级
 enum PingLevel {
-  timeout, // 超时
-  excellent, // 优秀 < 100ms
-  good, // 良好 100-200ms
-  fair, // 一般 200-500ms
-  poor, // 较差 > 500ms
+  /// 连接超时或测试失败
+  timeout,
+
+  /// 优秀网络质量（< 100ms）
+  excellent,
+
+  /// 良好网络质量（100-200ms）
+  good,
+
+  /// 一般网络质量（200-500ms）
+  fair,
+
+  /// 较差网络质量（> 500ms）
+  poor,
 }
