@@ -2,17 +2,30 @@
 
 import '../models/proxy_mode.dart';
 import 'dns_manager.dart';
+import 'custom_rules_service.dart';
 
 /// 规则与配置组装（兼容 sing-box v1.8.0 及以上）
 class RulesetManager {
   /// 路由规则（规则模式）
   static List<Map<String, dynamic>> getRuleModeRoutes() {
-    return [
+    final rules = <Map<String, dynamic>>[
       // 系统 DNS 给内网 DNS 处理，避免被导入代理
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
       // 私有网段直连
       {"ip_is_private": true, "outbound": "direct"},
+    ];
+
+    // 插入自定义规则（优先级高于默认地理规则）
+    try {
+      final customRules = CustomRulesService.instance.generateSingBoxRules();
+      rules.addAll(customRules);
+    } catch (e) {
+      print('[ERROR] 加载自定义规则失败: $e');
+    }
+
+    // 添加默认地理规则
+    rules.addAll([
       // 中国域名直连
       {"rule_set": ["geosite-cn"], "outbound": "direct"},
       // 中国IP直连
@@ -20,19 +33,55 @@ class RulesetManager {
       // 广告拦截
       {"rule_set": ["geosite-ads"], "outbound": "block"},
       // 其余流量走 route.final（见 getRouteConfig）
-    ];
+    ]);
+
+    return rules;
   }
 
   /// 路由规则（全局模式）
   static List<Map<String, dynamic>> getGlobalModeRoutes() {
-    return [
+    final rules = <Map<String, dynamic>>[
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
       {"ip_is_private": true, "outbound": "direct"},
-      // 广告拦截（即使全局模式也保留广告拦截）
-      {"rule_set": ["geosite-ads"], "outbound": "block"},
-      // 其余流量走 route.final
     ];
+
+    // 插入自定义规则（全局模式下也应用自定义规则）
+    try {
+      final customRules = CustomRulesService.instance.generateSingBoxRules();
+      rules.addAll(customRules);
+    } catch (e) {
+      print('[ERROR] 加载自定义规则失败: $e');
+    }
+
+    // 添加广告拦截（即使全局模式也保留广告拦截）
+    rules.add({"rule_set": ["geosite-ads"], "outbound": "block"});
+
+    // 其余流量走 route.final
+    return rules;
+  }
+
+  /// 路由规则（自定义规则模式）
+  static List<Map<String, dynamic>> getCustomModeRoutes() {
+    final rules = <Map<String, dynamic>>[
+      // 系统 DNS 给内网 DNS 处理，避免被导入代理
+      {"network": "udp", "port": 53, "outbound": "dns-out"},
+      {"network": "tcp", "port": 53, "outbound": "dns-out"},
+      // 私有网段直连
+      {"ip_is_private": true, "outbound": "direct"},
+    ];
+
+    // 仅插入自定义规则（不包含默认地理规则）
+    try {
+      final customRules = CustomRulesService.instance.generateSingBoxRules();
+      rules.addAll(customRules);
+      print('[DEBUG] 自定义规则模式：加载了 ${customRules.length} 条自定义规则');
+    } catch (e) {
+      print('[ERROR] 自定义规则模式加载规则失败: $e');
+    }
+
+    // 其余流量走 route.final（在自定义模式下通常是proxy）
+    return rules;
   }
 
   /// 根据模式生成 route 配置
@@ -40,43 +89,84 @@ class RulesetManager {
     final base = {
       "auto_detect_interface": true,
       "final": "proxy",
-      "rule_set": [
-        {
-          "tag": "geosite-cn",
-          "type": "local",
-          "format": "binary",
-          "path": _getRulesetPath("geosite-cn.srs"),
-        },
-        {
-          "tag": "geoip-cn",
-          "type": "local",
-          "format": "binary",
-          "path": _getRulesetPath("geoip-cn.srs"),
-        },
-        {
-          "tag": "geosite-ads",
-          "type": "local",
-          "format": "binary",
-          "path": _getRulesetPath("geosite-ads.srs"),
-        },
-        {
-          "tag": "geosite-geolocation-!cn",
-          "type": "local",
-          "format": "binary",
-          "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
-        },
-      ],
     };
+
     switch (mode) {
       case ProxyMode.rule:
         return {
           ...base,
+          "rule_set": [
+            {
+              "tag": "geosite-cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-cn.srs"),
+            },
+            {
+              "tag": "geoip-cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geoip-cn.srs"),
+            },
+            {
+              "tag": "geosite-ads",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-ads.srs"),
+            },
+            {
+              "tag": "geosite-geolocation-!cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
+            },
+          ],
           "rules": getRuleModeRoutes(),
         };
       case ProxyMode.global:
         return {
           ...base,
+          "rule_set": [
+            {
+              "tag": "geosite-cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-cn.srs"),
+            },
+            {
+              "tag": "geoip-cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geoip-cn.srs"),
+            },
+            {
+              "tag": "geosite-ads",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-ads.srs"),
+            },
+            {
+              "tag": "geosite-geolocation-!cn",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
+            },
+          ],
           "rules": getGlobalModeRoutes(),
+        };
+      case ProxyMode.custom:
+        return {
+          ...base,
+          "rule_set": [
+            // 仅加载广告拦截规则集（如果需要的话）
+            {
+              "tag": "geosite-ads",
+              "type": "local",
+              "format": "binary",
+              "path": _getRulesetPath("geosite-ads.srs"),
+            },
+          ],
+          "rules": getCustomModeRoutes(),
         };
     }
   }
@@ -140,7 +230,7 @@ class RulesetManager {
   }
 
   /// 生成完整 sing-box 配置
-  static Map<String, dynamic> generateSingBoxConfig({
+  static Future<Map<String, dynamic>> generateSingBoxConfig({
     required Map<String, dynamic> proxyConfig,
     required ProxyMode mode,
     int? localPort,
@@ -152,7 +242,13 @@ class RulesetManager {
     String clashApiSecret = '',
     int? tunMtu,
     bool enableIpv6 = false,
-  }) {
+  }) async {
+    // 初始化自定义规则服务
+    try {
+      await CustomRulesService.instance.initialize();
+    } catch (e) {
+      print('[ERROR] 自定义规则服务初始化失败: $e');
+    }
     final inbounds = <Map<String, dynamic>>[];
 
     if (useTun) {

@@ -71,7 +71,7 @@ class VPNConfig {
   }
 
   /// 生成 sing-box 配置
-  Map<String, dynamic> toSingBoxConfig({
+  Future<Map<String, dynamic>> toSingBoxConfig({
     ProxyMode mode = ProxyMode.rule,
     int? localPort,
     bool useTun = false,
@@ -82,9 +82,9 @@ class VPNConfig {
     String clashApiSecret = '',
     int? tunMtu,
     bool enableIpv6 = false,
-  }) {
+  }) async {
     // 使用规则集管理器生成完整配置
-    return RulesetManager.generateSingBoxConfig(
+    return await RulesetManager.generateSingBoxConfig(
       proxyConfig: _generateOutbound(),
       mode: mode,
       localPort: localPort,

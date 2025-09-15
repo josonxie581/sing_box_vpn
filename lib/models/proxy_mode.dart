@@ -1,7 +1,8 @@
 /// 代理模式枚举
 enum ProxyMode {
   rule('rule', '规则', '按设定的规则跑流量'),
-  global('global', '全局', '所有的流量跑代理');
+  global('global', '全局', '所有的流量跑代理'),
+  custom('custom', '自定义规则', '仅使用自定义规则进行分流');
 
   const ProxyMode(this.value, this.name, this.description);
 

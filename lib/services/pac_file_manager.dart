@@ -128,7 +128,7 @@ class PacFileManager {
     if (externalContent != null) {
       // 不再每次请求都打印，避免高频 I/O；保留首次构建时输出即可
       print(
-        'PAC: 使用外部文件 -> ${mode == ProxyMode.rule ? _rulePacFile : _globalPacFile}',
+        'PAC: 使用外部文件 -> ${(mode == ProxyMode.rule || mode == ProxyMode.custom) ? _rulePacFile : _globalPacFile}',
       );
       return externalContent;
     }
@@ -141,13 +141,16 @@ class PacFileManager {
         return _generateRuleModePac(proxyPort);
       case ProxyMode.global:
         return _generateGlobalModePac(proxyPort);
+      case ProxyMode.custom:
+        // 自定义规则模式使用与规则模式相同的PAC逻辑
+        return _generateRuleModePac(proxyPort);
     }
   }
 
   /// 从外部文件加载 PAC 内容
   String? _loadExternalPacFile(int proxyPort, ProxyMode mode) {
     try {
-      final pacFile = mode == ProxyMode.rule ? _rulePacFile : _globalPacFile;
+      final pacFile = (mode == ProxyMode.rule || mode == ProxyMode.custom) ? _rulePacFile : _globalPacFile;
       final file = File(pacFile);
 
       if (!file.existsSync()) {

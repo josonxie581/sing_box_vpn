@@ -843,7 +843,7 @@ class VPNProvider extends ChangeNotifier {
 
       // 生成配置（使用当前代理模式，初始 MTU 可高, 后续根据探测回退）
       int? dynamicTunMtu; // 运行期可能调整的 MTU
-      final singBoxConfig = config.toSingBoxConfig(
+      final singBoxConfig = await config.toSingBoxConfig(
         mode: _proxyMode,
         localPort: _localPort,
         useTun: _useTun,
@@ -1158,7 +1158,7 @@ class VPNProvider extends ChangeNotifier {
   Future<bool> _reconnectWithTunMtu(VPNConfig cfg, {required int mtu}) async {
     try {
       if (!_useTun) return false;
-      final singBoxConfig = cfg.toSingBoxConfig(
+      final singBoxConfig = await cfg.toSingBoxConfig(
         mode: _proxyMode,
         localPort: _localPort,
         useTun: true,
@@ -2533,7 +2533,7 @@ class VPNProvider extends ChangeNotifier {
     try {
       _addLog('CONNECT(daemon): 准备生成 sing-box 配置 useTun=$_useTun');
       // 保持用户选择的 TUN 状态（不再强制开启）
-      var singBoxConfig = config.toSingBoxConfig(
+      var singBoxConfig = await config.toSingBoxConfig(
         mode: _proxyMode,
         localPort: _localPort,
         useTun: _useTun,
@@ -2657,7 +2657,7 @@ class VPNProvider extends ChangeNotifier {
       if (!ok && _enableClashApi) {
         _addLog('CONNECT(daemon): 启动失败，尝试关闭 Clash API 回退重试');
         // 构建去掉 clash_api 的配置再试一遍
-        singBoxConfig = config.toSingBoxConfig(
+        singBoxConfig = await config.toSingBoxConfig(
           mode: _proxyMode,
           localPort: _localPort,
           useTun: _useTun,

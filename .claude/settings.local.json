@@ -9,7 +9,8 @@
       "Bash(find:*)",
       "Bash(dir:*)",
       "Bash(powershell:*)",
-      "WebFetch(domain:sing-box.sagernet.org)"
+      "WebFetch(domain:sing-box.sagernet.org)",
+      "Bash(flutter build:*)"
     ],
     "deny": [],
     "ask": []

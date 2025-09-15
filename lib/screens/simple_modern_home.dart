@@ -275,7 +275,7 @@ class SimpleModernHome extends StatelessWidget {
                         ),
                         const SizedBox(height: 18),
 
-                        // 规则和全局按钮
+                        // 代理模式按钮（三个卡片）
                         Row(
                           children: [
                             Expanded(
@@ -283,12 +283,12 @@ class SimpleModernHome extends StatelessWidget {
                                 onTap: () =>
                                     provider.setProxyMode(ProxyMode.rule),
                                 child: _buildModeButton(
-                                  '智能分流',
+                                  '智能',
                                   provider.proxyMode == ProxyMode.rule,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: GestureDetector(
                                 onTap: () =>
@@ -296,6 +296,17 @@ class SimpleModernHome extends StatelessWidget {
                                 child: _buildModeButton(
                                   '全局',
                                   provider.proxyMode == ProxyMode.global,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () =>
+                                    provider.setProxyMode(ProxyMode.custom),
+                                child: _buildModeButton(
+                                  '自定义',
+                                  provider.proxyMode == ProxyMode.custom,
                                 ),
                               ),
                             ),
@@ -597,7 +608,7 @@ class SimpleModernHome extends StatelessWidget {
   // 构建模式按钮
   Widget _buildModeButton(String title, bool isSelected) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
         color: isSelected
             ? const Color.fromARGB(255, 75, 140, 57).withAlpha(30)
@@ -613,7 +624,7 @@ class SimpleModernHome extends StatelessWidget {
         child: Text(
           title,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: FontWeight.w600,
             color: isSelected ? AppTheme.primaryNeon : AppTheme.textPrimary,
           ),
