@@ -6,7 +6,9 @@
       "WebSearch",
       "Read(//d/TEMP/VPN/karing/**)",
       "Bash(flutter run:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(dir:*)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

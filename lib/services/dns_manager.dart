@@ -13,7 +13,7 @@ class DnsManager {
   bool _tunHijackDns = true; // 是否在 TUN 下劫持本地系统 DNS 请求
   bool _resolveInboundDomains = false; // 是否反向解析入站连接的远程地址（reverse_mapping）
   String _testDomain = 'gstatic.com'; // 用于测试连通性的默认测试域名
-  String _ttl = '12 h'; // 缓存 TTL 字符串表达
+  String _ttl = '1 h'; // 缓存 TTL 字符串表达
   bool _enableDnsRouting = false; // 是否启用基于 DNS 的路由细分
   bool _enableEcs = true; // 是否启用 EDNS Client Subnet（当前未显式使用，可预留）
   String _proxyResolver = 'FakeIP'; // 代理侧解析策略 (FakeIP / Remote 等)
@@ -65,7 +65,8 @@ class DnsManager {
   String get proxyResolver => _proxyResolver;
   bool get strictRoute => _strictRoute;
   List<DnsServer> get dnsServers => List.unmodifiable(_dnsServers);
-  List<StaticIpMapping> get staticIpMappings => List.unmodifiable(_staticIpMappings);
+  List<StaticIpMapping> get staticIpMappings =>
+      List.unmodifiable(_staticIpMappings);
 
   // Setters（修改后立即持久化）
   set tunHijackDns(bool value) {
@@ -176,7 +177,9 @@ class DnsManager {
   Future<void> _saveDnsServers() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final serverJson = _dnsServers.map((server) => server.toJsonString()).toList();
+      final serverJson = _dnsServers
+          .map((server) => server.toJsonString())
+          .toList();
       await prefs.setStringList('dns_servers', serverJson);
     } catch (e) {
       print('DNS 服务器配置保存失败: $e');
@@ -234,23 +237,103 @@ class DnsManager {
       }
     }
 
-    // v1.8.0 兼容：移除基于 rule_set 的 DNS 路由，避免缺少本地规则集导致启动失败
+    // v1.8.0 兼容：添加基于 rule_set 的 DNS 路由，实现中国域名使用本地DNS
+    if (preferRuleRouting && enableRoutingNow) {
+      // 找到一个国内DNS服务器（detour=direct的服务器）
+      String? directDNSTag;
+      for (final s in servers) {
+        final detour = (s['detour'] as String?) ?? '';
+        final tag = (s['tag'] as String?) ?? '';
+        if (detour == 'direct' && tag.isNotEmpty && tag != 'block' && tag != 'local') {
+          directDNSTag = tag;
+          break;
+        }
+      }
+
+      // 中国域名使用国内DNS服务器
+      if (directDNSTag != null) {
+        rules.add({
+          'rule_set': ['geosite-cn'],
+          'server': directDNSTag,
+        });
+      }
+
+      // 广告域名拦截
+      rules.add({
+        'rule_set': ['geosite-ads'],
+        'server': 'block',
+      });
+
+      // 境外域名使用代理DNS - 这是正确的做法
+      if (proxyDNSTag != null) {
+        rules.add({
+          'rule_set': ['geosite-geolocation-!cn'],
+          'server': proxyDNSTag,
+        });
+      } else {
+        // 如果没有启用的代理DNS，查找已禁用的代理DNS作为备选
+        String? fallbackProxyDNS;
+        for (final server in _dnsServers) {
+          if (server.detour == 'proxy' && !server.enabled) {
+            fallbackProxyDNS = server.name.toLowerCase();
+            // 临时添加这个备选服务器到servers列表
+            servers.add({
+              'tag': fallbackProxyDNS,
+              'address': _buildServerAddress(server),
+              'detour': server.detour,
+            });
+            break;
+          }
+        }
+
+        if (fallbackProxyDNS != null) {
+          rules.add({
+            'rule_set': ['geosite-geolocation-!cn'],
+            'server': fallbackProxyDNS,
+          });
+        }
+        // 如果连备选都没有，就让境外域名走默认服务器
+      }
+    }
 
     // 默认服务器选择逻辑
-    // TUN 模式优先使用代理侧 DNS 以避免 DNS 污染；非 TUN 模式优先选择直连（detour=direct）
+    // 在开启DNS分流时，优先使用国内DNS作为默认，这样可以确保中国域名解析正常
+    // 在未开启DNS分流时，TUN模式优先使用代理侧DNS以避免DNS污染
     String defaultServerTag = 'local';
 
     if (useTun) {
-      if (proxyDNSTag != null) {
-        defaultServerTag = proxyDNSTag;
-      } else {
-        // 若无代理 DNS，尝试选择任一非本地非 block 且非 direct 的服务器
+      if (enableRoutingNow) {
+        // 开启DNS分流时，优先使用国内DNS作为默认
+        String? directDNSTag;
         for (final s in servers) {
-          final tag = (s['tag'] as String?) ?? '';
           final detour = (s['detour'] as String?) ?? '';
-          if (tag.isNotEmpty && tag != 'block' && tag != 'local' && detour != 'direct') {
-            defaultServerTag = tag;
+          final tag = (s['tag'] as String?) ?? '';
+          if (detour == 'direct' && tag.isNotEmpty && tag != 'block' && tag != 'local') {
+            directDNSTag = tag;
             break;
+          }
+        }
+        if (directDNSTag != null) {
+          defaultServerTag = directDNSTag;
+        } else if (proxyDNSTag != null) {
+          defaultServerTag = proxyDNSTag;
+        }
+      } else {
+        // 未开启DNS分流时，使用代理DNS避免污染
+        if (proxyDNSTag != null) {
+          defaultServerTag = proxyDNSTag;
+        } else {
+          // 若无代理 DNS，尝试选择任一非本地非 block 且非 direct 的服务器
+          for (final s in servers) {
+            final tag = (s['tag'] as String?) ?? '';
+            final detour = (s['detour'] as String?) ?? '';
+            if (tag.isNotEmpty &&
+                tag != 'block' &&
+                tag != 'local' &&
+                detour != 'direct') {
+              defaultServerTag = tag;
+              break;
+            }
           }
         }
       }
@@ -310,6 +393,8 @@ class DnsManager {
       'disable_cache': false,
       'disable_expire': false,
       'reverse_mapping': _resolveInboundDomains,
+      // 添加超时配置，防止DNS查询卡死
+      'client_subnet': '0.0.0.0/0',
     };
 
     // DNS严格路由配置：启用后确保DNS查询严格按照路由规则进行
@@ -414,7 +499,9 @@ class DnsManager {
   Future<void> _saveStaticIpMappings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final mappingsJson = _staticIpMappings.map((mapping) => mapping.toJsonString()).toList();
+      final mappingsJson = _staticIpMappings
+          .map((mapping) => mapping.toJsonString())
+          .toList();
       await prefs.setStringList('static_ip_mappings', mappingsJson);
     } catch (e) {
       print('静态IP映射配置保存失败: $e');
@@ -559,7 +646,7 @@ class DnsServer {
   static DnsServer? fromJsonString(String jsonString) {
     try {
       final json = Map<String, dynamic>.from(
-        const JsonDecoder().convert(jsonString)
+        const JsonDecoder().convert(jsonString),
       );
       return DnsServer.fromJson(json);
     } catch (e) {
@@ -624,7 +711,7 @@ class StaticIpMapping {
   static StaticIpMapping? fromJsonString(String jsonString) {
     try {
       final json = Map<String, dynamic>.from(
-        const JsonDecoder().convert(jsonString)
+        const JsonDecoder().convert(jsonString),
       );
       return StaticIpMapping.fromJson(json);
     } catch (e) {
@@ -667,4 +754,3 @@ class DnsTestResult {
     }
   }
 }
-

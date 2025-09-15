@@ -13,6 +13,12 @@ class RulesetManager {
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
       // 私有网段直连
       {"ip_is_private": true, "outbound": "direct"},
+      // 中国域名直连
+      {"rule_set": ["geosite-cn"], "outbound": "direct"},
+      // 中国IP直连
+      {"rule_set": ["geoip-cn"], "outbound": "direct"},
+      // 广告拦截
+      {"rule_set": ["geosite-ads"], "outbound": "block"},
       // 其余流量走 route.final（见 getRouteConfig）
     ];
   }
@@ -23,6 +29,8 @@ class RulesetManager {
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
       {"ip_is_private": true, "outbound": "direct"},
+      // 广告拦截（即使全局模式也保留广告拦截）
+      {"rule_set": ["geosite-ads"], "outbound": "block"},
       // 其余流量走 route.final
     ];
   }
@@ -32,6 +40,32 @@ class RulesetManager {
     final base = {
       "auto_detect_interface": true,
       "final": "proxy",
+      "rule_set": [
+        {
+          "tag": "geosite-cn",
+          "type": "local",
+          "format": "binary",
+          "path": _getRulesetPath("geosite-cn.srs"),
+        },
+        {
+          "tag": "geoip-cn",
+          "type": "local",
+          "format": "binary",
+          "path": _getRulesetPath("geoip-cn.srs"),
+        },
+        {
+          "tag": "geosite-ads",
+          "type": "local",
+          "format": "binary",
+          "path": _getRulesetPath("geosite-ads.srs"),
+        },
+        {
+          "tag": "geosite-geolocation-!cn",
+          "type": "local",
+          "format": "binary",
+          "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
+        },
+      ],
     };
     switch (mode) {
       case ProxyMode.rule:
@@ -44,6 +78,40 @@ class RulesetManager {
           ...base,
           "rules": getGlobalModeRoutes(),
         };
+    }
+  }
+
+  /// 获取规则集文件路径
+  static String _getRulesetPath(String filename) {
+    if (Platform.isWindows) {
+      // Windows平台使用应用程序目录下的assets路径
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      String rulesetPath;
+
+      if (filename.startsWith("geoip")) {
+        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
+      } else {
+        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
+      }
+
+      // 如果生产环境路径不存在，尝试开发环境路径
+      if (!File(rulesetPath).existsSync()) {
+        final devPath = Directory.current.path;
+        if (filename.startsWith("geoip")) {
+          rulesetPath = "$devPath\\assets\\rulesets\\geo\\geoip\\$filename";
+        } else {
+          rulesetPath = "$devPath\\assets\\rulesets\\geo\\geosite\\$filename";
+        }
+      }
+
+      return rulesetPath;
+    } else {
+      // 其他平台的路径处理
+      if (filename.startsWith("geoip")) {
+        return "assets/rulesets/geo/geoip/$filename";
+      } else {
+        return "assets/rulesets/geo/geosite/$filename";
+      }
     }
   }
 
