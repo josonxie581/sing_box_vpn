@@ -309,16 +309,16 @@ class SimpleModernHome extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 10),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () =>
-                                    provider.setProxyMode(ProxyMode.custom),
-                                child: _buildModeButton(
-                                  '自定义',
-                                  provider.proxyMode == ProxyMode.custom,
-                                ),
-                              ),
-                            ),
+                            // Expanded(
+                            //   child: GestureDetector(
+                            //     onTap: () =>
+                            //         provider.setProxyMode(ProxyMode.custom),
+                            //     child: _buildModeButton(
+                            //       '自定义',
+                            //       provider.proxyMode == ProxyMode.custom,
+                            //     ),
+                            //   ),
+                            // ),
                           ],
                         ),
                         const SizedBox(height: 18),
