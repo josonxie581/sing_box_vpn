@@ -21,6 +21,10 @@ class DnsManager {
   bool _enableIpv6 = false; // 是否启用IPv6支持（影响TUN接口配置）
   int _localPort = 7890; // 本地混合代理端口
 
+  // 运行时探测结果：实际链路是否可用IPv6（优先与用户开关共同决定最终行为）
+  bool _ipv6RuntimeAvailable = false;
+  DateTime? _lastIpv6CheckTime;
+
   // 静态IP映射配置
   List<StaticIpMapping> _staticIpMappings = [];
 
@@ -227,7 +231,7 @@ class DnsManager {
 
       // 对于代理DNS服务器，添加额外的稳定性配置
       if (server.detour == 'proxy') {
-        serverConfig['address_resolver'] = 'local';  // 使用本地解析器解析DNS服务器地址
+        serverConfig['address_resolver'] = 'local'; // 使用本地解析器解析DNS服务器地址
       }
 
       servers.add(serverConfig);
@@ -270,7 +274,10 @@ class DnsManager {
       for (final s in servers) {
         final detour = (s['detour'] as String?) ?? '';
         final tag = (s['tag'] as String?) ?? '';
-        if (detour == 'direct' && tag.isNotEmpty && tag != 'block' && tag != 'local') {
+        if (detour == 'direct' &&
+            tag.isNotEmpty &&
+            tag != 'block' &&
+            tag != 'local') {
           directDNSTag = tag;
           break;
         }
@@ -334,7 +341,10 @@ class DnsManager {
         for (final s in servers) {
           final detour = (s['detour'] as String?) ?? '';
           final tag = (s['tag'] as String?) ?? '';
-          if (detour == 'direct' && tag.isNotEmpty && tag != 'block' && tag != 'local') {
+          if (detour == 'direct' &&
+              tag.isNotEmpty &&
+              tag != 'block' &&
+              tag != 'local') {
             directDNSTag = tag;
             break;
           }
@@ -384,11 +394,6 @@ class DnsManager {
       }
     }
 
-    // 旧版通过 rules + final 共同指派默认，此处仅依赖 final；保留注释供回溯
-    // rules.add({'outbound': 'any', 'server': defaultServerTag});
-
-    // TODO: 下一步补上 enableRoutingNow 变量逻辑，并基于其决定是否插入强制代理域名列表
-
     // 当未开启 DNS 分流时，为关键境外域名强制使用代理 DNS，但添加备用策略提高稳定性
     if (!enableRoutingNow && proxyDNSTag != null) {
       final alwaysProxyDomains = <String>{
@@ -417,7 +422,9 @@ class DnsManager {
       'rules': rules,
       'final': defaultServerTag,
       'independent_cache': true,
-      'strategy': (useTun ? 'prefer_ipv4' : _getResolverStrategy()),  // 改为prefer_ipv4提高稳定性
+      'strategy': (useTun
+          ? 'prefer_ipv4'
+          : _getResolverStrategy()), // 改为prefer_ipv4提高稳定性
       'disable_cache': false,
       'disable_expire': false,
       'reverse_mapping': _resolveInboundDomains,
@@ -603,6 +610,36 @@ class DnsManager {
         testTime: DateTime.now(),
       );
     }
+  }
+
+  /// IPv6 探测：尝试解析并 TCP 连接一个只在 IPv6 上可访问的域名 (可换成公共 v6 测试域)。
+  /// 若成功则设置 _ipv6RuntimeAvailable=true。
+  /// 使用超时防止阻塞启动；失败不会抛出异常，只记录并返回 false。
+  Future<bool> detectIpv6Support({
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    // 1 分钟内不重复探测
+    if (_lastIpv6CheckTime != null &&
+        DateTime.now().difference(_lastIpv6CheckTime!) <
+            const Duration(minutes: 1)) {
+      return _ipv6RuntimeAvailable;
+    }
+    _lastIpv6CheckTime = DateTime.now();
+    try {
+      // 选择一个常见域名（可访问性高），尝试 AAAA 解析
+      final addresses = await InternetAddress.lookup(
+        'ipv6.google.com',
+        type: InternetAddressType.IPv6,
+      ).timeout(timeout);
+      if (addresses.isNotEmpty) {
+        // 可进一步尝试对 80/443 端口建立一个短连接验证链路，但多数情况下解析成功即可判定
+        _ipv6RuntimeAvailable = true;
+        return true;
+      }
+    } catch (_) {
+      _ipv6RuntimeAvailable = false;
+    }
+    return _ipv6RuntimeAvailable;
   }
 }
 

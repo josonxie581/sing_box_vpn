@@ -27,11 +27,20 @@ class RulesetManager {
     // 添加默认地理规则
     rules.addAll([
       // 中国域名直连
-      {"rule_set": ["geosite-cn"], "outbound": "direct"},
+      {
+        "rule_set": ["geosite-cn"],
+        "outbound": "direct",
+      },
       // 中国IP直连
-      {"rule_set": ["geoip-cn"], "outbound": "direct"},
+      {
+        "rule_set": ["geoip-cn"],
+        "outbound": "direct",
+      },
       // 广告拦截
-      {"rule_set": ["geosite-ads"], "outbound": "block"},
+      {
+        "rule_set": ["geosite-ads"],
+        "outbound": "block",
+      },
       // 其余流量走 route.final（见 getRouteConfig）
     ]);
 
@@ -55,7 +64,10 @@ class RulesetManager {
     }
 
     // 添加广告拦截（即使全局模式也保留广告拦截）
-    rules.add({"rule_set": ["geosite-ads"], "outbound": "block"});
+    rules.add({
+      "rule_set": ["geosite-ads"],
+      "outbound": "block",
+    });
 
     // 其余流量走 route.final
     return rules;
@@ -86,10 +98,7 @@ class RulesetManager {
 
   /// 根据模式生成 route 配置
   static Map<String, dynamic> getRouteConfig(ProxyMode mode) {
-    final base = {
-      "auto_detect_interface": true,
-      "final": "proxy",
-    };
+    final base = {"auto_detect_interface": true, "final": "proxy"};
 
     switch (mode) {
       case ProxyMode.rule:
@@ -179,9 +188,11 @@ class RulesetManager {
       String rulesetPath;
 
       if (filename.startsWith("geoip")) {
-        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
+        rulesetPath =
+            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
       } else {
-        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
+        rulesetPath =
+            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
       }
 
       // 如果生产环境路径不存在，尝试开发环境路径
@@ -259,11 +270,11 @@ class RulesetManager {
         if (Platform.isWindows) "interface_name": "sing-box",
         // IPv4地址配置，仅在明确启用IPv6且VPS支持时才添加IPv6
         "address": enableIpv6
-          ? ["172.19.0.1/30", "2001:db8::1/128"]
-          : ["172.19.0.1/30"],
+            ? ["172.19.0.1/30", "2001:db8::1/128"]
+            : ["172.19.0.1/30"],
 
         // 使用稳定的MTU设置，避免频繁调整导致连接中断
-        "mtu": tunMtu ?? 1500,  // 标准以太网MTU，最稳定
+        "mtu": tunMtu ?? 1500, // 标准以太网MTU，最稳定
         "auto_route": true,
         "strict_route": tunStrictRoute,
 
@@ -271,8 +282,7 @@ class RulesetManager {
         "sniff": true,
 
         // 添加稳定性配置
-        "domain_strategy": "prefer_ipv4",  // 优先IPv4提高稳定性
-
+        "domain_strategy": "prefer_ipv4", // 优先IPv4提高稳定性
         // 默认使用 system（Windows 下 Wintun），必要时可切换 gvisor
         "stack": Platform.isWindows ? 'system' : 'system',
 
@@ -280,10 +290,7 @@ class RulesetManager {
         if (Platform.isWindows) "endpoint_independent_nat": false,
 
         // 路由表配置，减少路由冲突
-        "inet4_route_address": [
-          "0.0.0.0/1",
-          "128.0.0.0/1"
-        ],
+        "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
       });
     }
 
@@ -304,12 +311,28 @@ class RulesetManager {
       "route": getRouteConfig(mode),
     };
 
+    // 如果用户开启但运行时判定不支持 IPv6（调用方会传 enableIpv6=false），则确保 DNS 策略强制 ipv4_only 并去掉 fakeip 的 inet6_range
+    if (!enableIpv6) {
+      try {
+        final dns = config['dns'] as Map<String, dynamic>?;
+        if (dns != null) {
+          dns['strategy'] = 'ipv4_only';
+          final fakeip = dns['fakeip'];
+          if (fakeip is Map<String, dynamic>) {
+            fakeip.remove('inet6_range');
+          }
+        }
+      } catch (e) {
+        print('[WARN] 应用 IPv4-only DNS 策略失败: $e');
+      }
+    }
+
     if (enableClashApi) {
       config["experimental"] = {
         "clash_api": {
           'external_controller': '127.0.0.1:$clashApiPort',
           'secret': clashApiSecret,
-        }
+        },
       };
     }
 

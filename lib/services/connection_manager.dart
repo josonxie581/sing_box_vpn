@@ -103,6 +103,19 @@ class ConnectionManager {
     _currentConfig = config;
 
     try {
+      // 运行时探测 IPv6 能力（仅在用户打开 IPv6 选项时才有意义）
+      bool effectiveIpv6 = false;
+      if (_dnsManager.enableIpv6) {
+        // 用户请求启用 IPv6, 进行运行时探测, 若失败则自动降级并仅使用 IPv4
+        final ok = await _dnsManager.detectIpv6Support();
+        effectiveIpv6 = ok;
+        if (!ok) {
+          _addLog('IPv6 探测失败：将按 IPv4 模式运行');
+        } else {
+          _addLog('IPv6 探测成功：将启用 IPv6 地址');
+        }
+      }
+
       // 检查TUN权限
       if (_useTun && Platform.isWindows) {
         final isElevated = PrivilegeManager.instance.isElevated();
@@ -130,7 +143,7 @@ class ConnectionManager {
         enableClashApi: _enableClashApi,
         clashApiPort: _clashApiPort,
         clashApiSecret: _clashApiSecret,
-        enableIpv6: _dnsManager.enableIpv6,
+        enableIpv6: effectiveIpv6,
       );
 
       // 启动服务
@@ -210,6 +223,70 @@ class ConnectionManager {
   /// 设置代理模式
   void setProxyMode(ProxyMode mode) {
     _proxyMode = mode;
+  }
+
+  /// 重新加载当前配置（用于切换代理模式等需要生效新的路由规则的场景）
+  /// 简单实现：若已连接则平滑重启 sing-box （尽量保持端口不变）
+  Future<bool> reloadCurrentConfig() async {
+    if (!isConnected || _currentConfig == null) {
+      return false;
+    }
+    _addLog('正在重载配置以应用新的模式: ${_proxyMode.name}');
+    try {
+      bool effectiveIpv6 = false;
+      if (_dnsManager.enableIpv6) {
+        final ok = await _dnsManager.detectIpv6Support();
+        effectiveIpv6 = ok;
+        if (!ok) {
+          _addLog('IPv6 探测失败(重载)：继续按 IPv4 模式');
+        } else {
+          _addLog('IPv6 探测成功(重载)：启用 IPv6');
+        }
+      }
+      final cfg = await _currentConfig!.toSingBoxConfig(
+        mode: _proxyMode,
+        localPort: _localPort,
+        useTun: _useTun,
+        tunStrictRoute: _tunStrictRoute,
+        preferredTunStack: _singBoxService.preferredTunStack,
+        enableClashApi: _enableClashApi,
+        clashApiPort: _clashApiPort,
+        clashApiSecret: _clashApiSecret,
+        enableIpv6: effectiveIpv6,
+      );
+      // 停止但保持状态
+      final stopped = await _singBoxService.stop();
+      if (!stopped) {
+        _addLog('配置重载: 停止原实例失败');
+        return false;
+      }
+      final started = await _singBoxService.start(cfg);
+      if (started) {
+        _addLog('配置重载成功，模式=${_proxyMode.name}');
+        return true;
+      } else {
+        _addLog('配置重载失败：重新启动未成功');
+        // 尝试恢复
+        try {
+          final oldCfg = await _currentConfig!.toSingBoxConfig(
+            mode: _proxyMode,
+            localPort: _localPort,
+            useTun: _useTun,
+            tunStrictRoute: _tunStrictRoute,
+            preferredTunStack: _singBoxService.preferredTunStack,
+            enableClashApi: _enableClashApi,
+            clashApiPort: _clashApiPort,
+            clashApiSecret: _clashApiSecret,
+            enableIpv6: effectiveIpv6,
+          );
+          await _singBoxService.start(oldCfg);
+        } catch (_) {}
+        return false;
+      }
+    } catch (e) {
+      _addLog('配置重载异常: $e');
+      return false;
+    }
   }
 
   /// 设置TUN模式

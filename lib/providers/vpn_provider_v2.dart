@@ -240,8 +240,24 @@ class VPNProviderV2 extends ChangeNotifier {
   // ============== 设置管理 ==============
 
   Future<void> setProxyMode(ProxyMode mode) async {
+    final prev = _connectionManager.proxyMode;
     _connectionManager.setProxyMode(mode);
     await _savePreference('proxy_mode', mode.name);
+
+    // 若已经连接则重载配置以应用新的路由模式
+    if (isConnected && prev != mode) {
+      try {
+        final ok = await _connectionManager.reloadCurrentConfig();
+        if (!ok) {
+          print('[WARN] 代理模式切换后重载失败，模式=${mode.name}');
+        } else {
+          print('[INFO] 代理模式切换已生效: ${mode.name}');
+        }
+      } catch (e) {
+        print('[ERROR] 切换代理模式重载异常: $e');
+      }
+    }
+
     notifyListeners();
   }
 
