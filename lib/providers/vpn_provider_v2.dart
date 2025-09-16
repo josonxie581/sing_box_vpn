@@ -620,15 +620,6 @@ class VPNProviderV2 extends ChangeNotifier {
         .then((delay) {
           // 保存延时结果
           _configPings[current.id] = delay;
-          print('[DEBUG] 延时数据已保存: ${current.id} -> ${delay}ms');
-          print('[DEBUG] 当前所有延时数据: $_configPings');
-
-          if (delay > 0) {
-            print('[DEBUG] 启动延时测试完成: ${current.name} -> ${delay}ms');
-            print('[DEBUG] 准备更新UI显示延时');
-          } else {
-            print('[DEBUG] 启动延时测试失败: ${current.name}');
-          }
 
           // 强制UI更新
           notifyListeners();

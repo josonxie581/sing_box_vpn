@@ -55,13 +55,8 @@ class RulesetManager {
       {"ip_is_private": true, "outbound": "direct"},
     ];
 
-    // 插入自定义规则（全局模式下也应用自定义规则）
-    try {
-      final customRules = CustomRulesService.instance.generateSingBoxRules();
-      rules.addAll(customRules);
-    } catch (e) {
-      print('[ERROR] 加载自定义规则失败: $e');
-    }
+    // 在全局模式下，不应用自定义规则，所有流量都走代理
+    // 如果用户需要特定规则，应该切换到规则模式或自定义规则模式
 
     // 添加广告拦截（即使全局模式也保留广告拦截）
     rules.add({
@@ -69,7 +64,7 @@ class RulesetManager {
       "outbound": "block",
     });
 
-    // 其余流量走 route.final
+    // 其余流量走 route.final（proxy）
     return rules;
   }
 
@@ -136,17 +131,12 @@ class RulesetManager {
         return {
           ...base,
           "rule_set": [
+            // 全局模式保留必要的规则集以支持DNS分流
             {
               "tag": "geosite-cn",
               "type": "local",
               "format": "binary",
               "path": _getRulesetPath("geosite-cn.srs"),
-            },
-            {
-              "tag": "geoip-cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geoip-cn.srs"),
             },
             {
               "tag": "geosite-ads",
@@ -235,8 +225,11 @@ class RulesetManager {
   }) {
     final dns = DnsManager();
     return dns.generateDnsConfig(
+      // 只有规则模式启用DNS分流
+      // 全局模式下所有DNS查询都应该通过代理DNS，不使用本地DNS
       preferRuleRouting: mode == ProxyMode.rule,
       useTun: useTun,
+      forceProxyDns: mode == ProxyMode.global, // 全局模式强制使用代理DNS
     );
   }
 

@@ -43,7 +43,7 @@ class DnsManager {
       address: '1.1.1.1',
       type: DnsServerType.udp,
       detour: 'proxy',
-      enabled: false,
+      enabled: false, // 暂时禁用，避免连接问题
     ),
     DnsServer(
       name: '阿里DNS',
@@ -57,7 +57,7 @@ class DnsManager {
       address: '119.29.29.29',
       type: DnsServerType.udp,
       detour: 'direct',
-      enabled: false,
+      enabled: false, // 禁用备用直连DNS
     ),
   ];
 
@@ -212,9 +212,11 @@ class DnsManager {
   /// 生成 sing-box DNS 配置
   /// preferRuleRouting: 在 规则 模式下临时启用 DNS 分流（不持久化），确保国内域名走本地/直连解析
   /// useTun: 在 TUN 模式下启用 FakeIP 优化并减少系统 DNS 竞争
+  /// forceProxyDns: 强制所有DNS查询通过代理（用于全局模式）
   Map<String, dynamic> generateDnsConfig({
     bool preferRuleRouting = false,
     bool useTun = false,
+    bool forceProxyDns = false,
   }) {
     // 运行时判定是否启用 DNS 分流：持久化开关或临时参数任一为 true 即启用
     final enableRoutingNow = _enableDnsRouting || preferRuleRouting;
@@ -223,6 +225,11 @@ class DnsManager {
 
     // 添加启用的 DNS 服务器
     for (final server in _dnsServers.where((s) => s.enabled)) {
+      // 全局模式下只使用代理DNS服务器
+      if (forceProxyDns && server.detour != 'proxy') {
+        continue; // 跳过非代理DNS
+      }
+
       final serverConfig = {
         'tag': server.name.toLowerCase(),
         'address': _buildServerAddress(server),
@@ -232,6 +239,7 @@ class DnsManager {
       // 对于代理DNS服务器，添加额外的稳定性配置
       if (server.detour == 'proxy') {
         serverConfig['address_resolver'] = 'local'; // 使用本地解析器解析DNS服务器地址
+        serverConfig['strategy'] = 'prefer_ipv4'; // 优先IPv4提高稳定性
       }
 
       servers.add(serverConfig);
@@ -268,7 +276,8 @@ class DnsManager {
     }
 
     // v1.8.0 兼容：添加基于 rule_set 的 DNS 路由，实现中国域名使用本地DNS
-    if (preferRuleRouting && enableRoutingNow) {
+    // 全局模式下不使用DNS分流，所有查询都通过代理DNS
+    if (preferRuleRouting && enableRoutingNow && !forceProxyDns) {
       // 找到一个国内DNS服务器（detour=direct的服务器）
       String? directDNSTag;
       for (final s in servers) {
@@ -332,9 +341,13 @@ class DnsManager {
     // 默认服务器选择逻辑
     // 在开启DNS分流时，优先使用国内DNS作为默认，这样可以确保中国域名解析正常
     // 在未开启DNS分流时，TUN模式优先使用代理侧DNS以避免DNS污染
+    // 全局模式下强制使用代理DNS
     String defaultServerTag = 'local';
 
-    if (useTun) {
+    if (forceProxyDns) {
+      // 全局模式：必须使用代理DNS
+      defaultServerTag = proxyDNSTag ?? 'google'; // 优先选择已配置的代理DNS
+    } else if (useTun) {
       if (enableRoutingNow) {
         // 开启DNS分流时，优先使用国内DNS作为默认
         String? directDNSTag;
@@ -395,7 +408,8 @@ class DnsManager {
     }
 
     // 当未开启 DNS 分流时，为关键境外域名强制使用代理 DNS，但添加备用策略提高稳定性
-    if (!enableRoutingNow && proxyDNSTag != null) {
+    // 全局模式下所有域名都已经使用代理DNS，不需要特殊处理
+    if (!enableRoutingNow && proxyDNSTag != null && !forceProxyDns) {
       final alwaysProxyDomains = <String>{
         'google.com',
         'gstatic.com',
