@@ -65,6 +65,7 @@ class ConnectionManager {
   bool get autoSystemProxy => _autoSystemProxy;
   bool get enableClashApi => _enableClashApi;
   int get clashApiPort => _clashApiPort;
+  String get clashApiSecret => _clashApiSecret;
 
   // 流量统计 Getters (从 ImprovedTrafficStatsService 获取)
   int get uploadBytes => _trafficService.currentData.totalUploadBytes;

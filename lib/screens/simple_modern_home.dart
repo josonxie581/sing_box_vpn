@@ -1001,7 +1001,6 @@ class SimpleModernHome extends StatelessWidget {
   // 显示添加服务器页面
 
   // 显示连接状态页面
-  // 显示连接状态页面
   void _showConnectionStatusPage(BuildContext context) {
     Navigator.of(context).push(
       PageRouteBuilder(

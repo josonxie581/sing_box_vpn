@@ -8,6 +8,7 @@ import '../services/config_manager.dart';
 import '../services/connection_manager.dart';
 import '../services/improved_traffic_stats_service.dart';
 import '../services/ping_service.dart';
+import '../services/connection_stats_service.dart';
 import '../utils/privilege_manager.dart';
 
 /// 精简版VPN Provider
@@ -28,6 +29,11 @@ class VPNProviderV2 extends ChangeNotifier {
 
   // 连接时长定时器
   Timer? _durationUpdateTimer;
+
+  // 连接信息相关
+  List<ConnectionInfo> _connectionInfos = [];
+  Timer? _connectionUpdateTimer;
+  ConnectionSource _connectionSource = ConnectionSource.clashAPI;
 
   // 构造函数
   VPNProviderV2() {
@@ -82,6 +88,7 @@ class VPNProviderV2 extends ChangeNotifier {
   bool get autoSystemProxy => _connectionManager.autoSystemProxy;
   bool get enableClashApi => _connectionManager.enableClashApi;
   int get clashApiPort => _connectionManager.clashApiPort;
+  String get clashApiSecret => _connectionManager.clashApiSecret;
 
   // 流量统计
   int get uploadBytes => _trafficService.currentData.totalUploadBytes;
@@ -106,7 +113,7 @@ class VPNProviderV2 extends ChangeNotifier {
   int get pingIntervalMinutes => _pingIntervalMinutes;
 
   // 其他属性
-  int get activeConnections => 0; // 暂时返回0，后续可以从ConnectionManager获取实际值
+  int get activeConnections => _connectionInfos.length; // 返回实际的连接数
 
   // 系统代理相关
   bool get isSystemProxySupported => true; // Windows 平台支持系统代理
@@ -201,6 +208,9 @@ class VPNProviderV2 extends ChangeNotifier {
 
       // 启动连接时长更新定时器
       _startDurationUpdateTimer();
+
+      // 启动连接信息更新定时器
+      _startConnectionUpdateTimer();
     }
 
     notifyListeners();
@@ -210,6 +220,7 @@ class VPNProviderV2 extends ChangeNotifier {
   Future<bool> disconnect() async {
     _stopPingTimer();
     _stopDurationUpdateTimer();
+    _stopConnectionUpdateTimer();
     final success = await _connectionManager.disconnect();
     notifyListeners();
     return success;
@@ -370,6 +381,51 @@ class VPNProviderV2 extends ChangeNotifier {
     _durationUpdateTimer = null;
   }
 
+  // 启动连接信息更新定时器
+  void _startConnectionUpdateTimer() {
+    _stopConnectionUpdateTimer();
+
+    // 立即获取一次连接信息
+    _updateConnectionInfo();
+
+    // 每2秒更新一次连接信息
+    _connectionUpdateTimer = Timer.periodic(Duration(seconds: 2), (timer) {
+      _updateConnectionInfo();
+    });
+  }
+
+  // 停止连接信息更新定时器
+  void _stopConnectionUpdateTimer() {
+    _connectionUpdateTimer?.cancel();
+    _connectionUpdateTimer = null;
+    _connectionInfos.clear();
+    notifyListeners();
+  }
+
+  // 更新连接信息
+  Future<void> _updateConnectionInfo() async {
+    if (!isConnected) {
+      _connectionInfos.clear();
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final stats = await ConnectionStatsService.getConnectionStats(
+        clashApiPort: clashApiPort,
+        clashApiSecret: clashApiSecret,
+      );
+
+      if (stats != null) {
+        _connectionInfos = stats.connections;
+        _connectionSource = stats.source;
+        notifyListeners();
+      }
+    } catch (e) {
+      print('更新连接信息失败: $e');
+    }
+  }
+
   Future<void> _pingAllConfigs() async {
     if (_isPingingAll) return;
 
@@ -501,10 +557,21 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   // 获取连接源（使用字符串类型避免导入冲突）
-  String get connectionSource => 'Clash API';
+  String get connectionSource {
+    switch (_connectionSource) {
+      case ConnectionSource.clashAPI:
+        return 'Clash API';
+      case ConnectionSource.system:
+        return '系统';
+      default:
+        return '未知';
+    }
+  }
 
-  // 获取连接列表（暂时返回空列表）
-  List<Map<String, dynamic>> get connections => [];
+  // 获取连接列表
+  List<Map<String, dynamic>> get connections {
+    return _connectionInfos.map((info) => info.toDisplayMap()).toList();
+  }
 
   Future<void> resetPreferences() async {
     final prefs = await SharedPreferences.getInstance();
@@ -618,6 +685,7 @@ class VPNProviderV2 extends ChangeNotifier {
   void dispose() {
     _stopPingTimer();
     _stopDurationUpdateTimer();
+    _stopConnectionUpdateTimer();
     _trafficService.stop();
     super.dispose();
   }
