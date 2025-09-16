@@ -20,6 +20,10 @@ class ConfigManagementPage extends StatefulWidget {
 }
 
 class _ConfigManagementPageState extends State<ConfigManagementPage> {
+  // 排序状态
+  bool _isSortedByPing = false;
+  bool _isAscending = true;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -40,6 +44,34 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           ),
         ),
         actions: [
+          // 排序按钮
+          Consumer<VPNProviderV2>(
+            builder: (context, provider, _) => IconButton(
+              icon: Icon(
+                _isSortedByPing
+                    ? (_isAscending ? Icons.trending_up : Icons.trending_down)
+                    : Icons.sort,
+                color: _isSortedByPing ? AppTheme.accentNeon : AppTheme.textSecondary,
+              ),
+              onPressed: provider.configs.isEmpty
+                  ? null
+                  : () {
+                      setState(() {
+                        if (!_isSortedByPing) {
+                          _isSortedByPing = true;
+                          _isAscending = true;
+                        } else if (_isAscending) {
+                          _isAscending = false;
+                        } else {
+                          _isSortedByPing = false;
+                        }
+                      });
+                    },
+              tooltip: _isSortedByPing
+                  ? (_isAscending ? '延时升序' : '延时降序')
+                  : '按延时排序',
+            ),
+          ),
           // 刷新延时按钮
           Consumer<VPNProviderV2>(
             builder: (context, provider, _) => IconButton(
@@ -99,7 +131,11 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                   padding: const EdgeInsets.all(20),
                   itemCount: provider.configs.length,
                   itemBuilder: (context, index) {
-                    final config = provider.configs[index];
+                    // 获取排序后的配置列表
+                    final sortedConfigs = _getSortedConfigs(provider);
+                    final config = sortedConfigs[index];
+                    // 找到原始索引
+                    final originalIndex = provider.configs.indexOf(config);
                     final isConnected =
                         provider.currentConfig == config &&
                         provider.isConnected;
@@ -108,7 +144,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                     return _buildConfigCard(
                       context,
                       config,
-                      index,
+                      originalIndex, // 使用原始索引进行编辑和删除
                       isConnected,
                       isCurrent,
                       provider,
@@ -121,6 +157,36 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         },
       ),
     );
+  }
+
+  /// 获取排序后的配置列表
+  List<VPNConfig> _getSortedConfigs(VPNProviderV2 provider) {
+    if (!_isSortedByPing) {
+      return provider.configs;
+    }
+
+    // 复制列表以避免修改原始列表
+    final sortedList = List<VPNConfig>.from(provider.configs);
+
+    // 按延时排序
+    sortedList.sort((a, b) {
+      final pingA = provider.getConfigPing(a.id);
+      final pingB = provider.getConfigPing(b.id);
+
+      // 超时的配置放在最后
+      if (pingA == -1 && pingB == -1) return 0;
+      if (pingA == -1) return 1;
+      if (pingB == -1) return -1;
+
+      // 根据升序或降序排序
+      if (_isAscending) {
+        return pingA.compareTo(pingB);
+      } else {
+        return pingB.compareTo(pingA);
+      }
+    });
+
+    return sortedList;
   }
 
   /// 构建空状态
