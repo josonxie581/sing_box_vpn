@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../providers/vpn_provider_v2.dart';
 import '../theme/app_theme.dart';
 import '../services/dns_manager.dart';
+import '../services/geosite_manager.dart';
 import 'dns_servers_page.dart';
 import 'static_ip_mapping_page.dart';
 import 'dns_test_page.dart';
+import 'geosite_manager_page.dart';
 
 /// DNS 设置页面
 class DnsSettingsPage extends StatefulWidget {
@@ -18,6 +20,25 @@ class DnsSettingsPage extends StatefulWidget {
 
 class _DnsSettingsPageState extends State<DnsSettingsPage> {
   final DnsManager _dnsManager = DnsManager(); // 使用单例，确保与VPNProvider同步
+  final GeositeManager _geositeManager = GeositeManager();
+  int _downloadedRulesetsCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGeositeStatus();
+  }
+
+  Future<void> _loadGeositeStatus() async {
+    try {
+      final downloaded = await _geositeManager.getDownloadedRulesets();
+      setState(() {
+        _downloadedRulesetsCount = downloaded.length;
+      });
+    } catch (e) {
+      print('加载 geosite 状态失败: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,6 +189,11 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
                 // 服务器
                 _buildServerCard(),
+
+                const SizedBox(height: 16),
+
+                // Geosite 规则管理
+                _buildGeositeCard(),
               ],
             ),
           );
@@ -1462,6 +1488,101 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 构建 Geosite 规则管理卡片
+  Widget _buildGeositeCard() {
+    return GestureDetector(
+      onTap: () async {
+        // 导航到 Geosite 管理页面
+        final result = await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => const GeositeManagerPage(),
+          ),
+        );
+
+        // 页面返回后重新加载状态
+        if (result != null || mounted) {
+          await _loadGeositeStatus();
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNeon.withAlpha(20),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.public,
+                color: AppTheme.primaryNeon,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '规则集管理',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '管理 Geosite 和 GeoIP 规则集数据库',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                  if (_downloadedRulesetsCount > 0) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.successGreen.withAlpha(20),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '已下载 $_downloadedRulesetsCount 个规则集',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.successGreen,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right,
+              color: AppTheme.textHint,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }

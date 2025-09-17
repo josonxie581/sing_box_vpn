@@ -149,8 +149,6 @@ class ConnectionStatsService {
         // 使用 netstat 获取 Windows 连接信息，只获取 TCP 连接
         final result = await Process.run('netstat', [
           '-ano',
-          '-p',
-          'TCP',
         ], runInShell: true);
         if (result.exitCode == 0) {
           final lines = result.stdout.toString().split('\n');
@@ -216,7 +214,7 @@ class ConnectionStatsService {
     Map<int, String> processMap,
   ) {
     final parts = line.trim().split(RegExp(r'\s+'));
-    if (parts.length < 5) return null;
+    if (parts.length < 4) return null;
 
     try {
       final protocol = parts[0];

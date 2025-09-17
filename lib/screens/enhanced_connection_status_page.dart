@@ -15,7 +15,7 @@ class EnhancedConnectionStatusPage extends StatefulWidget {
 
 class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusPage> {
   bool isPaused = false;
-  String sortBy = 'time'; // time, upload, download, total
+  String sortBy = 'time'; // time, upload, download, total, proxy
   String filterProtocol = 'all'; // all, tcp, udp
   final Set<String> _expandedItems = {};
   final TextEditingController _searchController = TextEditingController();
@@ -37,6 +37,22 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
         connections.sort(
           (a, b) => (b['totalBytes'] as int).compareTo(a['totalBytes'] as int),
         );
+        break;
+      case 'proxy':
+        connections.sort((a, b) {
+          // 获取代理链信息进行排序
+          String getProxyChain(Map<String, dynamic> conn) {
+            if (conn['chains'] != null && (conn['chains'] as List).isNotEmpty) {
+              return (conn['chains'] as List).join(' → ');
+            } else {
+              return conn['target'] ?? '';
+            }
+          }
+
+          String chainA = getProxyChain(a);
+          String chainB = getProxyChain(b);
+          return chainA.compareTo(chainB);
+        });
         break;
       default:
         connections.sort(
@@ -282,6 +298,11 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   sortBy = 'total';
                                 });
                                 break;
+                              case 'sort_proxy':
+                                setState(() {
+                                  sortBy = 'proxy';
+                                });
+                                break;
                               case 'expand_all':
                                 setState(() {
                                   for (final conn in provider.connections) {
@@ -408,6 +429,20 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按总流量排序'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'sort_proxy',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.route,
+                                    size: 18,
+                                    color: sortBy == 'proxy' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text('按代理链排序'),
                                 ],
                               ),
                             ),
@@ -768,15 +803,48 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                               ),
                                             ),
                                             const SizedBox(width: 6),
-                                            // 进程
+                                            // 进程 + PID + 代理链
                                             Expanded(
-                                              child: Text(
-                                                connection['process'],
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: AppTheme.textSecondary,
-                                                ),
+                                              child: RichText(
                                                 overflow: TextOverflow.ellipsis,
+                                                text: TextSpan(
+                                                  children: [
+                                                    // 进程名
+                                                    TextSpan(
+                                                      text: connection['process'],
+                                                      style: const TextStyle(
+                                                        fontSize: 11,
+                                                        color: AppTheme.textSecondary,
+                                                      ),
+                                                    ),
+                                                    // PID
+                                                    TextSpan(
+                                                      text: ' (PID: ${connection['pid']})',
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        color: AppTheme.textHint,
+                                                      ),
+                                                    ),
+                                                    // 代理链
+                                                    if (connection['chains'] != null && (connection['chains'] as List).isNotEmpty) ...[
+                                                      const TextSpan(
+                                                        text: ' → ',
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          color: AppTheme.primaryNeon,
+                                                        ),
+                                                      ),
+                                                      TextSpan(
+                                                        text: (connection['chains'] as List).join(' → '),
+                                                        style: const TextStyle(
+                                                          fontSize: 10,
+                                                          color: AppTheme.primaryNeon,
+                                                          fontWeight: FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ],
@@ -867,6 +935,17 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                         Icons.apps,
                                       ),
                                       const SizedBox(height: 8),
+                                      // 代理链（放在PID后面，方便查看）
+                                      _buildDetailRow(
+                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
+                                          ? '代理链'
+                                          : '目标',
+                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
+                                          ? (connection['chains'] as List).join(' → ')
+                                          : connection['target'],
+                                        Icons.route,
+                                      ),
+                                      const SizedBox(height: 8),
                                       // 连接状态
                                       if (connection['state'].toString().isNotEmpty) ...[
                                         _buildDetailRow(
@@ -881,17 +960,6 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                         '匹配规则',
                                         connection['rule'],
                                         Icons.rule,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 代理链
-                                      _buildDetailRow(
-                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
-                                          ? '代理链'
-                                          : '目标',
-                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
-                                          ? (connection['chains'] as List).join(' → ')
-                                          : connection['target'],
-                                        Icons.route,
                                       ),
                                       const SizedBox(height: 8),
                                       // 实时速度

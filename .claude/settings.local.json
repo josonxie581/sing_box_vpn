@@ -13,7 +13,9 @@
       "Bash(flutter build:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:clash.gitbook.io)"
+      "WebFetch(domain:clash.gitbook.io)",
+      "Bash(timeout:*)",
+      "Bash(dart:*)"
     ],
     "deny": [],
     "ask": []

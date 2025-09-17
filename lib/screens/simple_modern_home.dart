@@ -9,9 +9,11 @@ import '../services/ping_service.dart';
 // import 'add_config_page.dart';
 import 'enhanced_connection_status_page.dart';
 import 'routing_rules_page.dart';
+import 'routing_config_page.dart';
 import 'dns_settings_page.dart';
 import 'config_management_page.dart';
 import 'logs_page.dart';
+import 'geosite_manager_page.dart';
 import '../widgets/animated_connection_button.dart';
 import '../widgets/hover_scale.dart';
 import 'package:gsou/utils/privilege_manager.dart';
@@ -1031,7 +1033,7 @@ class SimpleModernHome extends StatelessWidget {
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            const RoutingRulesPage(),
+            const RoutingConfigPage(),
         transitionDuration: const Duration(milliseconds: 300),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);

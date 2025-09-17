@@ -3,20 +3,24 @@
 import '../models/proxy_mode.dart';
 import 'dns_manager.dart';
 import 'custom_rules_service.dart';
+import 'routing_config_service.dart';
+import 'geosite_manager.dart';
 
 /// 规则与配置组装（兼容 sing-box v1.8.0 及以上）
+/// 符合官方迁移指南：https://sing-box.sagernet.org/zh/migration/#geoip
 class RulesetManager {
   /// 路由规则（规则模式）
-  static List<Map<String, dynamic>> getRuleModeRoutes() {
+  static Future<List<Map<String, dynamic>>> getRuleModeRoutes() async {
     final rules = <Map<String, dynamic>>[
       // 系统 DNS 给内网 DNS 处理，避免被导入代理
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
-      // 私有网段直连
-      {"ip_is_private": true, "outbound": "direct"},
+
+      // 私有地址直连（硬编码，无需规则集文件）
+      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
     ];
 
-    // 插入自定义规则（优先级高于默认地理规则）
+    // 插入自定义规则（优先级高于路由配置规则）
     try {
       final customRules = CustomRulesService.instance.generateSingBoxRules();
       rules.addAll(customRules);
@@ -24,26 +28,27 @@ class RulesetManager {
       print('[ERROR] 加载自定义规则失败: $e');
     }
 
-    // 添加默认地理规则
-    rules.addAll([
-      // 中国域名直连
-      {
-        "rule_set": ["geosite-cn"],
-        "outbound": "direct",
-      },
-      // 中国IP直连
-      {
-        "rule_set": ["geoip-cn"],
-        "outbound": "direct",
-      },
-      // 广告拦截
-      {
-        "rule_set": ["geosite-ads"],
-        "outbound": "block",
-      },
-      // 其余流量走 route.final（见 getRouteConfig）
-    ]);
+    // 插入路由配置服务的规则（用户配置的 geosite/geoIP 规则）
+    try {
+      final routingService = RoutingConfigService.instance;
+      if (!routingService.isInitialized) {
+        await routingService.initialize();
+      }
+      final configuredRules = routingService.generateSingBoxRules();
+      rules.addAll(configuredRules);
+      print('[DEBUG] 规则模式：加载了 ${configuredRules.length} 条路由配置规则');
+    } catch (e) {
+      print('[ERROR] 加载路由配置规则失败: $e');
+      // 降级到默认规则
+      rules.addAll([
+        {"rule_set": ["geoip-private"], "outbound": "direct"},
+        {"rule_set": ["geosite-cn"], "outbound": "direct"},
+        {"rule_set": ["geoip-cn"], "outbound": "direct"},
+        {"rule_set": ["geosite-ads"], "outbound": "block"},
+      ]);
+    }
 
+    // 其余流量走 route.final（见 getRouteConfig）
     return rules;
   }
 
@@ -52,7 +57,9 @@ class RulesetManager {
     final rules = <Map<String, dynamic>>[
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
-      {"ip_is_private": true, "outbound": "direct"},
+
+      // 私有地址直连（硬编码，无需规则集文件）
+      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
     ];
 
     // 在全局模式下，不应用自定义规则，所有流量都走代理
@@ -74,8 +81,9 @@ class RulesetManager {
       // 系统 DNS 给内网 DNS 处理，避免被导入代理
       {"network": "udp", "port": 53, "outbound": "dns-out"},
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
-      // 私有网段直连
-      {"ip_is_private": true, "outbound": "direct"},
+
+      // 私有地址直连（硬编码，无需规则集文件）
+      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
     ];
 
     // 仅插入自定义规则（不包含默认地理规则）
@@ -92,97 +100,147 @@ class RulesetManager {
   }
 
   /// 根据模式生成 route 配置
-  static Map<String, dynamic> getRouteConfig(ProxyMode mode) {
+  static Future<Map<String, dynamic>> getRouteConfig(ProxyMode mode) async {
     final base = {"auto_detect_interface": true, "final": "proxy"};
 
     switch (mode) {
       case ProxyMode.rule:
+        // 获取基础规则集
+        final baseRulesets = [
+          "geosite-cn.srs",
+          "geoip-cn.srs",
+          "geosite-ads.srs",
+          "geosite-geolocation-!cn.srs",
+        ];
+
+        // 获取用户配置的规则集
+        final userRulesets = await _getUserConfiguredRulesets();
+
+        // 合并并去重
+        final allRulesets = {...baseRulesets, ...userRulesets}.toList();
+        final validRulesets = await _getValidRulesets(allRulesets);
+
         return {
           ...base,
-          "rule_set": [
-            {
-              "tag": "geosite-cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-cn.srs"),
-            },
-            {
-              "tag": "geoip-cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geoip-cn.srs"),
-            },
-            {
-              "tag": "geosite-ads",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-ads.srs"),
-            },
-            {
-              "tag": "geosite-geolocation-!cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
-            },
-          ],
-          "rules": getRuleModeRoutes(),
+          "rule_set": validRulesets,
+          "rules": await getRuleModeRoutes(),
         };
       case ProxyMode.global:
+        // 全局模式只使用基础规则集
+        final baseRulesets = [
+          "geosite-cn.srs",
+          "geosite-ads.srs",
+          "geosite-geolocation-!cn.srs",
+        ];
+        final validRulesets = await _getValidRulesets(baseRulesets);
+
         return {
           ...base,
-          "rule_set": [
-            // 全局模式保留必要的规则集以支持DNS分流
-            {
-              "tag": "geosite-cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-cn.srs"),
-            },
-            {
-              "tag": "geosite-ads",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-ads.srs"),
-            },
-            {
-              "tag": "geosite-geolocation-!cn",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-geolocation-!cn.srs"),
-            },
-          ],
+          "rule_set": validRulesets,
           "rules": getGlobalModeRoutes(),
         };
       case ProxyMode.custom:
+        // 自定义模式包含基础规则集 + 用户配置的规则集
+        final baseRulesets = [
+          "geosite-ads.srs",
+        ];
+
+        // 获取用户配置的规则集
+        final userRulesets = await _getUserConfiguredRulesets();
+
+        // 合并并去重
+        final allRulesets = {...baseRulesets, ...userRulesets}.toList();
+        final validRulesets = await _getValidRulesets(allRulesets);
+
         return {
           ...base,
-          "rule_set": [
-            // 仅加载广告拦截规则集（如果需要的话）
-            {
-              "tag": "geosite-ads",
-              "type": "local",
-              "format": "binary",
-              "path": _getRulesetPath("geosite-ads.srs"),
-            },
-          ],
+          "rule_set": validRulesets,
           "rules": getCustomModeRoutes(),
         };
     }
   }
 
+  /// 获取有效的规则集配置（仅包含存在的文件）
+  static Future<List<Map<String, dynamic>>> _getValidRulesets(List<String> filenames) async {
+    final validRulesets = <Map<String, dynamic>>[];
+
+    for (final filename in filenames) {
+      try {
+        final path = await _getRulesetPath(filename);
+        if (File(path).existsSync()) {
+          final tag = filename.replaceAll('.srs', '');
+          validRulesets.add({
+            "tag": tag,
+            "type": "local",
+            "format": "binary",
+            "path": path,
+          });
+        } else {
+          print('[RulesetManager] 规则集文件不存在: $path');
+        }
+      } catch (e) {
+        print('[RulesetManager] 获取规则集路径失败 $filename: $e');
+      }
+    }
+
+    if (validRulesets.isEmpty) {
+      print('[RulesetManager] 警告: 没有找到任何有效的规则集文件');
+    } else {
+      print('[RulesetManager] 找到 ${validRulesets.length} 个有效规则集');
+    }
+
+    return validRulesets;
+  }
+
+  /// 获取用户配置的规则集文件名列表
+  static Future<List<String>> _getUserConfiguredRulesets() async {
+    try {
+      final routingService = RoutingConfigService.instance;
+      if (!routingService.isInitialized) {
+        await routingService.initialize();
+      }
+
+      final configuredRulesets = routingService.getConfiguredRulesets();
+      return configuredRulesets.map((ruleset) => '$ruleset.srs').toList();
+    } catch (e) {
+      print('[RulesetManager] 获取用户配置规则集失败: $e');
+      return [];
+    }
+  }
+
   /// 获取规则集文件路径
-  static String _getRulesetPath(String filename) {
+  static Future<String> _getRulesetPath(String filename) async {
+    try {
+      // 首先尝试从 GeositeManager 获取规则集路径
+      final geositeManager = GeositeManager();
+      final rulesetName = filename.endsWith('.srs')
+          ? filename.substring(0, filename.length - 4)
+          : filename;
+
+      // 检查 GeositeManager 中是否有这个规则集
+      final downloadedRulesets = await geositeManager.getDownloadedRulesets();
+      if (downloadedRulesets.contains(rulesetName)) {
+        return await geositeManager.getRulesetPath(rulesetName);
+      }
+    } catch (e) {
+      print('[RulesetManager] 从 GeositeManager 获取路径失败: $e');
+    }
+
+    // 降级到旧版本路径查找
+    return _getFallbackPath(filename);
+  }
+
+  /// 获取规则集文件路径（支持多个路径查找）
+  static String _getFallbackPath(String filename) {
     if (Platform.isWindows) {
-      // Windows平台使用应用程序目录下的assets路径
+      // 降级到原有的应用程序目录
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       String rulesetPath;
 
       if (filename.startsWith("geoip")) {
-        rulesetPath =
-            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
+        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
       } else {
-        rulesetPath =
-            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
+        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
       }
 
       // 如果生产环境路径不存在，尝试开发环境路径
@@ -312,13 +370,13 @@ class RulesetManager {
       "inbounds": inbounds,
       "outbounds": getOutbounds({"tag": "proxy", ...proxyConfig}),
       "route": {
-        ...getRouteConfig(mode),
+        ...await getRouteConfig(mode),
         "rules": [
           {
             "inbound": ["latency-test-in"],
             "outbound": "direct",
           },
-          ...?getRouteConfig(mode)["rules"] as List?,
+          ...?(await getRouteConfig(mode))["rules"] as List?,
         ],
       },
     };
