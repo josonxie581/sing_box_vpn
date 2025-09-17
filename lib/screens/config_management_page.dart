@@ -51,7 +51,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 _isSortedByPing
                     ? (_isAscending ? Icons.trending_up : Icons.trending_down)
                     : Icons.sort,
-                color: _isSortedByPing ? AppTheme.accentNeon : AppTheme.textSecondary,
+                color: _isSortedByPing
+                    ? AppTheme.accentNeon
+                    : AppTheme.textSecondary,
               ),
               onPressed: provider.configs.isEmpty
                   ? null
@@ -525,14 +527,13 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 const SizedBox(height: 12),
 
                 // 配置详情
-                Row(
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
                     _buildDetailChip('类型', _getConfigTypeDisplay(config)),
-                    const SizedBox(width: 12),
                     _buildDetailChip('地址', '${config.server}:${config.port}'),
-                    const SizedBox(width: 12),
                     _buildPingDetailChip(provider, config),
-                    const SizedBox(width: 12),
                     GestureDetector(
                       onTap: () async {
                         await Clipboard.setData(ClipboardData(text: config.id));
@@ -1161,7 +1162,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 显示删除所有配置的确认对话框
-  void _showDeleteAllConfirmDialog(BuildContext context, VPNProviderV2 provider) {
+  void _showDeleteAllConfirmDialog(
+    BuildContext context,
+    VPNProviderV2 provider,
+  ) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

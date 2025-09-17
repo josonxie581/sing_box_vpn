@@ -225,50 +225,22 @@ class PingService {
     List<VPNConfig> configs, {
     bool isConnected = false,
     VPNConfig? currentConfig,
+    int? concurrency,
   }) async {
     final results = <String, int>{};
 
-    try {
-      print('[DEBUG] 开始批量延时测试（逐个使用单个测试方法 realTest），节点数量: ${configs.length}');
-
-      // 与单个测试保持一致：统一使用 realTest，避免 quickTest 带来的偏差
-      final tester = NodeDelayTester(
-        timeout: 8000,
-        enableIpInfo: false,
-        latencyMode: LatencyTestMode.systemOnly,
-      );
-
-      for (final cfg in configs) {
-        try {
-          final r = await tester.realTest(cfg);
-          results[cfg.id] = r.isSuccess ? r.delay : -1;
-        } catch (e) {
-          results[cfg.id] = -1;
-        }
-      }
-
-      final successCount = results.values.where((v) => v >= 0).length;
-      print(
-        '[DEBUG] 批量延时测试完成（realTest），成功测试: ${successCount}/${configs.length}',
-      );
-    } catch (e) {
-      print('[DEBUG] 批量延时测试异常（realTest）: $e');
-    }
+    await pingConfigsWithProgress(
+      configs,
+      isConnected: isConnected,
+      currentConfig: currentConfig,
+      concurrency: concurrency,
+      onEach: (cfg, ping) => results[cfg.id] = ping,
+    );
 
     return results;
   }
 
   /// 自适应并发批量延时检测，支持进度回调
-  ///
-  /// 根据节点数量自动调整并发数，优化性能表现
-  ///
-  /// 参数：
-  /// - configs: 要测试的 VPN 配置列表
-  /// - onEach: 单个节点完成时的回调函数 (config, 延时ms)
-  /// - onProgress: 整体进度回调函数 (已完成数, 总数)
-  /// - concurrency: 自定义并发数（可选）
-  /// - isConnected: 是否处于VPN连接状态
-  /// - currentConfig: 当前连接的配置
   static Future<void> pingConfigsWithProgress(
     List<VPNConfig> configs, {
     void Function(VPNConfig config, int ping)? onEach,
@@ -279,41 +251,83 @@ class PingService {
   }) async {
     if (configs.isEmpty) return;
 
-    try {
-      print(
-        '[DEBUG] 开始进度回调批量延时测试（逐个使用单个测试方法 realTest），节点数量: ${configs.length}',
-      );
+    final total = configs.length;
+    final workerCount = _resolveConcurrency(total, concurrency);
 
-      // 与单个测试保持一致：统一使用 realTest，顺序执行；按用户需求，最终再统一展示
-      final tester = NodeDelayTester(
-        timeout: 8000,
-        enableIpInfo: false,
-        latencyMode: LatencyTestMode.systemOnly,
-      );
+    print('[DEBUG] 并发延时测试启动: 节点数量=$total, 并发数=$workerCount, 已连接=$isConnected');
 
-      int done = 0;
-      for (final cfg in configs) {
+    int nextIndex = 0;
+    int completed = 0;
+    int successCount = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        final current = nextIndex;
+        if (current >= total) {
+          return;
+        }
+        nextIndex++;
+        final cfg = configs[current];
+
+        int ping = -1;
         try {
-          final r = await tester.realTest(cfg);
-          onEach?.call(cfg, r.isSuccess ? r.delay : -1);
+          ping = await pingConfig(
+            cfg,
+            isConnected: isConnected,
+            currentConfig: currentConfig,
+          );
         } catch (e) {
-          onEach?.call(cfg, -1);
+          print('[DEBUG] 节点 ${cfg.name} 并发延时测试异常: $e');
         } finally {
-          done++;
-          onProgress?.call(done, configs.length);
+          if (ping >= 0) {
+            successCount++;
+          }
+          onEach?.call(cfg, ping);
+          completed++;
+          onProgress?.call(completed, total);
         }
       }
+    }
 
-      print('[DEBUG] 进度回调批量延时测试完成（realTest）');
+    try {
+      final futures = List.generate(workerCount, (_) => worker());
+      await Future.wait(futures);
+      print('[DEBUG] 并发延时测试完成，成功节点: $successCount/$total，线程数=$workerCount');
     } catch (e) {
-      print('[DEBUG] 进度回调批量延时测试异常（realTest）: $e');
+      print('[DEBUG] 并发批量延时测试异常: $e');
     }
   }
 
-  /// 格式化延时数值为用户友好的显示文本
-  ///
-  /// 参数：ping 延时毫秒数，-1表示超时，-2表示当前连接的服务器
-  /// 返回：格式化的延时字符串
+  /// 根据节点数量决定并发数，避免对系统造成过大压力
+  static int _resolveConcurrency(int total, int? preferred) {
+    if (total <= 1) {
+      return 1;
+    }
+
+    int value;
+    if (preferred != null && preferred > 0) {
+      value = preferred;
+    } else if (total <= 6) {
+      value = 2;
+    } else if (total <= 20) {
+      value = 4;
+    } else if (total <= 60) {
+      value = 6;
+    } else if (total <= 120) {
+      value = 8;
+    } else if (total <= 200) {
+      value = 10;
+    } else {
+      value = 12;
+    }
+
+    if (value > total) {
+      value = total;
+    }
+
+    return value < 1 ? 1 : value;
+  }
+
   static String formatPing(int ping) {
     if (ping == -2) {
       return '已连接';
