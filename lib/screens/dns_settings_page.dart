@@ -54,7 +54,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   (value) {
                     setState(() => _dnsManager.tunHijackDns = value);
                     // 通知VPN提供者配置已更改
-                    context.read<VPNProviderV2>().notifyListeners();
+                    context.read<VPNProviderV2>().onDnsSettingsChanged();
                   },
                   hasInfo: true,
                 ),
@@ -73,7 +73,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   _dnsManager.resolveInboundDomains,
                   (value) {
                     setState(() => _dnsManager.resolveInboundDomains = value);
-                    context.read<VPNProviderV2>().notifyListeners();
+                    context.read<VPNProviderV2>().onDnsSettingsChanged();
                   },
                   hasInfo: true,
                 ),
@@ -102,7 +102,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   _dnsManager.enableDnsRouting,
                   (value) {
                     setState(() => _dnsManager.enableDnsRouting = value);
-                    context.read<VPNProviderV2>().notifyListeners();
+                    context.read<VPNProviderV2>().onDnsSettingsChanged();
                   },
                   hasInfo: true,
                 ),
@@ -116,7 +116,9 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   _dnsManager.strictRoute,
                   (value) {
                     setState(() => _dnsManager.strictRoute = value);
-                    context.read<VPNProviderV2>().syncStrictRouteFromDnsManager();
+                    context
+                        .read<VPNProviderV2>()
+                        .syncStrictRouteFromDnsManager();
                   },
                   hasInfo: true,
                 ),
@@ -128,7 +130,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   _dnsManager.enableEcs,
                   (value) {
                     setState(() => _dnsManager.enableEcs = value);
-                    context.read<VPNProviderV2>().notifyListeners();
+                    context.read<VPNProviderV2>().onDnsSettingsChanged();
                   },
                   hasInfo: true,
                 ),
@@ -142,7 +144,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                   _dnsManager.enableIpv6,
                   (value) {
                     setState(() => _dnsManager.enableIpv6 = value);
-                    context.read<VPNProviderV2>().notifyListeners();
+                    context.read<VPNProviderV2>().onDnsSettingsChanged();
                   },
                   hasInfo: true,
                 ),
@@ -646,7 +648,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           TextButton(
             onPressed: () {
               setState(() => _dnsManager.testDomain = controller.text);
-              context.read<VPNProviderV2>().notifyListeners();
+              context.read<VPNProviderV2>().onDnsSettingsChanged();
               safePop(context);
             },
             child: const Text(
@@ -691,7 +693,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           : null,
       onTap: () {
         setState(() => _dnsManager.ttl = display);
-        context.read<VPNProviderV2>().notifyListeners();
+        context.read<VPNProviderV2>().onDnsSettingsChanged();
         safePop(context);
       },
     );
@@ -727,7 +729,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           : null,
       onTap: () {
         setState(() => _dnsManager.proxyResolver = display);
-        context.read<VPNProviderV2>().notifyListeners();
+        context.read<VPNProviderV2>().onDnsSettingsChanged();
         safePop(context);
       },
     );

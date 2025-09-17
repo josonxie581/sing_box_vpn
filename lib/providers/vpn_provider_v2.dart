@@ -9,6 +9,7 @@ import '../services/connection_manager.dart';
 import '../services/improved_traffic_stats_service.dart';
 import '../services/ping_service.dart';
 import '../services/connection_stats_service.dart';
+import '../services/singbox_native_service.dart';
 import '../utils/privilege_manager.dart';
 
 /// 精简版VPN Provider
@@ -19,6 +20,7 @@ class VPNProviderV2 extends ChangeNotifier {
   final ConnectionManager _connectionManager = ConnectionManager();
   final ImprovedTrafficStatsService _trafficService =
       ImprovedTrafficStatsService();
+  final SingBoxNativeService _singboxService = SingBoxNativeService();
 
   // Ping服务
   final Map<String, int> _configPings = {};
@@ -46,6 +48,9 @@ class VPNProviderV2 extends ChangeNotifier {
     await _connectionManager.init();
     await _loadPreferences();
 
+    // 初始化 sing-box 服务并启动基础代理用于延时测试
+    await _initBasicProxy();
+
     // 初始化 PingService 配置
     PingService.setApiConfig(
       host: '127.0.0.1',
@@ -63,6 +68,22 @@ class VPNProviderV2 extends ChangeNotifier {
     // 应用启动时自动测试所有配置的延时（未连接状态）
     _testAllConfigsOnStartup();
   }
+
+  /// 初始化基础代理用于延时测试
+  Future<void> _initBasicProxy() async {
+    try {
+      print('🚀 初始化 sing-box 服务...');
+      // 仅初始化 sing-box FFI，不启动任何配置
+      // 延时测试时会动态创建临时配置
+      await _singboxService.initialize();
+      print('✅ sing-box 服务初始化完成');
+    } catch (e) {
+      print('❌ 初始化 sing-box 服务失败: $e');
+    }
+  }
+
+  /// 获取 sing-box 服务实例（供延时测试使用）
+  SingBoxNativeService get singboxService => _singboxService;
 
   // ============== Getters ==============
 
@@ -572,6 +593,11 @@ class VPNProviderV2 extends ChangeNotifier {
     notifyListeners();
   }
 
+  // DNS 设置更改后的通用通知入口，供 UI 调用，避免直接调用受保护的 notifyListeners
+  void onDnsSettingsChanged() {
+    notifyListeners();
+  }
+
   // 获取连接源（使用字符串类型避免导入冲突）
   String get connectionSource {
     switch (_connectionSource) {
@@ -579,8 +605,6 @@ class VPNProviderV2 extends ChangeNotifier {
         return 'Clash API';
       case ConnectionSource.system:
         return '系统';
-      default:
-        return '未知';
     }
   }
 

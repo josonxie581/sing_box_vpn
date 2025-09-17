@@ -321,7 +321,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   /// 删除配置
-  void _deleteConfig(BuildContext context, VPNProvider provider, int index) {
+  void _deleteConfig(BuildContext context, VPNProviderV2 provider, int index) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

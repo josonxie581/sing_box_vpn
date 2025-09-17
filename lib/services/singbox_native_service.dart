@@ -4,11 +4,13 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'singbox_ffi.dart';
+import '../models/vpn_config.dart';
 
 /// sing-box 原生服务管理类（使用 FFI）
 class SingBoxNativeService {
   SingBoxFFI? _ffi; // 延迟加载，避免应用启动时就加载 DLL
   bool _initialized = false;
+  // ignore: unused_field
   bool _started = false; // 记录当前是否已成功执行 start
   Future<bool>? _initFuture; // 进行中的初始化（防止并发重入）
 
@@ -561,5 +563,265 @@ class SingBoxNativeService {
       await prefFile.writeAsString(stack);
       onLog?.call('保存首选 TUN 栈: $stack');
     } catch (_) {}
+  }
+
+  // ================= 延时测试专用方法 =================
+
+  /// 启动临时代理用于延时测试
+  Future<bool> startProxy(VPNConfig node, int proxyPort) async {
+    if (!_initialized) {
+      if (!await initialize()) {
+        return false;
+      }
+    }
+
+    try {
+      onLog?.call('启动延时测试代理: ${node.name} 端口: $proxyPort');
+
+      // 创建最简代理配置 - 仅HTTP代理，无TUN
+      final config = {
+        "log": {"level": "warn", "timestamp": true},
+        "inbounds": [
+          {
+            "type": "http",
+            "tag": "http-in",
+            "listen": "127.0.0.1",
+            "listen_port": proxyPort,
+            "users": [],
+          },
+        ],
+        "outbounds": [
+          _createOutboundFromNode(node),
+          {"type": "direct", "tag": "direct-out"},
+        ],
+        "route": {"rules": [], "final": node.id},
+      };
+
+      // 启动代理
+      final configJson = jsonEncode(config);
+      _ffi ??= SingBoxFFI.instance;
+
+      final result = _ffi!.start(configJson);
+      if (result == 0) {
+        onLog?.call('延时测试代理启动成功: 端口 $proxyPort');
+        return true;
+      } else {
+        final detail = _ffi!.getLastError();
+        onLog?.call('延时测试代理启动失败($result): $detail');
+        return false;
+      }
+    } catch (e) {
+      onLog?.call('启动延时测试代理异常: $e');
+      return false;
+    }
+  }
+
+  /// 停止延时测试代理
+  Future<bool> stopProxy() async {
+    try {
+      _ffi ??= SingBoxFFI.instance;
+      if (!_ffi!.isRunning) {
+        return true; // 已经停止
+      }
+
+      final result = _ffi!.stop();
+      if (result == 0 || result == -1) {
+        // 0=成功停止, -1=未运行
+        onLog?.call('延时测试代理已停止');
+        return true;
+      } else {
+        final detail = _ffi!.getLastError();
+        onLog?.call('停止延时测试代理失败($result): $detail');
+        return false;
+      }
+    } catch (e) {
+      onLog?.call('停止延时测试代理异常: $e');
+      return false;
+    }
+  }
+
+  /// 根据VPN节点创建出站配置
+  Map<String, dynamic> _createOutboundFromNode(VPNConfig node) {
+    final outbound = <String, dynamic>{
+      "tag": node.id,
+      "type": node.type.toLowerCase(),
+    };
+
+    // 从settings获取配置值的辅助函数
+    String getSetting(String key, [String defaultValue = '']) {
+      return node.settings[key]?.toString() ?? defaultValue;
+    }
+
+    bool getBoolSetting(String key, [bool defaultValue = false]) {
+      final value = node.settings[key];
+      if (value is bool) return value;
+      if (value is String) {
+        return value.toLowerCase() == 'true' || value == '1';
+      }
+      return defaultValue;
+    }
+
+    switch (node.type.toLowerCase()) {
+      case 'anytls':
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "password": getSetting('password'),
+        });
+
+        // AnyTLS 需要 TLS 配置
+        final tlsCfg = <String, dynamic>{
+          "enabled": true,
+          "server_name": getSetting('sni', node.server),
+          "insecure": getBoolSetting('skipCertVerify', false),
+        };
+        final alpn = node.settings['alpn'];
+        if (alpn is List && alpn.isNotEmpty) {
+          tlsCfg["alpn"] = alpn;
+        }
+        outbound["tls"] = tlsCfg;
+        break;
+      case 'vmess':
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "uuid": node.uuid,
+          "alter_id": node.alterId ?? 0,
+          "security": node.security.isNotEmpty ? node.security : "auto",
+        });
+
+        if (node.network == 'ws') {
+          outbound["transport"] = {
+            "type": "ws",
+            "path": node.path.isNotEmpty ? node.path : "/",
+            "headers": {if (node.host.isNotEmpty) "Host": node.host},
+          };
+        }
+
+        final tlsValue = getSetting('tls');
+        if (tlsValue == 'tls' || tlsValue.toLowerCase() == 'true') {
+          outbound["tls"] = {
+            "enabled": true,
+            "server_name": getSetting(
+              'sni',
+              node.host.isNotEmpty ? node.host : node.server,
+            ),
+            "insecure": getBoolSetting('skipCertVerify', false),
+          };
+        }
+        break;
+
+      case 'vless':
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "uuid": node.uuid,
+        });
+
+        final flow = getSetting('flow');
+        if (flow.isNotEmpty) {
+          outbound["flow"] = flow;
+        }
+
+        if (node.network == 'ws') {
+          outbound["transport"] = {
+            "type": "ws",
+            "path": node.path.isNotEmpty ? node.path : "/",
+            "headers": {if (node.host.isNotEmpty) "Host": node.host},
+          };
+        } else if (node.network == 'grpc') {
+          final serviceName = getSetting(
+            'grpcServiceName',
+            getSetting('service_name'),
+          );
+          outbound["transport"] = {
+            "type": "grpc",
+            "service_name": serviceName.isNotEmpty ? serviceName : "",
+          };
+        }
+
+        final tlsEnabled = getBoolSetting('tlsEnabled');
+        final realityEnabled = getBoolSetting('realityEnabled');
+
+        if (tlsEnabled) {
+          final tlsConfig = <String, dynamic>{
+            "enabled": true,
+            "server_name": getSetting('sni', node.server),
+            "insecure": getBoolSetting('skipCertVerify', false),
+          };
+
+          if (realityEnabled) {
+            final publicKey = getSetting('realityPublicKey');
+            final shortId = getSetting('realityShortId');
+            if (publicKey.isNotEmpty) {
+              tlsConfig["reality"] = {
+                "enabled": true,
+                "public_key": publicKey,
+                "short_id": shortId,
+              };
+            }
+          }
+
+          final alpn = node.settings['alpn'];
+          if (alpn is List && alpn.isNotEmpty) {
+            tlsConfig["alpn"] = alpn;
+          }
+
+          outbound["tls"] = tlsConfig;
+        }
+        break;
+
+      case 'trojan':
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "password": node.password,
+        });
+
+        if (node.network == 'ws') {
+          outbound["transport"] = {
+            "type": "ws",
+            "path": node.path.isNotEmpty ? node.path : "/",
+            "headers": {if (node.host.isNotEmpty) "Host": node.host},
+          };
+        } else if (node.network == 'grpc') {
+          final serviceName = getSetting(
+            'grpcServiceName',
+            getSetting('service_name'),
+          );
+          outbound["transport"] = {"type": "grpc", "service_name": serviceName};
+        }
+
+        outbound["tls"] = {
+          "enabled": true,
+          "server_name": getSetting(
+            'sni',
+            node.host.isNotEmpty ? node.host : node.server,
+          ),
+          "insecure": getBoolSetting('skipCertVerify', false),
+        };
+
+        final alpn = node.settings['alpn'];
+        if (alpn is List && alpn.isNotEmpty) {
+          outbound["tls"]["alpn"] = alpn;
+        }
+        break;
+
+      case 'shadowsocks':
+        final method = getSetting('method', "aes-256-gcm");
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "method": method,
+          "password": node.password,
+        });
+        break;
+
+      default:
+        // 默认处理
+        outbound.addAll({"server": node.server, "server_port": node.port});
+    }
+
+    return outbound;
   }
 }

@@ -102,6 +102,33 @@ class VPNConfig {
   /// 生成出站配置
   Map<String, dynamic> _generateOutbound() {
     switch (type.toLowerCase()) {
+      case 'anytls':
+        return {
+          "type": "anytls",
+          "tag": "proxy",
+          "server": server,
+          "server_port": port,
+          "password": settings['password'] ?? "",
+          // 连接保活/空闲会话可选项
+          if ((settings['idle_session_check_interval'] ?? '')
+              .toString()
+              .isNotEmpty)
+            "idle_session_check_interval":
+                settings['idle_session_check_interval'],
+          if ((settings['idle_session_timeout'] ?? '').toString().isNotEmpty)
+            "idle_session_timeout": settings['idle_session_timeout'],
+          if (settings['min_idle_session'] != null)
+            "min_idle_session": settings['min_idle_session'],
+          // AnyTLS 要求 TLS 出站配置
+          "tls": {
+            "enabled": true,
+            // 若未提供 sni，兜底使用服务器域名
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
       case 'shadowsocks':
         return {
           "type": "shadowsocks",
@@ -341,6 +368,8 @@ class VPNConfig {
       } else if (lower.startsWith('hysteria2://') ||
           lower.startsWith('hy2://')) {
         return _parseHysteria2(s);
+      } else if (lower.startsWith('anytls://') || lower.startsWith('tu5://')) {
+        return _parseAnyTLS(s);
       }
 
       return null;
@@ -766,6 +795,74 @@ class VPNConfig {
           'sni': uri.queryParameters['sni'] ?? uri.host,
           'skipCertVerify': uri.queryParameters['allowInsecure'] == '1',
         },
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 解析 AnyTLS / tu5 链接（非官方统一格式，这里采用与 trojan 类似的直观形态）
+  /// 形如：
+  /// anytls://PASSWORD@server:port?alpn=h2,h3&sni=example.com&insecure=1#Name
+  /// 或：tu5://PASSWORD@server:port?...（兼容别名）
+  static VPNConfig? _parseAnyTLS(String link) {
+    try {
+      final uri = Uri.parse(link);
+      final qp = uri.queryParameters;
+
+      final server = uri.host;
+      // AnyTLS 多数走 443，缺省兜底 443
+      final port = uri.hasPort ? uri.port : 443;
+      final name = uri.fragment.isNotEmpty
+          ? Uri.decodeComponent(uri.fragment)
+          : 'AnyTLS';
+
+      // 密码：优先 userInfo，其次 query（password/pwd）
+      String password = '';
+      if (uri.userInfo.isNotEmpty) password = uri.userInfo;
+      password = (qp['password'] ?? qp['pwd'] ?? password).trim();
+
+      // TLS 相关
+      final sni = (qp['sni'] ?? qp['serverName'] ?? '').trim();
+      final insecureStr = (qp['insecure'] ?? qp['allowInsecure'] ?? '0').trim();
+      final skipCertVerify =
+          insecureStr == '1' ||
+          insecureStr.toLowerCase() == 'true' ||
+          insecureStr.toLowerCase() == 'yes';
+
+      // ALPN（可选）
+      List<String>? alpn;
+      final alpnStr = (qp['alpn'] ?? '').trim();
+      if (alpnStr.isNotEmpty) {
+        alpn = alpnStr
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+
+      // 会话空闲可选参数（直接传递字符串，遵循 sing-box 的时长格式，如 30s）
+      final idleCheck = (qp['idle_session_check_interval'] ?? '').trim();
+      final idleTimeout = (qp['idle_session_timeout'] ?? '').trim();
+      final minIdleStr = (qp['min_idle_session'] ?? '').trim();
+      final minIdle = int.tryParse(minIdleStr);
+
+      final settings = <String, dynamic>{
+        'password': password,
+        if (sni.isNotEmpty) 'sni': sni,
+        'skipCertVerify': skipCertVerify,
+        if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
+        if (idleCheck.isNotEmpty) 'idle_session_check_interval': idleCheck,
+        if (idleTimeout.isNotEmpty) 'idle_session_timeout': idleTimeout,
+        if (minIdle != null) 'min_idle_session': minIdle,
+      };
+
+      return VPNConfig(
+        name: name,
+        type: 'anytls',
+        server: server,
+        port: port,
+        settings: settings,
       );
     } catch (e) {
       return null;

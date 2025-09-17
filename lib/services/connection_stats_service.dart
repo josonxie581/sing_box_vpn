@@ -6,6 +6,27 @@ import 'package:http/http.dart' as http;
 /// 真实连接统计服务
 class ConnectionStatsService {
   static const Duration _timeout = Duration(seconds: 3);
+  static int _clashFailCount = 0;
+  static DateTime? _clashNextProbeAt;
+  static const int _clashFailThreshold = 2; // 超过2次失败则进入冷却
+  static const Duration _clashCooldown = Duration(seconds: 30);
+  static DateTime? _lastNetstatLogAt;
+  static const Duration _netstatLogInterval = Duration(seconds: 15);
+
+  /// 快速探测 127.0.0.1:port 是否在监听
+  static Future<bool> _isLocalPortOpen(int port) async {
+    try {
+      final socket = await Socket.connect(
+        '127.0.0.1',
+        port,
+        timeout: const Duration(milliseconds: 250),
+      );
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// 获取连接统计信息
   static Future<ConnectionStats?> getConnectionStats({
@@ -13,12 +34,21 @@ class ConnectionStatsService {
     String clashApiSecret = '',
   }) async {
     try {
-      // 尝试获取 Clash API 的连接信息
-      final connections = await _getClashConnections(
-        port: clashApiPort,
-        secret: clashApiSecret,
-      );
+      // 仅在端口可用且未处于冷却期时尝试 Clash API
+      final now = DateTime.now();
+      final inCooldown =
+          _clashNextProbeAt != null && now.isBefore(_clashNextProbeAt!);
+      List<ConnectionInfo>? connections;
+      if (!inCooldown && await _isLocalPortOpen(clashApiPort)) {
+        connections = await _getClashConnections(
+          port: clashApiPort,
+          secret: clashApiSecret,
+        );
+      }
       if (connections != null) {
+        // 成功则清零失败与冷却
+        _clashFailCount = 0;
+        _clashNextProbeAt = null;
         return ConnectionStats(
           connections: connections,
           source: ConnectionSource.clashAPI,
@@ -76,11 +106,24 @@ class ConnectionStatsService {
           return null; // 返回 null 以触发 fallback
         }
       } else {
-        print('Clash API 请求失败: 状态码=${response.statusCode}');
+        // 降噪：只在少量失败内输出一次，随后进入冷却
+        if (_clashFailCount < _clashFailThreshold) {
+          print('Clash API 请求失败: 状态码=${response.statusCode}');
+        }
+        _clashFailCount++;
+        if (_clashFailCount == _clashFailThreshold) {
+          _clashNextProbeAt = DateTime.now().add(_clashCooldown);
+        }
       }
     } catch (e) {
-      // Clash API 不可用
-      print('Clash API 连接失败: $e');
+      // Clash API 不可用：降噪 + 冷却
+      if (_clashFailCount < _clashFailThreshold) {
+        print('Clash API 连接失败: $e');
+      }
+      _clashFailCount++;
+      if (_clashFailCount == _clashFailThreshold) {
+        _clashNextProbeAt = DateTime.now().add(_clashCooldown);
+      }
       return null;
     }
     return null;
@@ -92,7 +135,13 @@ class ConnectionStatsService {
 
     try {
       if (Platform.isWindows) {
-        print('使用 netstat 获取系统连接信息...');
+        final now = DateTime.now();
+        final shouldLog =
+            _lastNetstatLogAt == null ||
+            now.difference(_lastNetstatLogAt!) >= _netstatLogInterval;
+        if (shouldLog) {
+          print('使用 netstat 获取系统连接信息...');
+        }
 
         // 获取进程列表（用于PID到进程名的映射）
         final processMap = await _getProcessMap();
@@ -105,14 +154,15 @@ class ConnectionStatsService {
         ], runInShell: true);
         if (result.exitCode == 0) {
           final lines = result.stdout.toString().split('\n');
-          print('netstat 返回 ${lines.length} 行数据');
+          if (shouldLog) {
+            print('netstat 返回 ${lines.length} 行数据');
+            _lastNetstatLogAt = now;
+          }
 
-          int parsedCount = 0;
           for (final line in lines) {
             final conn = _parseWindowsNetstatLine(line, processMap);
             if (conn != null) {
               connections.add(conn);
-              parsedCount++;
             }
           }
           // print('成功解析 $parsedCount 个系统连接');

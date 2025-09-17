@@ -35,6 +35,13 @@ var (
 )
 
 var lastError string
+var lastRestartAt time.Time
+
+// 记录当前运行配置与动态插入的路由规则（JSON 文本形式）
+// pristineConfigJSON 记录“无临时规则”的基线配置
+var baseConfigJSON string
+var currentConfigJSON string
+var dynamicRuleJSONs []string
 
 // 诊断文件路径（若 Dart 侧未注册回调仍可落盘）
 func diagFilePath() string {
@@ -94,6 +101,9 @@ func InitSingBox() int {
 	defer mu.Unlock()
 	dbg("InitSingBox enter")
 
+	if cancel != nil {
+		cancel()
+	}
 	ctx, cancel = context.WithCancel(context.Background())
 	if logCB != nil {
 		msg := C.CString("sing-box 初始化完成")
@@ -112,6 +122,11 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox got lock")
 	defer mu.Unlock()
 	dbg("StartSingBox enter")
+
+	if ctx == nil {
+		// 容忍未显式调用 InitSingBox 的情况
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 
 	if instance != nil {
 		if logCB != nil {
@@ -145,6 +160,10 @@ func StartSingBox(configJSON *C.char) int {
 	// 解析配置（必须使用带上下文的解析以启用各注册表与 typed DNS 等选项）
 	var options option.Options
 	configStr := C.GoString(configJSON)
+	// 刷新基线配置：每次 Start 都将当前传入配置作为新的基线
+	baseConfigJSON = configStr
+	currentConfigJSON = configStr
+	dynamicRuleJSONs = nil
 	ctxWithRegistry := include.Context(ctx)
 	stage = "parse_options"
 	dbg("StartSingBox phase=parse_options begin")
@@ -242,6 +261,9 @@ func StopSingBox() int {
 	}
 
 	instance = nil
+	// 停止后清空当前与基线配置，等待下次 Start 设置
+	currentConfigJSON = ""
+	baseConfigJSON = ""
 
 	if logCB != nil {
 		msg := C.CString("sing-box 已停止")
@@ -313,6 +335,10 @@ func Cleanup() {
 	if cancel != nil {
 		cancel()
 	}
+	// 清理配置记录
+	baseConfigJSON = ""
+	currentConfigJSON = ""
+	dynamicRuleJSONs = nil
 
 	if logCB != nil {
 		msg := C.CString("资源清理完成")
@@ -341,6 +367,176 @@ func RegisterLogCallback(cb C.LogCallback) {
 	mu.Lock()
 	defer mu.Unlock()
 	logCB = cb
+}
+
+// --- 动态路由规则：通过合并配置并平滑重启实现（注意：会短暂中断现有连接） ---
+
+// 合并 baseConfigJSON + dynamicRuleJSONs 到一个新的配置 JSON
+func buildMergedConfig() (string, error) {
+	if baseConfigJSON == "" {
+		return "", fmt.Errorf("no base config available")
+	}
+	// 解析为通用 map 以便操作 route.rules
+	var base map[string]interface{}
+	if err := sjson.Unmarshal([]byte(baseConfigJSON), &base); err != nil {
+		// 尝试使用 currentConfigJSON 作为兜底
+		if currentConfigJSON != "" {
+			if err2 := sjson.Unmarshal([]byte(currentConfigJSON), &base); err2 == nil {
+				goto MERGE_RULES
+			}
+		}
+		return "", fmt.Errorf("unmarshal base: %w", err)
+	}
+MERGE_RULES:
+	route, ok := base["route"].(map[string]interface{})
+	if !ok {
+		route = map[string]interface{}{}
+		base["route"] = route
+	}
+	// 取出现有 rules
+	var rules []interface{}
+	if v, ok := route["rules"].([]interface{}); ok {
+		rules = v
+	} else {
+		rules = []interface{}{}
+	}
+	// 把动态规则插入到最前面（高优先级）
+	for i := len(dynamicRuleJSONs) - 1; i >= 0; i-- { // 逆序插入保持调用顺序
+		rjs := dynamicRuleJSONs[i]
+		var r map[string]interface{}
+		if err := sjson.Unmarshal([]byte(rjs), &r); err != nil {
+			return "", fmt.Errorf("bad rule json: %w", err)
+		}
+		rules = append([]interface{}{r}, rules...)
+	}
+	route["rules"] = rules
+	mergedBytes, err := sjson.Marshal(base)
+	if err != nil {
+		return "", fmt.Errorf("marshal merged: %w", err)
+	}
+	return string(mergedBytes), nil
+}
+
+func restartWithConfig(cfg string) error {
+	// 简单节流：两次重启间隔至少 300ms，避免频繁操作导致卡顿
+	if !lastRestartAt.IsZero() {
+		delta := time.Since(lastRestartAt)
+		if delta < 300*time.Millisecond {
+			time.Sleep(300*time.Millisecond - delta)
+		}
+	}
+	// 若未运行，直接使用 cfg 启动
+	if instance == nil {
+		conf := C.CString(cfg)
+		defer C.free(unsafe.Pointer(conf))
+		r := StartSingBox(conf)
+		if r != 0 && r != -1 { // -1 表示已在运行，不应发生
+			return fmt.Errorf("start failed code=%d", r)
+		}
+		return nil
+	}
+	// 运行中：先关闭再用新配置启动
+	if err := instance.Close(); err != nil {
+		return fmt.Errorf("close: %w", err)
+	}
+	instance = nil
+
+	// 解析与创建
+	var options option.Options
+	ctxWithRegistry := include.Context(ctx)
+	if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(cfg), &options); err != nil {
+		return fmt.Errorf("parse options: %w", err)
+	}
+	var pw log.PlatformWriter
+	if logCB != nil {
+		pw = &ffiPlatformWriter{}
+	}
+	b, err := box.New(box.Options{Context: ctxWithRegistry, Options: options, PlatformLogWriter: pw})
+	if err != nil {
+		return fmt.Errorf("box.New: %w", err)
+	}
+	if err := b.Start(); err != nil {
+		return fmt.Errorf("instance.Start: %w", err)
+	}
+	instance = b
+	currentConfigJSON = cfg
+	lastRestartAt = time.Now()
+	return nil
+}
+
+//export AddRouteRule
+func AddRouteRule(ruleJSON *C.char) int {
+	mu.Lock()
+	defer mu.Unlock()
+	if instance == nil {
+		setLastError(fmt.Errorf("not running"))
+		return -1
+	}
+	r := C.GoString(ruleJSON)
+	// 先验证是合法 JSON
+	var tmp map[string]interface{}
+	if err := sjson.Unmarshal([]byte(r), &tmp); err != nil {
+		setLastError(fmt.Errorf("invalid rule json: %w", err))
+		return -2
+	}
+	// 仅更新内存，并由 ReloadConfig 统一触发一次重启
+	dynamicRuleJSONs = append(dynamicRuleJSONs, r)
+	return 0
+}
+
+//export RemoveRouteRule
+func RemoveRouteRule(ruleJSON *C.char) int {
+	mu.Lock()
+	defer mu.Unlock()
+	if instance == nil {
+		setLastError(fmt.Errorf("not running"))
+		return -1
+	}
+	r := C.GoString(ruleJSON)
+	// 删除匹配的第一项
+	idx := -1
+	for i, v := range dynamicRuleJSONs {
+		if v == r {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		setLastError(fmt.Errorf("rule not found"))
+		return -2
+	}
+	// 仅更新内存，并由 ReloadConfig 统一触发一次重启
+	dynamicRuleJSONs = append(dynamicRuleJSONs[:idx], dynamicRuleJSONs[idx+1:]...)
+	return 0
+}
+
+//export ReloadConfig
+func ReloadConfig() int {
+	mu.Lock()
+	if instance == nil {
+		mu.Unlock()
+		setLastError(fmt.Errorf("not running"))
+		return -1
+	}
+	merged, err := buildMergedConfig()
+	mu.Unlock()
+	if err != nil {
+		setLastError(err)
+		return -2
+	}
+	if err := restartWithConfig(merged); err != nil {
+		setLastError(err)
+		return -3
+	}
+	return 0
+}
+
+//export ClearRouteRules
+func ClearRouteRules() int {
+	mu.Lock()
+	defer mu.Unlock()
+	dynamicRuleJSONs = nil
+	return 0
 }
 
 func main() {

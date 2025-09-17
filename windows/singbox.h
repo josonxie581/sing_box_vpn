@@ -95,6 +95,10 @@ extern __declspec(dllexport) void Cleanup();
 extern __declspec(dllexport) char* SbGetLastError();
 extern __declspec(dllexport) void FreeCString(char* p);
 extern __declspec(dllexport) void RegisterLogCallback(LogCallback cb);
+extern __declspec(dllexport) GoInt AddRouteRule(char* ruleJSON);
+extern __declspec(dllexport) GoInt RemoveRouteRule(char* ruleJSON);
+extern __declspec(dllexport) GoInt ReloadConfig();
+extern __declspec(dllexport) GoInt ClearRouteRules();
 
 #ifdef __cplusplus
 }

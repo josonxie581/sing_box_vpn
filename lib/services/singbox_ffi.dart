@@ -25,6 +25,12 @@ class SingBoxFFI {
   Pointer<Utf8> Function()? _getLastError;
   void Function(Pointer<Utf8>)? _freeCString;
 
+  // 新增：动态路由规则管理
+  int Function(Pointer<Utf8>)? _addRouteRule;
+  int Function(Pointer<Utf8>)? _removeRouteRule;
+  int Function()? _reloadConfig;
+  int Function()? _clearRouteRules;
+
   // 回调函数
   // 日志回调暂不使用，后续可以通过端口消息通道实现
 
@@ -186,6 +192,41 @@ class SingBoxFFI {
     } catch (_) {
       _freeCString = null;
     }
+
+    // 尝试绑定新的路由规则管理函数（可能不存在于旧版DLL）
+    try {
+      _addRouteRule = _lib
+          .lookup<NativeFunction<Int32 Function(Pointer<Utf8>)>>('AddRouteRule')
+          .asFunction<int Function(Pointer<Utf8>)>();
+    } catch (_) {
+      _addRouteRule = null;
+    }
+
+    try {
+      _removeRouteRule = _lib
+          .lookup<NativeFunction<Int32 Function(Pointer<Utf8>)>>(
+            'RemoveRouteRule',
+          )
+          .asFunction<int Function(Pointer<Utf8>)>();
+    } catch (_) {
+      _removeRouteRule = null;
+    }
+
+    try {
+      _reloadConfig = _lib
+          .lookup<NativeFunction<Int32 Function()>>('ReloadConfig')
+          .asFunction<int Function()>();
+    } catch (_) {
+      _reloadConfig = null;
+    }
+    try {
+      _clearRouteRules = _lib
+          .lookup<NativeFunction<Int32 Function()>>('ClearRouteRules')
+          .asFunction<int Function()>();
+    } catch (_) {
+      _clearRouteRules = null;
+    }
+
     _ffiDiag('FFI: _bindFunctions done');
   }
 
@@ -255,6 +296,64 @@ class SingBoxFFI {
   /// 设置日志回调（当前为空实现，原生回调未启用）
   void setLogCallback(void Function(String) callback) {
     // no-op: 若后续启用原生回调，请基于 Dart_Port/SendPort 实现线程安全回调
+  }
+
+  /// 添加临时路由规则（用于延时测试绕过VPN）
+  bool addRouteRule(String ruleJson) {
+    if (_addRouteRule == null) {
+      print('FFI: AddRouteRule函数不可用，可能需要更新DLL');
+      return false;
+    }
+
+    final rulePtr = ruleJson.toNativeUtf8();
+    try {
+      final result = _addRouteRule!(rulePtr);
+      return result == 0;
+    } finally {
+      malloc.free(rulePtr);
+    }
+  }
+
+  /// 移除临时路由规则
+  bool removeRouteRule(String ruleJson) {
+    if (_removeRouteRule == null) {
+      print('FFI: RemoveRouteRule函数不可用，可能需要更新DLL');
+      return false;
+    }
+
+    final rulePtr = ruleJson.toNativeUtf8();
+    try {
+      final result = _removeRouteRule!(rulePtr);
+      return result == 0;
+    } finally {
+      malloc.free(rulePtr);
+    }
+  }
+
+  /// 重新加载配置
+  bool reloadConfig() {
+    if (_reloadConfig == null) {
+      print('FFI: ReloadConfig函数不可用，可能需要更新DLL');
+      return false;
+    }
+
+    final result = _reloadConfig!();
+    return result == 0;
+  }
+
+  /// 清空所有临时路由规则
+  bool clearRouteRules() {
+    if (_clearRouteRules == null) {
+      print('FFI: ClearRouteRules函数不可用，可能需要更新DLL');
+      return false;
+    }
+    final result = _clearRouteRules!();
+    return result == 0;
+  }
+
+  /// 检查是否支持动态路由规则
+  bool get supportsRouteRules {
+    return _addRouteRule != null && _removeRouteRule != null;
   }
 }
 
