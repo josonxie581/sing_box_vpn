@@ -274,6 +274,9 @@ class ConnectionStatsService {
         rule: 'SYSTEM',
         target: '直连',
         startTime: DateTime.now(), // 记录连接发现时间作为开始时间
+        domain: null,  // netstat 不提供域名信息
+        proxyProtocol: null,  // netstat 不提供代理协议
+        chains: null,
       );
     } catch (e) {
       return null;
@@ -341,6 +344,9 @@ class ConnectionInfo {
   final String rule;
   final String target;
   final DateTime startTime;
+  final String? domain;  // 域名（如果有的话）
+  final String? proxyProtocol;  // 代理协议（如 Shadowsocks, VMess, Trojan 等）
+  final List<String>? chains;  // 完整的代理链
 
   ConnectionInfo({
     required this.id,
@@ -358,6 +364,9 @@ class ConnectionInfo {
     this.rule = '',
     this.target = '',
     DateTime? startTime,
+    this.domain,
+    this.proxyProtocol,
+    this.chains,
   }) : startTime = startTime ?? DateTime.now();
 
   /// 从 Clash API 数据创建连接信息
@@ -370,10 +379,55 @@ class ConnectionInfo {
         ? DateTime.tryParse(data['start']) ?? DateTime.now()
         : DateTime.now();
 
+    // 获取域名和IP
+    final domain = metadata['host']?.toString();
+    final destinationIP = metadata['destinationIP']?.toString() ?? 'unknown';
+    final destinationPort = metadata['destinationPort']?.toString() ?? '';
+
+    // 优先使用IP，如果没有IP则使用域名
+    final hostDisplay = destinationIP != 'unknown' ? destinationIP : (domain ?? 'unknown');
+
+    // 解析代理链
+    final chains = (data['chains'] as List?)?.cast<String>() ?? [];
+
+    // 推测代理协议（从代理链中提取）
+    String? proxyProtocol;
+    if (chains.isNotEmpty) {
+      final proxyName = chains.firstWhere(
+        (chain) => chain != 'DIRECT' && chain != 'REJECT',
+        orElse: () => '',
+      );
+      // 尝试从代理名称中提取协议类型
+      // 例如："vmess-us-01" -> "VMess", "trojan-hk" -> "Trojan"
+      if (proxyName.isNotEmpty) {
+        final lowerName = proxyName.toLowerCase();
+        if (lowerName.contains('vmess')) {
+          proxyProtocol = 'VMess';
+        } else if (lowerName.contains('vless')) {
+          proxyProtocol = 'VLESS';
+        } else if (lowerName.contains('trojan')) {
+          proxyProtocol = 'Trojan';
+        } else if (lowerName.contains('shadowsocks') || lowerName.contains('ss')) {
+          proxyProtocol = 'Shadowsocks';
+        } else if (lowerName.contains('ssr')) {
+          proxyProtocol = 'ShadowsocksR';
+        } else if (lowerName.contains('hysteria')) {
+          proxyProtocol = 'Hysteria';
+        } else if (lowerName.contains('tuic')) {
+          proxyProtocol = 'TUIC';
+        } else if (lowerName.contains('wireguard') || lowerName.contains('wg')) {
+          proxyProtocol = 'WireGuard';
+        } else if (lowerName.contains('http')) {
+          proxyProtocol = 'HTTP';
+        } else if (lowerName.contains('socks')) {
+          proxyProtocol = 'SOCKS';
+        }
+      }
+    }
+
     return ConnectionInfo(
       id: id,
-      host:
-          '${metadata['destinationIP'] ?? metadata['host'] ?? 'unknown'}:${metadata['destinationPort'] ?? ''}',
+      host: '$hostDisplay:$destinationPort',
       localAddress:
           '${metadata['sourceIP'] ?? '127.0.0.1'}:${metadata['sourcePort'] ?? ''}',
       protocol: metadata['network'] ?? 'tcp',
@@ -386,19 +440,58 @@ class ConnectionInfo {
       downloadSpeed: 0,
       duration: DateTime.now().difference(startTime),
       rule: data['rule'] ?? 'DIRECT',
-      target: data['chains']?.last ?? 'DIRECT',
+      target: chains.isNotEmpty ? chains.last : 'DIRECT',
       startTime: startTime,
+      domain: domain,
+      proxyProtocol: proxyProtocol,
+      chains: chains,
     );
   }
 
   /// 转换为显示用的 Map
   Map<String, dynamic> toDisplayMap() {
+    // 解析主机和端口
+    String hostAddr = host;
+    String hostPort = '';
+    if (host.contains(':')) {
+      final parts = host.split(':');
+      hostAddr = parts[0];
+      hostPort = parts.length > 1 ? parts[1] : '';
+    }
+
+    // 解析本地地址和端口
+    String localAddr = localAddress;
+    String localPort = '';
+    if (localAddress.contains(':')) {
+      final parts = localAddress.split(':');
+      localAddr = parts[0];
+      localPort = parts.length > 1 ? parts[1] : '';
+    }
+
+    // 获取进程名称（只显示文件名，不显示路径）
+    String displayProcess = process;
+    if (process.contains('\\')) {
+      displayProcess = process.split('\\').last;
+    } else if (process.contains('/')) {
+      displayProcess = process.split('/').last;
+    }
+    if (displayProcess.isEmpty) {
+      displayProcess = 'PID:$pid';
+    }
+
     return {
       'id': id,
       'host': host,
+      'hostAddr': hostAddr,
+      'hostPort': hostPort,
       'localPort': localAddress,
-      'process': process.isNotEmpty ? process : 'PID:$pid',
-      'protocol': protocol,
+      'localAddr': localAddr,
+      'localPortOnly': localPort,
+      'process': displayProcess,
+      'processFullPath': process,
+      'pid': pid,
+      'protocol': protocol.toUpperCase(),
+      'state': state,
       'uploadBytes': uploadBytes,
       'downloadBytes': downloadBytes,
       'uploadSpeed': uploadSpeed,
@@ -407,6 +500,10 @@ class ConnectionInfo {
       'target': target,
       'duration': duration,
       'startTime': startTime,
+      'totalBytes': uploadBytes + downloadBytes,
+      'domain': domain,
+      'proxyProtocol': proxyProtocol,
+      'chains': chains,
     };
   }
 }

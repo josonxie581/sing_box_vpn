@@ -9,6 +9,7 @@ import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 
 import 'providers/vpn_provider_v2.dart';
 import 'services/improved_traffic_stats_service.dart';
+import 'services/singbox_ffi.dart';
 import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
@@ -21,6 +22,12 @@ void main() async {
   await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
 
   await windowManager.ensureInitialized();
+
+  // 提前预加载 sing-box FFI 库（异步执行，不阻塞启动流程）
+  if (Platform.isWindows) {
+    // 异步预加载，不等待完成，这样不会阻塞应用启动
+    SingBoxFFI.preloadLibrary();
+  }
 
   // 在应用首次启动时弹出UAC权限请求
   if (Platform.isWindows) {

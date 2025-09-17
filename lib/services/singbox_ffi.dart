@@ -45,6 +45,24 @@ class SingBoxFFI {
     return _instance!;
   }
 
+  /// 提前初始化（在应用启动时调用）
+  static Future<void> preloadLibrary() async {
+    try {
+      print('[SingBoxFFI] 开始预加载 sing-box 动态库...');
+      final stopwatch = Stopwatch()..start();
+
+      // 触发单例创建，这会自动调用 _loadLibrary
+      final _ = instance;
+
+      stopwatch.stop();
+      print('[SingBoxFFI] sing-box 动态库预加载完成，耗时: ${stopwatch.elapsedMilliseconds}ms');
+    } catch (e) {
+      print('[SingBoxFFI] sing-box 动态库预加载失败: $e');
+      // 不抛出异常，允许应用继续运行
+      // 实际使用时会再次尝试加载
+    }
+  }
+
   /// 加载动态库
   void _loadLibrary() {
     final libraryPath = _getLibraryPath();
@@ -62,8 +80,6 @@ class SingBoxFFI {
     } catch (e) {
       _ffiDiag('FFI: set CWD failed: $e');
     }
-
-    // 移除本地 Wintun 预加载：守护进程模式统一处理 TUN，应用侧不再尝试显式加载 wintun.dll
 
     final sw = Stopwatch()..start();
     bool finished = false;

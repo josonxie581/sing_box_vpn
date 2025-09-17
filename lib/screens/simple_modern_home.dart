@@ -7,7 +7,7 @@ import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
 // import 'add_config_page.dart';
-import 'connection_status_page.dart';
+import 'enhanced_connection_status_page.dart';
 import 'routing_rules_page.dart';
 import 'dns_settings_page.dart';
 import 'config_management_page.dart';
@@ -1005,7 +1005,7 @@ class SimpleModernHome extends StatelessWidget {
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            const ConnectionStatusPage(),
+            const EnhancedConnectionStatusPage(),
         transitionDuration: const Duration(milliseconds: 300),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);

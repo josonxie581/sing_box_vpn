@@ -479,8 +479,8 @@ class VPNProviderV2 extends ChangeNotifier {
         isConnected: isConnected,
         currentConfig: currentConfig,
         onEach: (cfg, ping) {
-          _configPings[cfg.id] = ping;
-          // 实时通知UI更新每个节点的延时显示
+          final sanitized = _sanitizeLatency(cfg, ping);
+          _configPings[cfg.id] = sanitized;
           notifyListeners();
         },
         onProgress: (done, total) {
@@ -543,13 +543,14 @@ class VPNProviderV2 extends ChangeNotifier {
   Future<void> pingConfig(VPNConfig config) async {
     try {
       print('测试延时: ${config.name}, 连接状态: $isConnected');
-      final delay = await PingService.pingConfig(
-        config,
-        isConnected: isConnected,
-        currentConfig: currentConfig,
-      );
-      print('延时结果: ${config.name} -> ${delay}ms');
-      _configPings[config.id] = delay;
+      final delay = await PingService.pingConfig(
+        config,
+        isConnected: isConnected,
+        currentConfig: currentConfig,
+      );
+      final sanitized = _sanitizeLatency(config, delay);
+      print('测试延时: ${config.name} -> ${sanitized}ms');
+      _configPings[config.id] = sanitized;
     } catch (e) {
       print('延时测试失败: ${config.name}, 错误: $e');
       _configPings[config.id] = -1;
@@ -777,6 +778,69 @@ class VPNProviderV2 extends ChangeNotifier {
     return await PrivilegeManager.instance.requestElevation(
       reason: reason ?? '启用 TUN 模式需要管理员权限',
     );
+  }
+
+  static const int _suspiciousLatencyThresholdMs = 5;
+
+  int _sanitizeLatency(VPNConfig config, int latency) {
+    if (latency < 0) {
+      return latency;
+    }
+    if (latency > _suspiciousLatencyThresholdMs) {
+      return latency;
+    }
+    if (_isLocalOrPrivateHost(config.server)) {
+      return latency;
+    }
+
+    print(
+      '[DEBUG] Latency ${latency}ms looks suspicious for ${config.name}, mark as timeout',
+    );
+    return -1;
+  }
+
+  bool _isLocalOrPrivateHost(String host) {
+    final trimmed = host.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    if (trimmed.toLowerCase() == 'localhost') {
+      return true;
+    }
+
+    final parsed = InternetAddress.tryParse(trimmed);
+    if (parsed == null) {
+      return false;
+    }
+
+    if (parsed.isLoopback || parsed.isLinkLocal) {
+      return true;
+    }
+
+    if (parsed.type == InternetAddressType.IPv4) {
+      final parts = parsed.address.split('.').map(int.parse).toList();
+      final first = parts[0];
+      final second = parts[1];
+      if (first == 10) {
+        return true;
+      }
+      if (first == 192 && second == 168) {
+        return true;
+      }
+      if (first == 172 && second >= 16 && second <= 31) {
+        return true;
+      }
+      if (first == 169 && second == 254) {
+        return true;
+      }
+    } else {
+      final lower = parsed.address.toLowerCase();
+      if (lower.startsWith('fc') || lower.startsWith('fd')) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // ============== 私有方法 ==============
