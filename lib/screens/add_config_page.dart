@@ -372,6 +372,18 @@ class _AddConfigPageState extends State<AddConfigPage>
                                   child: Text('Trojan'),
                                 ),
                                 DropdownMenuItem(
+                                  value: 'anytls',
+                                  child: Text('AnyTLS'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'shadowtls',
+                                  child: Text('ShadowTLS'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'hysteria',
+                                  child: Text('Hysteria'),
+                                ),
+                                DropdownMenuItem(
                                   value: 'hysteria2',
                                   child: Text('Hysteria2'),
                                 ),
@@ -822,6 +834,9 @@ class _AddConfigPageState extends State<AddConfigPage>
 
       case 'trojan':
       case 'hysteria2':
+      case 'anytls':
+      case 'shadowtls':
+      case 'hysteria':
         return [
           _buildTextFormField(
             controller: _passwordController,
@@ -1139,8 +1154,17 @@ class _AddConfigPageState extends State<AddConfigPage>
           }
           break;
         case 'trojan':
+        case 'anytls':
+        case 'shadowtls':
+        case 'hysteria':
           settings['password'] = _passwordController.text;
           settings['skipCertVerify'] = _skipCertVerify;
+          if (_alpnController.text.isNotEmpty) {
+            settings['alpn'] = _alpnController.text
+                .split(',')
+                .map((e) => e.trim())
+                .toList();
+          }
           break;
         case 'hysteria2':
           settings['password'] = _passwordController.text;

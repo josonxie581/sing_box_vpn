@@ -100,6 +100,8 @@ class YamlParserService {
       case 'hysteria2':
       case 'hy2':
         return _parseHysteria2Config(name, server, port, proxy);
+      case 'hysteria':
+        return _parseHysteriaConfig(name, server, port, proxy);
       case 'tuic':
         return _parseTuicConfig(name, server, port, proxy);
       case 'anytls':
@@ -109,6 +111,8 @@ class YamlParserService {
         return _parseSocksConfig(name, server, port, proxy);
       case 'http':
         return _parseHttpConfig(name, server, port, proxy);
+      case 'shadowtls':
+        return _parseShadowTlsConfig(name, server, port, proxy);
       default:
         print('不支持的代理类型: $type');
         return null;
@@ -337,6 +341,53 @@ class YamlParserService {
     );
   }
 
+  /// 解析 Hysteria v1 配置
+  static VPNConfig _parseHysteriaConfig(
+    String name,
+    String server,
+    int port,
+    YamlMap proxy,
+  ) {
+    final password =
+        proxy['auth_str']?.toString() ?? proxy['password']?.toString() ?? '';
+    final authB64 = proxy['auth']?.toString() ?? '';
+    final sni = proxy['sni']?.toString() ?? server;
+    final skipCertVerify = _parseBool(proxy['skip-cert-verify']) ?? false;
+
+    // 带宽：支持 up_mbps/down_mbps 数字，或 up/down 字符串
+    final upMbps = _parseInt(proxy['up_mbps']);
+    final downMbps = _parseInt(proxy['down_mbps']);
+    final up = proxy['up']?.toString() ?? '';
+    final down = proxy['down']?.toString() ?? '';
+
+    // ALPN
+    List<String>? alpn;
+    final alpnData = proxy['alpn'];
+    if (alpnData is YamlList) {
+      alpn = alpnData.map((e) => e.toString()).toList();
+    }
+
+    final settings = <String, dynamic>{
+      if (password.isNotEmpty) 'password': password,
+      if (authB64.isNotEmpty) 'auth': authB64,
+      'sni': sni,
+      'skipCertVerify': skipCertVerify,
+      if (upMbps != null) 'up_mbps': upMbps,
+      if (downMbps != null) 'down_mbps': downMbps,
+      if (up.isNotEmpty) 'up': up,
+      if (down.isNotEmpty) 'down': down,
+      if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
+    };
+
+    return VPNConfig(
+      name: name,
+      type: 'hysteria',
+      server: server,
+      port: port,
+      settings: settings,
+    );
+  }
+
   /// 解析 TUIC 配置
   static VPNConfig _parseTuicConfig(
     String name,
@@ -423,6 +474,42 @@ class YamlParserService {
     );
   }
 
+  /// 解析 ShadowTLS 配置
+  static VPNConfig _parseShadowTlsConfig(
+    String name,
+    String server,
+    int port,
+    YamlMap proxy,
+  ) {
+    final version = _parseInt(proxy['version']) ?? 1;
+    final password = proxy['password']?.toString() ?? '';
+    final sni =
+        proxy['sni']?.toString() ?? proxy['servername']?.toString() ?? server;
+    final skipCertVerify = _parseBool(proxy['skip-cert-verify']) ?? false;
+
+    List<String>? alpn;
+    final alpnData = proxy['alpn'];
+    if (alpnData is YamlList) {
+      alpn = alpnData.map((e) => e.toString()).toList();
+    }
+
+    final settings = <String, dynamic>{
+      'version': version,
+      if (password.isNotEmpty) 'password': password,
+      'sni': sni,
+      'skipCertVerify': skipCertVerify,
+      if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
+    };
+
+    return VPNConfig(
+      name: name,
+      type: 'shadowtls',
+      server: server,
+      port: port,
+      settings: settings,
+    );
+  }
+
   /// 安全解析整数
   static int? _parseInt(dynamic value) {
     if (value == null) return null;
@@ -451,6 +538,7 @@ class YamlParserService {
       'ss',
       'vmess',
       'vless',
+      'hysteria',
       'hysteria2',
       'hy2',
       'tuic',
@@ -458,6 +546,7 @@ class YamlParserService {
       'socks5',
       'socks',
       'http',
+      'shadowtls',
     ];
   }
 

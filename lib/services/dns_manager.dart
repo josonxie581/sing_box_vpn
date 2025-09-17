@@ -61,6 +61,39 @@ class DnsManager {
     ),
   ];
 
+  // ===== Tailscale Endpoint settings =====
+  bool _tailscaleEnabled = false;
+  String _tsStateDirectory = 'tailscale';
+  String _tsAuthKey = '';
+  String _tsControlUrl = '';
+  bool _tsEphemeral = false;
+  String _tsHostname = '';
+  bool _tsAcceptRoutes = false;
+  String _tsExitNode = '';
+  bool _tsExitNodeAllowLanAccess = false;
+  List<String> _tsAdvertiseRoutes = [];
+  bool _tsAdvertiseExitNode = false;
+  String _tsUdpTimeout = '5m';
+
+  // ===== WireGuard Endpoint settings =====
+  bool _wgEnabled = false;
+  bool _wgSystem = false;
+  String _wgName = '';
+  int _wgMtu = 1408;
+  List<String> _wgAddress = [];
+  String _wgPrivateKey = '';
+  int _wgListenPort = 0; // 0 = not set
+  // Single peer (UI 先支持 1 个 Peer，后续可扩展为多 Peer 列表)
+  String _wgPeerAddress = '';
+  int _wgPeerPort = 0;
+  String _wgPeerPublicKey = '';
+  String _wgPeerPreSharedKey = '';
+  List<String> _wgPeerAllowedIps = [];
+  int _wgPeerKeepalive = 0; // seconds, 0 to disable
+  List<int> _wgPeerReserved = const [0, 0, 0];
+  String _wgUdpTimeout = '5m';
+  int _wgWorkers = 0; // 0 -> CPU count
+
   // Getters
   bool get tunHijackDns => _tunHijackDns;
   bool get resolveInboundDomains => _resolveInboundDomains;
@@ -75,6 +108,36 @@ class DnsManager {
   List<DnsServer> get dnsServers => List.unmodifiable(_dnsServers);
   List<StaticIpMapping> get staticIpMappings =>
       List.unmodifiable(_staticIpMappings);
+  bool get tailscaleEnabled => _tailscaleEnabled;
+  String get tsStateDirectory => _tsStateDirectory;
+  String get tsAuthKey => _tsAuthKey;
+  String get tsControlUrl => _tsControlUrl;
+  bool get tsEphemeral => _tsEphemeral;
+  String get tsHostname => _tsHostname;
+  bool get tsAcceptRoutes => _tsAcceptRoutes;
+  String get tsExitNode => _tsExitNode;
+  bool get tsExitNodeAllowLanAccess => _tsExitNodeAllowLanAccess;
+  List<String> get tsAdvertiseRoutes => List.unmodifiable(_tsAdvertiseRoutes);
+  bool get tsAdvertiseExitNode => _tsAdvertiseExitNode;
+  String get tsUdpTimeout => _tsUdpTimeout;
+
+  // WireGuard getters
+  bool get wgEnabled => _wgEnabled;
+  bool get wgSystem => _wgSystem;
+  String get wgName => _wgName;
+  int get wgMtu => _wgMtu;
+  List<String> get wgAddress => List.unmodifiable(_wgAddress);
+  String get wgPrivateKey => _wgPrivateKey;
+  int get wgListenPort => _wgListenPort;
+  String get wgPeerAddress => _wgPeerAddress;
+  int get wgPeerPort => _wgPeerPort;
+  String get wgPeerPublicKey => _wgPeerPublicKey;
+  String get wgPeerPreSharedKey => _wgPeerPreSharedKey;
+  List<String> get wgPeerAllowedIps => List.unmodifiable(_wgPeerAllowedIps);
+  int get wgPeerKeepalive => _wgPeerKeepalive;
+  List<int> get wgPeerReserved => List.unmodifiable(_wgPeerReserved);
+  String get wgUdpTimeout => _wgUdpTimeout;
+  int get wgWorkers => _wgWorkers;
 
   // Setters（修改后立即持久化）
   set tunHijackDns(bool value) {
@@ -128,6 +191,149 @@ class DnsManager {
     _saveSettings();
   }
 
+  set tailscaleEnabled(bool v) {
+    _tailscaleEnabled = v;
+    _saveSettings();
+  }
+
+  set tsStateDirectory(String v) {
+    _tsStateDirectory = v;
+    _saveSettings();
+  }
+
+  set tsAuthKey(String v) {
+    _tsAuthKey = v;
+    _saveSettings();
+  }
+
+  set tsControlUrl(String v) {
+    _tsControlUrl = v;
+    _saveSettings();
+  }
+
+  set tsEphemeral(bool v) {
+    _tsEphemeral = v;
+    _saveSettings();
+  }
+
+  set tsHostname(String v) {
+    _tsHostname = v;
+    _saveSettings();
+  }
+
+  set tsAcceptRoutes(bool v) {
+    _tsAcceptRoutes = v;
+    _saveSettings();
+  }
+
+  set tsExitNode(String v) {
+    _tsExitNode = v;
+    _saveSettings();
+  }
+
+  set tsExitNodeAllowLanAccess(bool v) {
+    _tsExitNodeAllowLanAccess = v;
+    _saveSettings();
+  }
+
+  set tsAdvertiseRoutes(List<String> v) {
+    _tsAdvertiseRoutes = v;
+    _saveSettings();
+  }
+
+  set tsAdvertiseExitNode(bool v) {
+    _tsAdvertiseExitNode = v;
+    _saveSettings();
+  }
+
+  set tsUdpTimeout(String v) {
+    _tsUdpTimeout = v;
+    _saveSettings();
+  }
+
+  // WireGuard setters
+  set wgEnabled(bool v) {
+    _wgEnabled = v;
+    _saveSettings();
+  }
+
+  set wgSystem(bool v) {
+    _wgSystem = v;
+    _saveSettings();
+  }
+
+  set wgName(String v) {
+    _wgName = v;
+    _saveSettings();
+  }
+
+  set wgMtu(int v) {
+    _wgMtu = v > 0 ? v : 1408;
+    _saveSettings();
+  }
+
+  set wgAddress(List<String> v) {
+    _wgAddress = v;
+    _saveSettings();
+  }
+
+  set wgPrivateKey(String v) {
+    _wgPrivateKey = v;
+    _saveSettings();
+  }
+
+  set wgListenPort(int v) {
+    _wgListenPort = v;
+    _saveSettings();
+  }
+
+  set wgPeerAddress(String v) {
+    _wgPeerAddress = v;
+    _saveSettings();
+  }
+
+  set wgPeerPort(int v) {
+    _wgPeerPort = v;
+    _saveSettings();
+  }
+
+  set wgPeerPublicKey(String v) {
+    _wgPeerPublicKey = v;
+    _saveSettings();
+  }
+
+  set wgPeerPreSharedKey(String v) {
+    _wgPeerPreSharedKey = v;
+    _saveSettings();
+  }
+
+  set wgPeerAllowedIps(List<String> v) {
+    _wgPeerAllowedIps = v;
+    _saveSettings();
+  }
+
+  set wgPeerKeepalive(int v) {
+    _wgPeerKeepalive = v;
+    _saveSettings();
+  }
+
+  set wgPeerReserved(List<int> v) {
+    if (v.length == 3) {
+      _wgPeerReserved = v;
+      _saveSettings();
+    }
+  }
+
+  set wgUdpTimeout(String v) {
+    _wgUdpTimeout = v;
+    _saveSettings();
+  }
+
+  set wgWorkers(int v) {
+    _wgWorkers = v;
+    _saveSettings();
+  }
+
   /// 初始化 DNS 配置（从 SharedPreferences 读取）
   Future<void> init() async {
     try {
@@ -142,6 +348,48 @@ class DnsManager {
       _strictRoute = prefs.getBool('dns_strict_route') ?? false;
       _enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
       _localPort = prefs.getInt('dns_local_port') ?? 7890;
+
+      // Tailscale settings
+      _tailscaleEnabled = prefs.getBool('ts_enabled') ?? false;
+      _tsStateDirectory = prefs.getString('ts_state_dir') ?? 'tailscale';
+      _tsAuthKey = prefs.getString('ts_auth_key') ?? '';
+      _tsControlUrl = prefs.getString('ts_control_url') ?? '';
+      _tsEphemeral = prefs.getBool('ts_ephemeral') ?? false;
+      _tsHostname = prefs.getString('ts_hostname') ?? '';
+      _tsAcceptRoutes = prefs.getBool('ts_accept_routes') ?? false;
+      _tsExitNode = prefs.getString('ts_exit_node') ?? '';
+      _tsExitNodeAllowLanAccess =
+          prefs.getBool('ts_exit_node_allow_lan') ?? false;
+      _tsAdvertiseRoutes = (prefs.getStringList('ts_advertise_routes') ?? []);
+      _tsAdvertiseExitNode = prefs.getBool('ts_advertise_exit_node') ?? false;
+      _tsUdpTimeout = prefs.getString('ts_udp_timeout') ?? '5m';
+
+      // WireGuard settings
+      _wgEnabled = prefs.getBool('wg_enabled') ?? false;
+      _wgSystem = prefs.getBool('wg_system') ?? false;
+      _wgName = prefs.getString('wg_name') ?? '';
+      _wgMtu = prefs.getInt('wg_mtu') ?? 1408;
+      _wgAddress = prefs.getStringList('wg_address') ?? [];
+      _wgPrivateKey = prefs.getString('wg_private_key') ?? '';
+      _wgListenPort = prefs.getInt('wg_listen_port') ?? 0;
+      _wgPeerAddress = prefs.getString('wg_peer_address') ?? '';
+      _wgPeerPort = prefs.getInt('wg_peer_port') ?? 0;
+      _wgPeerPublicKey = prefs.getString('wg_peer_public_key') ?? '';
+      _wgPeerPreSharedKey = prefs.getString('wg_peer_psk') ?? '';
+      _wgPeerAllowedIps = prefs.getStringList('wg_peer_allowed_ips') ?? [];
+      _wgPeerKeepalive = prefs.getInt('wg_peer_keepalive') ?? 0;
+      final reservedStrList =
+          prefs.getStringList('wg_peer_reserved') ?? ['0', '0', '0'];
+      _wgPeerReserved = reservedStrList
+          .map((e) => int.tryParse(e) ?? 0)
+          .toList()
+          .take(3)
+          .toList();
+      while (_wgPeerReserved.length < 3) {
+        _wgPeerReserved.add(0);
+      }
+      _wgUdpTimeout = prefs.getString('wg_udp_timeout') ?? '5m';
+      _wgWorkers = prefs.getInt('wg_workers') ?? 0;
 
       // 加载DNS服务器配置
       await _loadDnsServers();
@@ -167,6 +415,41 @@ class DnsManager {
       await prefs.setBool('dns_strict_route', _strictRoute);
       await prefs.setBool('dns_enable_ipv6', _enableIpv6);
       await prefs.setInt('dns_local_port', _localPort);
+
+      // Save Tailscale settings
+      await prefs.setBool('ts_enabled', _tailscaleEnabled);
+      await prefs.setString('ts_state_dir', _tsStateDirectory);
+      await prefs.setString('ts_auth_key', _tsAuthKey);
+      await prefs.setString('ts_control_url', _tsControlUrl);
+      await prefs.setBool('ts_ephemeral', _tsEphemeral);
+      await prefs.setString('ts_hostname', _tsHostname);
+      await prefs.setBool('ts_accept_routes', _tsAcceptRoutes);
+      await prefs.setString('ts_exit_node', _tsExitNode);
+      await prefs.setBool('ts_exit_node_allow_lan', _tsExitNodeAllowLanAccess);
+      await prefs.setStringList('ts_advertise_routes', _tsAdvertiseRoutes);
+      await prefs.setBool('ts_advertise_exit_node', _tsAdvertiseExitNode);
+      await prefs.setString('ts_udp_timeout', _tsUdpTimeout);
+
+      // Save WireGuard settings
+      await prefs.setBool('wg_enabled', _wgEnabled);
+      await prefs.setBool('wg_system', _wgSystem);
+      await prefs.setString('wg_name', _wgName);
+      await prefs.setInt('wg_mtu', _wgMtu);
+      await prefs.setStringList('wg_address', _wgAddress);
+      await prefs.setString('wg_private_key', _wgPrivateKey);
+      await prefs.setInt('wg_listen_port', _wgListenPort);
+      await prefs.setString('wg_peer_address', _wgPeerAddress);
+      await prefs.setInt('wg_peer_port', _wgPeerPort);
+      await prefs.setString('wg_peer_public_key', _wgPeerPublicKey);
+      await prefs.setString('wg_peer_psk', _wgPeerPreSharedKey);
+      await prefs.setStringList('wg_peer_allowed_ips', _wgPeerAllowedIps);
+      await prefs.setInt('wg_peer_keepalive', _wgPeerKeepalive);
+      await prefs.setStringList(
+        'wg_peer_reserved',
+        _wgPeerReserved.map((e) => e.toString()).toList(),
+      );
+      await prefs.setString('wg_udp_timeout', _wgUdpTimeout);
+      await prefs.setInt('wg_workers', _wgWorkers);
 
       // 保存DNS服务器配置
       await _saveDnsServers();
@@ -654,6 +937,87 @@ class DnsManager {
       _ipv6RuntimeAvailable = false;
     }
     return _ipv6RuntimeAvailable;
+  }
+
+  /// 生成 endpoints 配置（Tailscale / WireGuard）
+  List<Map<String, dynamic>> generateEndpointsConfig() {
+    final result = <Map<String, dynamic>>[];
+
+    // Tailscale endpoint
+    if (_tailscaleEnabled) {
+      final ep = <String, dynamic>{'type': 'tailscale', 'tag': 'ts-ep'};
+      if (_tsStateDirectory.trim().isNotEmpty) {
+        ep['state_directory'] = _tsStateDirectory.trim();
+      }
+      if (_tsAuthKey.trim().isNotEmpty) ep['auth_key'] = _tsAuthKey.trim();
+      if (_tsControlUrl.trim().isNotEmpty) {
+        ep['control_url'] = _tsControlUrl.trim();
+      }
+      if (_tsEphemeral) ep['ephemeral'] = true;
+      if (_tsHostname.trim().isNotEmpty) ep['hostname'] = _tsHostname.trim();
+      if (_tsAcceptRoutes) ep['accept_routes'] = true;
+      if (_tsExitNode.trim().isNotEmpty) ep['exit_node'] = _tsExitNode.trim();
+      if (_tsExitNodeAllowLanAccess) ep['exit_node_allow_lan_access'] = true;
+      if (_tsAdvertiseRoutes.isNotEmpty) {
+        ep['advertise_routes'] = _tsAdvertiseRoutes;
+      }
+      if (_tsAdvertiseExitNode) ep['advertise_exit_node'] = true;
+      if (_tsUdpTimeout.trim().isNotEmpty) {
+        ep['udp_timeout'] = _tsUdpTimeout.trim();
+      }
+      result.add(ep);
+    }
+
+    // WireGuard endpoint（仅在配置完整时注入，避免半成品配置影响启动）
+    if (_wgEnabled) {
+      final hasCore =
+          _wgPrivateKey.trim().isNotEmpty &&
+          _wgPeerAddress.trim().isNotEmpty &&
+          _wgPeerPort > 0 &&
+          _wgPeerPublicKey.trim().isNotEmpty &&
+          _wgPeerAllowedIps.isNotEmpty;
+
+      if (hasCore) {
+        final ep = <String, dynamic>{'type': 'wireguard', 'tag': 'wg-ep'};
+
+        if (_wgSystem) ep['system'] = true;
+        if (_wgName.trim().isNotEmpty) ep['name'] = _wgName.trim();
+        if (_wgMtu > 0) ep['mtu'] = _wgMtu;
+        if (_wgAddress.isNotEmpty) ep['address'] = _wgAddress;
+        ep['private_key'] = _wgPrivateKey.trim();
+        if (_wgListenPort > 0) ep['listen_port'] = _wgListenPort;
+
+        // Build single peer (核心字段已校验，剩余为可选)
+        final peer = <String, dynamic>{
+          'address': _wgPeerAddress.trim(),
+          'port': _wgPeerPort,
+          'public_key': _wgPeerPublicKey.trim(),
+          'allowed_ips': _wgPeerAllowedIps,
+        };
+        if (_wgPeerPreSharedKey.trim().isNotEmpty) {
+          peer['pre_shared_key'] = _wgPeerPreSharedKey.trim();
+        }
+        if (_wgPeerKeepalive > 0) {
+          peer['persistent_keepalive_interval'] = _wgPeerKeepalive;
+        }
+        if (_wgPeerReserved.length == 3) {
+          peer['reserved'] = _wgPeerReserved;
+        }
+        ep['peers'] = [peer];
+
+        if (_wgUdpTimeout.trim().isNotEmpty)
+          ep['udp_timeout'] = _wgUdpTimeout.trim();
+        if (_wgWorkers > 0) ep['workers'] = _wgWorkers;
+
+        result.add(ep);
+      } else {
+        // 配置被启用但不完整：为了安全不注入 endpoint，避免影响启动或路由
+        // 可在调试时输出提示（不打断运行）
+        // print('[WG endpoint] 已启用但配置不完整，已跳过注入');
+      }
+    }
+
+    return result;
   }
 }
 

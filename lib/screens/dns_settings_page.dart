@@ -151,6 +151,16 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
                 const SizedBox(height: 16),
 
+                // Tailscale Endpoint
+                _buildTailscaleEndpointCard(),
+
+                const SizedBox(height: 16),
+
+                // WireGuard Endpoint
+                _buildWireGuardEndpointCard(),
+
+                const SizedBox(height: 16),
+
                 // 代理流量解析通道
                 _buildProxyResolverCard(),
 
@@ -489,10 +499,360 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
     );
   }
 
-  /// 构建代理流量解析通道卡片
-  Widget _buildProxyResolverCard() {
+  /// 构建Tailscale Endpoint卡片
+  Widget _buildTailscaleEndpointCard() {
+    final provider = context.read<VPNProviderV2>();
+
+    String advertiseRoutesPreview() {
+      final list = _dnsManager.tsAdvertiseRoutes;
+      if (list.isEmpty) return '未配置';
+      return list.join(', ');
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNeon.withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.link_outlined,
+                  color: AppTheme.primaryNeon,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Tailscale Endpoint',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              Switch(
+                value: _dnsManager.tailscaleEnabled,
+                onChanged: (v) {
+                  setState(() => _dnsManager.tailscaleEnabled = v);
+                  provider.onDnsSettingsChanged();
+                },
+                thumbColor: WidgetStateProperty.resolveWith<Color?>(
+                  (states) => states.contains(WidgetState.selected)
+                      ? AppTheme.primaryNeon
+                      : null,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '接入 Tailscale 控制面，允许通过 Tailscale 网络解析/访问（需要 with_tailscale 构建标签）。',
+            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          if (_dnsManager.tailscaleEnabled) ...[
+            _kvRow(
+              label: 'State 目录',
+              value: _dnsManager.tsStateDirectory.isEmpty
+                  ? 'tailscale (默认)'
+                  : _dnsManager.tsStateDirectory,
+              onTap: () async {
+                await _editText(
+                  title: 'State 目录',
+                  initial: _dnsManager.tsStateDirectory,
+                  hint: '例如 C:/Users/you/.tailscale',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsStateDirectory = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'Auth Key',
+              value: _dnsManager.tsAuthKey.isEmpty ? '未设置' : '已设置（点击修改）',
+              obscure: true,
+              onTap: () async {
+                await _editText(
+                  title: 'Auth Key',
+                  initial: _dnsManager.tsAuthKey,
+                  hint: '可留空使用登录链接',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsAuthKey = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'Control URL',
+              value: _dnsManager.tsControlUrl.isEmpty
+                  ? '默认 https://controlplane.tailscale.com'
+                  : _dnsManager.tsControlUrl,
+              onTap: () async {
+                await _editText(
+                  title: 'Control URL',
+                  initial: _dnsManager.tsControlUrl,
+                  hint: '可留空使用默认',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsControlUrl = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _toggleRow(
+              label: 'Ephemeral 临时节点',
+              value: _dnsManager.tsEphemeral,
+              onChanged: (v) {
+                setState(() => _dnsManager.tsEphemeral = v);
+                provider.onDnsSettingsChanged();
+              },
+            ),
+            _kvRow(
+              label: 'Hostname',
+              value: _dnsManager.tsHostname.isEmpty
+                  ? '系统主机名（默认）'
+                  : _dnsManager.tsHostname,
+              onTap: () async {
+                await _editText(
+                  title: 'Hostname',
+                  initial: _dnsManager.tsHostname,
+                  hint: '可留空使用系统主机名',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsHostname = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _toggleRow(
+              label: '接受路由 (accept_routes)',
+              value: _dnsManager.tsAcceptRoutes,
+              onChanged: (v) {
+                setState(() => _dnsManager.tsAcceptRoutes = v);
+                provider.onDnsSettingsChanged();
+              },
+            ),
+            _kvRow(
+              label: 'Exit Node',
+              value: _dnsManager.tsExitNode.isEmpty
+                  ? '未设置'
+                  : _dnsManager.tsExitNode,
+              onTap: () async {
+                await _editText(
+                  title: 'Exit Node',
+                  initial: _dnsManager.tsExitNode,
+                  hint: '节点名或 IP，可留空',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsExitNode = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _toggleRow(
+              label: 'Exit Node 允许访问局域网',
+              value: _dnsManager.tsExitNodeAllowLanAccess,
+              onChanged: (v) {
+                setState(() => _dnsManager.tsExitNodeAllowLanAccess = v);
+                provider.onDnsSettingsChanged();
+              },
+            ),
+            _kvRow(
+              label: 'Advertise Routes',
+              value: advertiseRoutesPreview(),
+              onTap: () async {
+                await _editText(
+                  title: 'Advertise Routes (CIDR，逗号分隔)',
+                  initial: _dnsManager.tsAdvertiseRoutes.join(', '),
+                  hint: '例如 192.168.1.0/24, 10.0.0.0/8',
+                  onSave: (v) {
+                    final items = v
+                        .split(',')
+                        .map((e) => e.trim())
+                        .where((e) => e.isNotEmpty)
+                        .toList();
+                    setState(() => _dnsManager.tsAdvertiseRoutes = items);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _toggleRow(
+              label: 'Advertise Exit Node',
+              value: _dnsManager.tsAdvertiseExitNode,
+              onChanged: (v) {
+                setState(() => _dnsManager.tsAdvertiseExitNode = v);
+                provider.onDnsSettingsChanged();
+              },
+            ),
+            _kvRow(
+              label: 'UDP 超时',
+              value: _dnsManager.tsUdpTimeout,
+              onTap: () async {
+                await _editText(
+                  title: 'UDP 超时(如 5m, 30s)',
+                  initial: _dnsManager.tsUdpTimeout,
+                  hint: 'sing-box 缺省 5m',
+                  onSave: (v) {
+                    setState(() => _dnsManager.tsUdpTimeout = v);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _kvRow({
+    required String label,
+    required String value,
+    bool obscure = false,
+    VoidCallback? onTap,
+  }) {
     return GestureDetector(
-      onTap: () => _showProxyResolverDialog(),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 180,
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                obscure ? '••••••••' : value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Icon(Icons.edit, size: 16, color: AppTheme.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _toggleRow({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 180,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            thumbColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) => states.contains(WidgetState.selected)
+                  ? AppTheme.primaryNeon
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editText({
+    required String title,
+    required String initial,
+    required String hint,
+    required ValueChanged<String> onSave,
+  }) async {
+    final controller = TextEditingController(text: initial);
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.bgCard,
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            decoration: InputDecoration(hintText: hint),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => safePop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                onSave(controller.text);
+                safePop(context);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ===== Missing methods/cards re-implemented below =====
+
+  Widget _buildLocalPortCard() {
+    final provider = context.read<VPNProviderV2>();
+    return GestureDetector(
+      onTap: () async {
+        await _editText(
+          title: '本地端口',
+          initial: _dnsManager.localPort.toString(),
+          hint: '1024-65535',
+          onSave: (v) {
+            final port = int.tryParse(v.trim());
+            if (port != null && port >= 1024 && port <= 65535) {
+              setState(() => _dnsManager.localPort = port);
+              provider.syncLocalPortFromDnsManager();
+            }
+          },
+        );
+      },
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -502,25 +862,96 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
         ),
         child: Row(
           children: [
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNeon.withAlpha(50),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.info_outline,
-                size: 12,
-                color: AppTheme.primaryNeon,
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
+                children: const [
+                  Text(
+                    '本地端口',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '混合入站监听端口 (mixed)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              _dnsManager.localPort.toString(),
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right,
+              color: AppTheme.textSecondary,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProxyResolverCard() {
+    final provider = context.read<VPNProviderV2>();
+    return GestureDetector(
+      onTap: () async {
+        final options = ['FakeIP', 'Remote'];
+        final selected = await showDialog<String>(
+          context: context,
+          builder: (context) => SimpleDialog(
+            title: const Text('代理流量解析通道'),
+            children: options
+                .map(
+                  (e) => SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, e),
+                    child: Row(
+                      children: [
+                        if (_dnsManager.proxyResolver == e)
+                          const Icon(Icons.check, size: 16)
+                        else
+                          const SizedBox(width: 16),
+                        const SizedBox(width: 8),
+                        Text(e),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        );
+        if (selected != null) {
+          setState(() => _dnsManager.proxyResolver = selected);
+          provider.onDnsSettingsChanged();
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
                     '代理流量解析通道',
                     style: TextStyle(
                       fontSize: 16,
@@ -528,9 +959,9 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'FakeIP可减少DNS泄漏，Remote使用真实IP',
+                  SizedBox(height: 4),
+                  Text(
+                    '选择代理侧的域名解析路径',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondary,
@@ -548,250 +979,8 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
               ),
             ),
             const SizedBox(width: 8),
-            Icon(Icons.expand_more, color: AppTheme.textSecondary, size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建服务器卡片
-  Widget _buildServerCard() {
-    return GestureDetector(
-      onTap: () => _showServerDialog(),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.bgCard,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '服务器',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    '管理DNS服务器列表，配置上游DNS解析器',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 导航到静态IP映射页面
-  void _navigateToStaticIpMapping() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const StaticIpMappingPage()),
-    ).then((_) {
-      // 页面返回后刷新状态
-      setState(() {});
-    });
-  }
-
-  /// 导航到DNS测试页面
-  void _navigateToDnsTest() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const DnsTestPage()),
-    );
-  }
-
-  /// 显示测试域名对话框
-  void _showTestDomainDialog() {
-    final controller = TextEditingController(text: _dnsManager.testDomain);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.bgCard,
-        title: const Text(
-          '测试域名',
-          style: TextStyle(color: AppTheme.textPrimary),
-        ),
-        content: TextField(
-          controller: controller,
-          style: const TextStyle(color: AppTheme.textPrimary),
-          decoration: const InputDecoration(
-            hintText: '输入测试域名',
-            hintStyle: TextStyle(color: AppTheme.textSecondary),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => safePop(context),
-            child: const Text(
-              '取消',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() => _dnsManager.testDomain = controller.text);
-              context.read<VPNProviderV2>().onDnsSettingsChanged();
-              safePop(context);
-            },
-            child: const Text(
-              '确定',
-              style: TextStyle(color: AppTheme.primaryNeon),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 显示TTL对话框
-  void _showTtlDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.bgCard,
-        title: const Text(
-          'TTL设置',
-          style: TextStyle(color: AppTheme.textPrimary),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildTtlOption('1 min', '1m'),
-            _buildTtlOption('5 min', '5m'),
-            _buildTtlOption('1 h', '1h'),
-            _buildTtlOption('12 h', '12h'),
-            _buildTtlOption('24 h', '24h'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTtlOption(String display, String value) {
-    return ListTile(
-      title: Text(display, style: const TextStyle(color: AppTheme.textPrimary)),
-      trailing: _dnsManager.ttl == display
-          ? const Icon(Icons.check, color: AppTheme.primaryNeon)
-          : null,
-      onTap: () {
-        setState(() => _dnsManager.ttl = display);
-        context.read<VPNProviderV2>().onDnsSettingsChanged();
-        safePop(context);
-      },
-    );
-  }
-
-  /// 显示代理解析器对话框
-  void _showProxyResolverDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.bgCard,
-        title: const Text(
-          '代理流量解析通道',
-          style: TextStyle(color: AppTheme.textPrimary),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildProxyResolverOption('Auto', 'auto'),
-            _buildProxyResolverOption('FakeIP', 'fakeip'),
-            _buildProxyResolverOption('Remote', 'remote'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProxyResolverOption(String display, String value) {
-    return ListTile(
-      title: Text(display, style: const TextStyle(color: AppTheme.textPrimary)),
-      trailing: _dnsManager.proxyResolver == display
-          ? const Icon(Icons.check, color: AppTheme.primaryNeon)
-          : null,
-      onTap: () {
-        setState(() => _dnsManager.proxyResolver = display);
-        context.read<VPNProviderV2>().onDnsSettingsChanged();
-        safePop(context);
-      },
-    );
-  }
-
-  /// 构建本地端口配置卡片
-  Widget _buildLocalPortCard() {
-    return GestureDetector(
-      onTap: () => _showLocalPortDialog(),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.bgCard,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
-        ),
-        child: Row(
-          children: [
-            // 图标
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNeon.withAlpha(30),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.settings_ethernet_outlined,
-                color: AppTheme.primaryNeon,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 10),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '本地端口',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_dnsManager.localPort}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
             const Icon(
-              Icons.expand_more,
+              Icons.chevron_right,
               color: AppTheme.textSecondary,
               size: 20,
             ),
@@ -801,91 +990,415 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
     );
   }
 
-  /// 显示本地端口设置对话框
-  void _showLocalPortDialog() {
-    final controller = TextEditingController(
-      text: _dnsManager.localPort.toString(),
-    );
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.bgCard,
-        title: const Text(
-          '本地端口设置',
-          style: TextStyle(color: AppTheme.textPrimary),
+  Widget _buildServerCard() {
+    return GestureDetector(
+      onTap: () async => _navigateToDnsServers(),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              '设置混合代理服务器的本地监听端口',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: AppTheme.textPrimary),
-              decoration: const InputDecoration(
-                hintText: '输入端口号 (1024-65535)',
-                hintStyle: TextStyle(color: AppTheme.textSecondary),
-                border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.borderColor),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primaryNeon),
+        child: Row(
+          children: const [
+            Expanded(
+              child: Text(
+                'DNS 服务器',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
                 ),
               ),
             ),
+            Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              '取消',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              final port = int.tryParse(controller.text);
-              if (port != null && port >= 1024 && port <= 65535) {
-                setState(() => _dnsManager.localPort = port);
-                context.read<VPNProviderV2>().syncLocalPortFromDnsManager();
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('端口设置已保存，重新连接后生效'),
-                    backgroundColor: AppTheme.primaryNeon,
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('请输入有效的端口号 (1024-65535)'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text(
-              '确定',
-              style: TextStyle(color: AppTheme.primaryNeon),
-            ),
-          ),
-        ],
       ),
     );
   }
 
-  /// 显示服务器配置页面
-  void _showServerDialog() {
-    Navigator.push(
+  void _navigateToStaticIpMapping() {
+    Navigator.of(
       context,
-      MaterialPageRoute(builder: (context) => const DnsServersPage()),
+    ).push(MaterialPageRoute(builder: (_) => const StaticIpMappingPage()));
+  }
+
+  void _navigateToDnsTest() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const DnsTestPage()));
+  }
+
+  void _navigateToDnsServers() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const DnsServersPage()));
+  }
+
+  Future<void> _showTestDomainDialog() async {
+    final provider = context.read<VPNProviderV2>();
+    await _editText(
+      title: '测试域名',
+      initial: _dnsManager.testDomain,
+      hint: '例如 gstatic.com',
+      onSave: (v) {
+        setState(() => _dnsManager.testDomain = v.trim());
+        provider.onDnsSettingsChanged();
+      },
+    );
+  }
+
+  Future<void> _showTtlDialog() async {
+    final provider = context.read<VPNProviderV2>();
+    await _editText(
+      title: 'TTL',
+      initial: _dnsManager.ttl,
+      hint: '如 1h, 30m',
+      onSave: (v) {
+        setState(() => _dnsManager.ttl = v.trim());
+        provider.onDnsSettingsChanged();
+      },
+    );
+  }
+
+  /// 构建 WireGuard Endpoint 卡片
+  Widget _buildWireGuardEndpointCard() {
+    final provider = context.read<VPNProviderV2>();
+
+    String joinList(List<String> list) =>
+        list.isEmpty ? '未配置' : list.join(', ');
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNeon.withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.vpn_lock,
+                  color: AppTheme.primaryNeon,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'WireGuard Endpoint',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              Switch(
+                value: _dnsManager.wgEnabled,
+                onChanged: (v) {
+                  setState(() => _dnsManager.wgEnabled = v);
+                  provider.onDnsSettingsChanged();
+                },
+                thumbColor: WidgetStateProperty.resolveWith<Color?>(
+                  (states) => states.contains(WidgetState.selected)
+                      ? AppTheme.primaryNeon
+                      : null,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '通过 WireGuard Endpoint 为解析与路由注入 WireGuard 接入（需要 with_wireguard 构建标签）。',
+            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          if (_dnsManager.wgEnabled) ...[
+            _toggleRow(
+              label: '使用系统 WireGuard (system)',
+              value: _dnsManager.wgSystem,
+              onChanged: (v) {
+                setState(() => _dnsManager.wgSystem = v);
+                provider.onDnsSettingsChanged();
+              },
+            ),
+            _kvRow(
+              label: '接口名称 name',
+              value: _dnsManager.wgName.isEmpty
+                  ? '未设置（可选）'
+                  : _dnsManager.wgName,
+              onTap: () async {
+                await _editText(
+                  title: '接口名称 name',
+                  initial: _dnsManager.wgName,
+                  hint: '例如 wg0，可留空',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgName = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'MTU',
+              value: _dnsManager.wgMtu.toString(),
+              onTap: () async {
+                await _editText(
+                  title: 'MTU',
+                  initial: _dnsManager.wgMtu.toString(),
+                  hint: '默认 1408',
+                  onSave: (v) {
+                    final n = int.tryParse(v) ?? 1408;
+                    setState(() => _dnsManager.wgMtu = n);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'Address 列表',
+              value: joinList(_dnsManager.wgAddress),
+              onTap: () async {
+                await _editText(
+                  title: 'Address 列表 (逗号分隔)',
+                  initial: _dnsManager.wgAddress.join(', '),
+                  hint: '例如 10.0.0.2/24, fd00::2/64',
+                  onSave: (v) {
+                    final list = v
+                        .split(',')
+                        .map((e) => e.trim())
+                        .where((e) => e.isNotEmpty)
+                        .toList();
+                    setState(() => _dnsManager.wgAddress = list);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: '私钥 private_key',
+              value: _dnsManager.wgPrivateKey.isEmpty ? '未设置' : '已设置（点击修改）',
+              obscure: true,
+              onTap: () async {
+                await _editText(
+                  title: '私钥 private_key',
+                  initial: _dnsManager.wgPrivateKey,
+                  hint: 'base64 私钥',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgPrivateKey = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: '监听端口 listen_port (可选)',
+              value: _dnsManager.wgListenPort == 0
+                  ? '未设置'
+                  : _dnsManager.wgListenPort.toString(),
+              onTap: () async {
+                await _editText(
+                  title: '监听端口 listen_port (可选)',
+                  initial: _dnsManager.wgListenPort.toString(),
+                  hint: '0 表示不设置',
+                  onSave: (v) {
+                    setState(
+                      () => _dnsManager.wgListenPort = int.tryParse(v) ?? 0,
+                    );
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            const Divider(height: 24),
+            const Text(
+              'Peer 配置',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            _kvRow(
+              label: '服务器地址 address',
+              value: _dnsManager.wgPeerAddress.isEmpty
+                  ? '未设置'
+                  : _dnsManager.wgPeerAddress,
+              onTap: () async {
+                await _editText(
+                  title: '服务器地址 address',
+                  initial: _dnsManager.wgPeerAddress,
+                  hint: '域名或 IP',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgPeerAddress = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: '端口 port',
+              value: _dnsManager.wgPeerPort == 0
+                  ? '未设置'
+                  : _dnsManager.wgPeerPort.toString(),
+              onTap: () async {
+                await _editText(
+                  title: '端口 port',
+                  initial: _dnsManager.wgPeerPort.toString(),
+                  hint: '0 表示未设置',
+                  onSave: (v) {
+                    setState(
+                      () => _dnsManager.wgPeerPort = int.tryParse(v) ?? 0,
+                    );
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'public_key',
+              value: _dnsManager.wgPeerPublicKey.isEmpty ? '未设置' : '已设置（点击修改）',
+              onTap: () async {
+                await _editText(
+                  title: 'public_key',
+                  initial: _dnsManager.wgPeerPublicKey,
+                  hint: '对端公钥',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgPeerPublicKey = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'pre_shared_key (可选)',
+              value: _dnsManager.wgPeerPreSharedKey.isEmpty
+                  ? '未设置'
+                  : '已设置（点击修改）',
+              obscure: true,
+              onTap: () async {
+                await _editText(
+                  title: 'pre_shared_key (可选)',
+                  initial: _dnsManager.wgPeerPreSharedKey,
+                  hint: 'PSK，可留空',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgPeerPreSharedKey = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'allowed_ips 列表',
+              value: joinList(_dnsManager.wgPeerAllowedIps),
+              onTap: () async {
+                await _editText(
+                  title: 'allowed_ips 列表 (逗号分隔)',
+                  initial: _dnsManager.wgPeerAllowedIps.join(', '),
+                  hint: '例如 0.0.0.0/0, ::/0',
+                  onSave: (v) {
+                    final list = v
+                        .split(',')
+                        .map((e) => e.trim())
+                        .where((e) => e.isNotEmpty)
+                        .toList();
+                    setState(() => _dnsManager.wgPeerAllowedIps = list);
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'keepalive 秒 (可选)',
+              value: _dnsManager.wgPeerKeepalive == 0
+                  ? '未设置'
+                  : _dnsManager.wgPeerKeepalive.toString(),
+              onTap: () async {
+                await _editText(
+                  title: 'keepalive 秒 (可选)',
+                  initial: _dnsManager.wgPeerKeepalive.toString(),
+                  hint: '0 表示未设置',
+                  onSave: (v) {
+                    setState(
+                      () => _dnsManager.wgPeerKeepalive = int.tryParse(v) ?? 0,
+                    );
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'reserved 3字节 (逗号分隔, 0-255)',
+              value: _dnsManager.wgPeerReserved.join(', '),
+              onTap: () async {
+                await _editText(
+                  title: 'reserved 3字节 (逗号分隔, 0-255)',
+                  initial: _dnsManager.wgPeerReserved.join(', '),
+                  hint: '例如 0,0,0',
+                  onSave: (v) {
+                    final list = v
+                        .split(',')
+                        .map((e) => int.tryParse(e.trim()) ?? 0)
+                        .toList();
+                    while (list.length < 3) list.add(0);
+                    setState(
+                      () => _dnsManager.wgPeerReserved = list.take(3).toList(),
+                    );
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'udp_timeout (可选)',
+              value: _dnsManager.wgUdpTimeout.isEmpty
+                  ? '默认 5m'
+                  : _dnsManager.wgUdpTimeout,
+              onTap: () async {
+                await _editText(
+                  title: 'udp_timeout (可选)',
+                  initial: _dnsManager.wgUdpTimeout,
+                  hint: '如 5m / 30s，留空使用默认',
+                  onSave: (v) {
+                    setState(() => _dnsManager.wgUdpTimeout = v.trim());
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+            _kvRow(
+              label: 'workers (0=CPU 数)',
+              value: _dnsManager.wgWorkers.toString(),
+              onTap: () async {
+                await _editText(
+                  title: 'workers (0=CPU 数)',
+                  initial: _dnsManager.wgWorkers.toString(),
+                  hint: '0 表示自动',
+                  onSave: (v) {
+                    setState(
+                      () => _dnsManager.wgWorkers = int.tryParse(v) ?? 0,
+                    );
+                    provider.onDnsSettingsChanged();
+                  },
+                );
+              },
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

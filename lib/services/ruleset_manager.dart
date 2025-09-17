@@ -313,7 +313,6 @@ class RulesetManager {
       "outbounds": getOutbounds({"tag": "proxy", ...proxyConfig}),
       "route": {
         ...getRouteConfig(mode),
-        // 在 route.rules 前插入一条高优先级的 inbound→direct 规则，确保通过 latency-test-in 的流量直连
         "rules": [
           {
             "inbound": ["latency-test-in"],
@@ -323,6 +322,16 @@ class RulesetManager {
         ],
       },
     };
+
+    // Inject endpoints (e.g., Tailscale) if enabled in DNS manager
+    try {
+      final eps = DnsManager().generateEndpointsConfig();
+      if (eps.isNotEmpty) {
+        config['endpoints'] = eps;
+      }
+    } catch (e) {
+      print('[WARN] 生成 endpoints 失败: $e');
+    }
 
     // 如果用户开启但运行时判定不支持 IPv6（调用方会传 enableIpv6=false），则确保 DNS 策略强制 ipv4_only 并去掉 fakeip 的 inet6_range
     if (!enableIpv6) {

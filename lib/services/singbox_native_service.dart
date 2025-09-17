@@ -26,6 +26,8 @@ class SingBoxNativeService {
   Function(String)? onLog;
   Function(bool)? onStatusChanged;
 
+  // 已存在 isRunning getter，避免重复定义
+
   /// 初始化服务
   Future<bool> initialize() async {
     if (_initialized) return true;
@@ -662,6 +664,50 @@ class SingBoxNativeService {
     }
 
     switch (node.type.toLowerCase()) {
+      case 'hysteria':
+        outbound.addAll({"server": node.server, "server_port": node.port});
+
+        // 认证：auth_str (明文) 或 auth (base64)
+        final pwd = node.settings['password']?.toString() ?? '';
+        if (pwd.isNotEmpty) outbound["auth_str"] = pwd;
+        final authB64 = node.settings['auth']?.toString() ?? '';
+        if (authB64.isNotEmpty) outbound["auth"] = authB64;
+
+        // 带宽
+        final upMbps = node.settings['up_mbps'];
+        final downMbps = node.settings['down_mbps'];
+        if (upMbps != null) outbound["up_mbps"] = upMbps;
+        if (downMbps != null) outbound["down_mbps"] = downMbps;
+        final upStr = node.settings['up']?.toString();
+        final downStr = node.settings['down']?.toString();
+        if (upStr != null && upStr.isNotEmpty) outbound["up"] = upStr;
+        if (downStr != null && downStr.isNotEmpty) outbound["down"] = downStr;
+
+        if (node.settings['obfs'] != null) {
+          outbound["obfs"] = node.settings['obfs'];
+        }
+        if (node.settings['recv_window_conn'] != null) {
+          outbound["recv_window_conn"] = node.settings['recv_window_conn'];
+        }
+        if (node.settings['recv_window'] != null) {
+          outbound["recv_window"] = node.settings['recv_window'];
+        }
+        if (node.settings['disable_mtu_discovery'] != null) {
+          outbound["disable_mtu_discovery"] =
+              node.settings['disable_mtu_discovery'];
+        }
+
+        final tlsCfg = <String, dynamic>{
+          "enabled": true,
+          "server_name": node.settings['sni']?.toString() ?? node.server,
+          "insecure": (node.settings['skipCertVerify'] == true),
+        };
+        final alpn = node.settings['alpn'];
+        if (alpn is List && alpn.isNotEmpty) {
+          tlsCfg["alpn"] = alpn;
+        }
+        outbound["tls"] = tlsCfg;
+        break;
       case 'anytls':
         outbound.addAll({
           "server": node.server,
@@ -815,6 +861,30 @@ class SingBoxNativeService {
           "method": method,
           "password": node.password,
         });
+        break;
+
+      case 'shadowtls':
+        outbound.addAll({
+          "server": node.server,
+          "server_port": node.port,
+          "version": (node.settings['version'] is int)
+              ? node.settings['version']
+              : int.tryParse(node.settings['version']?.toString() ?? '') ?? 1,
+        });
+        final pwd = node.settings['password']?.toString() ?? '';
+        if (pwd.isNotEmpty) {
+          outbound["password"] = pwd;
+        }
+        final tlsCfg = <String, dynamic>{
+          "enabled": true,
+          "server_name": node.settings['sni']?.toString() ?? node.server,
+          "insecure": (node.settings['skipCertVerify'] == true),
+        };
+        final alpn = node.settings['alpn'];
+        if (alpn is List && alpn.isNotEmpty) {
+          tlsCfg["alpn"] = alpn;
+        }
+        outbound["tls"] = tlsCfg;
         break;
 
       default:

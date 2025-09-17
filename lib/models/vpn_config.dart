@@ -102,6 +102,62 @@ class VPNConfig {
   /// 生成出站配置
   Map<String, dynamic> _generateOutbound() {
     switch (type.toLowerCase()) {
+      case 'hysteria':
+        return {
+          "type": "hysteria",
+          "tag": "proxy",
+          "server": server,
+          "server_port": port,
+          // Hysteria v1 认证：优先使用明文 auth_str（来自 settings.password）
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "auth_str": settings['password'],
+          // 也允许直接传入 base64 的 auth（来自 settings.auth）
+          if ((settings['auth'] ?? '').toString().isNotEmpty)
+            "auth": settings['auth'],
+          // 带宽：优先 up_mbps/down_mbps（数值），否则 up/down（字符串）
+          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
+          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
+          if ((settings['up'] ?? '').toString().isNotEmpty)
+            "up": settings['up'],
+          if ((settings['down'] ?? '').toString().isNotEmpty)
+            "down": settings['down'],
+          if ((settings['obfs'] ?? '').toString().isNotEmpty)
+            "obfs": settings['obfs'],
+          if (settings['recv_window_conn'] != null)
+            "recv_window_conn": settings['recv_window_conn'],
+          if (settings['recv_window'] != null)
+            "recv_window": settings['recv_window'],
+          if (settings['disable_mtu_discovery'] != null)
+            "disable_mtu_discovery": settings['disable_mtu_discovery'],
+          // TLS 配置
+          "tls": {
+            "enabled": true,
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+      case 'shadowtls':
+        return {
+          "type": "shadowtls",
+          "tag": "proxy",
+          "server": server,
+          "server_port": port,
+          if (settings['version'] is int)
+            "version": settings['version']
+          else if ((settings['version'] ?? '').toString().isNotEmpty)
+            "version": int.tryParse(settings['version'].toString()) ?? 1,
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "password": settings['password'],
+          "tls": {
+            "enabled": true,
+            // 若未提供 sni，兜底使用服务器域名
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
       case 'anytls':
         return {
           "type": "anytls",
@@ -368,6 +424,10 @@ class VPNConfig {
       } else if (lower.startsWith('hysteria2://') ||
           lower.startsWith('hy2://')) {
         return _parseHysteria2(s);
+      } else if (lower.startsWith('hysteria://')) {
+        return _parseHysteria(s);
+      } else if (lower.startsWith('shadowtls://')) {
+        return _parseShadowTLS(s);
       } else if (lower.startsWith('anytls://') || lower.startsWith('tu5://')) {
         return _parseAnyTLS(s);
       }
@@ -375,6 +435,77 @@ class VPNConfig {
       return null;
     } catch (e) {
       print('解析订阅链接失败: $e');
+      return null;
+    }
+  }
+
+  /// 解析 Hysteria v1 链接
+  /// 形如：
+  /// hysteria://PASSWORD@server:port?up_mbps=100&down_mbps=100&alpn=h3&insecure=1&sni=example.com#Name
+  static VPNConfig? _parseHysteria(String link) {
+    try {
+      final uri = Uri.parse(link);
+      final qp = uri.queryParameters;
+
+      final server = uri.host;
+      final port = uri.hasPort ? uri.port : 443;
+      final name = uri.fragment.isNotEmpty
+          ? Uri.decodeComponent(uri.fragment)
+          : 'Hysteria';
+
+      // 认证：优先 auth_str（userInfo / password/pwd），否则 base64 的 auth
+      String password = '';
+      if (uri.userInfo.isNotEmpty) password = uri.userInfo;
+      password = (qp['auth_str'] ?? qp['password'] ?? qp['pwd'] ?? password)
+          .trim();
+      final authB64 = (qp['auth'] ?? '').trim();
+
+      // 带宽
+      int? upMbps = int.tryParse((qp['up_mbps'] ?? '').trim());
+      int? downMbps = int.tryParse((qp['down_mbps'] ?? '').trim());
+      final upStr = (qp['up'] ?? '').trim();
+      final downStr = (qp['down'] ?? '').trim();
+
+      // TLS 相关
+      final sni = (qp['sni'] ?? qp['serverName'] ?? '').trim();
+      final insecure = (qp['insecure'] ?? qp['allowInsecure'] ?? '0').trim();
+      final skipCertVerify =
+          insecure == '1' ||
+          insecure.toLowerCase() == 'true' ||
+          insecure.toLowerCase() == 'yes';
+
+      // ALPN
+      List<String>? alpn;
+      final alpnStr = (qp['alpn'] ?? '').trim();
+      if (alpnStr.isNotEmpty) {
+        alpn = alpnStr
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+
+      final settings = <String, dynamic>{
+        if (password.isNotEmpty) 'password': password,
+        if (authB64.isNotEmpty) 'auth': authB64,
+        if (upMbps != null) 'up_mbps': upMbps,
+        if (downMbps != null) 'down_mbps': downMbps,
+        if (upStr.isNotEmpty) 'up': upStr,
+        if (downStr.isNotEmpty) 'down': downStr,
+        if ((qp['obfs'] ?? '').toString().isNotEmpty) 'obfs': qp['obfs'],
+        if (sni.isNotEmpty) 'sni': sni,
+        'skipCertVerify': skipCertVerify,
+        if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
+      };
+
+      return VPNConfig(
+        name: name,
+        type: 'hysteria',
+        server: server,
+        port: port,
+        settings: settings,
+      );
+    } catch (e) {
       return null;
     }
   }
@@ -860,6 +991,68 @@ class VPNConfig {
       return VPNConfig(
         name: name,
         type: 'anytls',
+        server: server,
+        port: port,
+        settings: settings,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 解析 ShadowTLS 链接（参考 AnyTLS 的直观形态）
+  /// 形如：
+  /// shadowtls://PASSWORD@server:port?version=3&alpn=h2&sni=example.com&insecure=1#Name
+  static VPNConfig? _parseShadowTLS(String link) {
+    try {
+      final uri = Uri.parse(link);
+      final qp = uri.queryParameters;
+
+      final server = uri.host;
+      final port = uri.hasPort ? uri.port : 443;
+      final name = uri.fragment.isNotEmpty
+          ? Uri.decodeComponent(uri.fragment)
+          : 'ShadowTLS';
+
+      // 密码（v2/v3 可用）：优先 userInfo，其次 query
+      String password = '';
+      if (uri.userInfo.isNotEmpty) password = uri.userInfo;
+      password = (qp['password'] ?? qp['pwd'] ?? password).trim();
+
+      // 版本：默认 1，可取 1/2/3
+      final verStr = (qp['version'] ?? '').trim();
+      final version = int.tryParse(verStr.isEmpty ? '1' : verStr) ?? 1;
+
+      // TLS 相关
+      final sni = (qp['sni'] ?? qp['serverName'] ?? '').trim();
+      final insecureStr = (qp['insecure'] ?? qp['allowInsecure'] ?? '0').trim();
+      final skipCertVerify =
+          insecureStr == '1' ||
+          insecureStr.toLowerCase() == 'true' ||
+          insecureStr.toLowerCase() == 'yes';
+
+      // ALPN（可选）
+      List<String>? alpn;
+      final alpnStr = (qp['alpn'] ?? '').trim();
+      if (alpnStr.isNotEmpty) {
+        alpn = alpnStr
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+
+      final settings = <String, dynamic>{
+        'version': version,
+        if (password.isNotEmpty) 'password': password,
+        if (sni.isNotEmpty) 'sni': sni,
+        'skipCertVerify': skipCertVerify,
+        if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
+      };
+
+      return VPNConfig(
+        name: name,
+        type: 'shadowtls',
         server: server,
         port: port,
         settings: settings,

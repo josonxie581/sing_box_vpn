@@ -91,7 +91,8 @@ class NodeDelayTester {
     final t = node.type.toLowerCase();
     if (t.contains('hysteria') || t == 'hysteria2' || t == 'hy2') return true;
     if (t == 'tuic') return true;
-    // 一些自定义别名
+    // ShadowTLS/AnyTLS 都是基于 TCP+TLS，这里明确标注为非 UDP-only
+    if (t == 'anytls' || t == 'shadowtls') return false;
     return false;
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:gsou/utils/safe_navigator.dart' as sn;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -69,6 +70,84 @@ class _LogsPageState extends State<LogsPage> {
           ),
         ),
         actions: [
+          // 显示登录链接（Tailscale 等首次授权）
+          IconButton(
+            icon: const Icon(Icons.link, color: AppTheme.textSecondary),
+            tooltip: '显示登录链接',
+            onPressed: () async {
+              final url = await provider.showLoginLinkFlow();
+              if (!mounted) return;
+              if (url == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('未发现可用的登录链接'),
+                    backgroundColor: AppTheme.warningOrange,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+                return;
+              }
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: AppTheme.bgCard,
+                  title: const Text(
+                    '登录链接',
+                    style: TextStyle(color: AppTheme.textPrimary),
+                  ),
+                  content: SelectableText(
+                    url,
+                    style: const TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: url));
+                        Navigator.of(ctx).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('链接已复制到剪贴板'),
+                            backgroundColor: AppTheme.successGreen,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        '复制',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        try {
+                          await Clipboard.setData(ClipboardData(text: url));
+                          await Process.run('powershell.exe', [
+                            '-NoProfile',
+                            '-NonInteractive',
+                            '-Command',
+                            'Start-Process',
+                            '"' + url + '"',
+                          ]);
+                        } catch (_) {}
+                        if (context.mounted) Navigator.of(ctx).pop();
+                      },
+                      child: const Text('在浏览器打开'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text(
+                        '关闭',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           // 自动滚动开关
           IconButton(
             icon: Icon(

@@ -572,6 +572,108 @@ class VPNProviderV2 extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============== 登录链接便捷入口（Tailscale 优先） ==============
+
+  /// 从现有日志中提取 Tailscale 登录链接（若存在）
+  String? extractTailscaleLoginUrlFromLogs() {
+    // 常见提示样式："Please visit https://login.tailscale.com/a/XXXX... to authenticate"
+    final regex = RegExp(
+      r'https?://[^\s]+tailscale[^\s]*',
+      caseSensitive: false,
+    );
+    for (final line in logs.reversed) {
+      final m = regex.firstMatch(line);
+      if (m != null) {
+        final url = m.group(0);
+        if (url != null && url.contains('tailscale')) return url;
+      }
+    }
+    return null;
+  }
+
+  /// 在未连接状态下，运行一次“最小 endpoints”探测以触发登录链接输出（仅当 endpoints 已配置且需要授权）
+  /// 返回捕获到的登录 URL；若未获得则返回 null。
+  Future<String?> probeLoginUrlOnce({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    if (isConnected || _connectionManager.isConnecting) return null; // 仅在未连接时执行
+
+    // 生成一个极简配置，注入 endpoints（如 Tailscale），不启用 TUN，仅 basic inbounds/outbounds
+    try {
+      final current = currentConfig ?? configs.firstOrNull;
+      if (current == null) return null;
+
+      final cfg = await current.toSingBoxConfig(
+        mode: _connectionManager.proxyMode,
+        localPort: _connectionManager.localPort,
+        useTun: false,
+        tunStrictRoute: false,
+        preferredTunStack: _connectionManager.useTun
+            ? _singboxService.preferredTunStack
+            : null,
+        enableClashApi: false,
+        clashApiPort: _connectionManager.clashApiPort,
+        clashApiSecret: _connectionManager.clashApiSecret,
+        enableIpv6: false,
+      );
+
+      // 若没有 endpoints 则无需探测
+      final endpoints =
+          (cfg['endpoints'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+      if (endpoints.isEmpty) return null;
+
+      // 暂存原日志回调并注入捕获
+      final captured = <String>[];
+      void capture(String s) => captured.add(s);
+      final originalOnLog = _singboxService.onLog;
+      _singboxService.onLog = (line) {
+        capture(line);
+        originalOnLog?.call(line);
+      };
+
+      // 启动并等待片刻产生日志
+      final started = await _singboxService.start(cfg);
+      if (!started) {
+        _singboxService.onLog = originalOnLog; // 还原
+        return null;
+      }
+
+      // 等待或提前捕获到链接
+      final end = DateTime.now().add(timeout);
+      String? url;
+      final regex = RegExp(
+        r'https?://[^\s]+tailscale[^\s]*',
+        caseSensitive: false,
+      );
+      while (DateTime.now().isBefore(end)) {
+        for (final line in List<String>.from(captured).reversed) {
+          final m = regex.firstMatch(line);
+          if (m != null) {
+            url = m.group(0);
+            break;
+          }
+        }
+        if (url != null) break;
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // 停止一次性探测实例
+      await _singboxService.stop();
+      _singboxService.onLog = originalOnLog; // 还原
+      return url;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// UI 触发的统一流程：优先从日志提取；否则在未连接状态尝试一次探测；成功则返回URL
+  Future<String?> showLoginLinkFlow() async {
+    final fromLogs = extractTailscaleLoginUrlFromLogs();
+    if (fromLogs != null) return fromLogs;
+    final probed = await probeLoginUrlOnce();
+    return probed;
+  }
+
   // 刷新所有配置的ping
   Future<void> refreshAllPings() async {
     await _pingAllConfigs();

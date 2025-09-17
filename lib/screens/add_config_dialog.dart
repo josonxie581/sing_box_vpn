@@ -293,6 +293,9 @@ class _AddConfigDialogState extends State<AddConfigDialog> {
                 DropdownMenuItem(value: 'vmess', child: Text('VMess')),
                 DropdownMenuItem(value: 'vless', child: Text('VLESS/REALITY')),
                 DropdownMenuItem(value: 'trojan', child: Text('Trojan')),
+                DropdownMenuItem(value: 'anytls', child: Text('AnyTLS')),
+                DropdownMenuItem(value: 'shadowtls', child: Text('ShadowTLS')),
+                DropdownMenuItem(value: 'hysteria', child: Text('Hysteria')),
                 DropdownMenuItem(value: 'hysteria2', child: Text('Hysteria2')),
                 DropdownMenuItem(value: 'tuic', child: Text('TUIC v5')),
                 DropdownMenuItem(value: 'socks', child: Text('SOCKS5')),
@@ -308,8 +311,12 @@ class _AddConfigDialogState extends State<AddConfigDialog> {
 
             const SizedBox(height: 10),
 
-            // SNI 与证书校验选项（仅 trojan / hysteria2）- 放到上面，避免出现在底部导致无法输入
-            if (_selectedType == 'trojan' || _selectedType == 'hysteria2') ...[
+            // SNI 与证书校验选项（适用于 trojan / hysteria2 / anytls / shadowtls / hysteria）
+            if (_selectedType == 'trojan' ||
+                _selectedType == 'hysteria2' ||
+                _selectedType == 'anytls' ||
+                _selectedType == 'shadowtls' ||
+                _selectedType == 'hysteria') ...[
               TextFormField(
                 controller: _sniController,
                 decoration: InputDecoration(
@@ -834,6 +841,9 @@ class _AddConfigDialogState extends State<AddConfigDialog> {
 
       case 'trojan':
       case 'hysteria2':
+      case 'anytls':
+      case 'shadowtls':
+      case 'hysteria':
         return [
           TextFormField(
             controller: _passwordController,
@@ -955,6 +965,9 @@ class _AddConfigDialogState extends State<AddConfigDialog> {
 
         case 'trojan':
         case 'hysteria2':
+        case 'anytls':
+        case 'shadowtls':
+        case 'hysteria':
           settings['password'] = _passwordController.text;
           if (_sniController.text.isNotEmpty) {
             settings['sni'] = _sniController.text.trim();
