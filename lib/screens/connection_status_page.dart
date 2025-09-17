@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/vpn_provider_v2.dart';
 import '../services/improved_traffic_stats_service.dart';
-import '../services/connection_stats_service.dart';
 
 class ConnectionStatusPage extends StatefulWidget {
   const ConnectionStatusPage({super.key});
@@ -51,7 +50,8 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
           '   ${conn['protocol']} ↑${ImprovedTrafficStatsService.formatBytes(conn['uploadBytes'])} ↓${ImprovedTrafficStatsService.formatBytes(conn['downloadBytes'])}\n';
       info += '   ${conn['rule']}\n';
       info += '   ${conn['target']}\n';
-      info += '   时长: ${ImprovedTrafficStatsService.formatDuration(conn['duration'])}\n\n';
+      info +=
+          '   时长: ${ImprovedTrafficStatsService.formatDuration(conn['duration'])}\n\n';
     }
 
     Clipboard.setData(ClipboardData(text: info));
@@ -109,12 +109,12 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                       Consumer<VPNProviderV2>(
                         builder: (context, provider, _) {
                           if (!provider.isConnected) return Container();
-                          
+
                           // 由于 connectionSource 现在返回字符串，直接使用
                           final sourceText = provider.connectionSource;
                           final sourceColor = AppTheme.successGreen;
                           final sourceIcon = Icons.api;
-                          
+
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -131,11 +131,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  sourceIcon,
-                                  size: 12,
-                                  color: sourceColor,
-                                ),
+                                Icon(sourceIcon, size: 12, color: sourceColor),
                                 const SizedBox(width: 4),
                                 Text(
                                   sourceText,
@@ -366,7 +362,9 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                 ),
                               ),
                               Text(
-                                ImprovedTrafficStatsService.formatDuration(connection['duration']),
+                                ImprovedTrafficStatsService.formatDuration(
+                                  connection['duration'],
+                                ),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
@@ -445,7 +443,8 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                               ),
                               const SizedBox(width: 8),
                               // 显示当前上传/下载速度
-                              if (connection['uploadSpeed'] != null && connection['uploadSpeed'] > 0) ...[
+                              if (connection['uploadSpeed'] != null &&
+                                  connection['uploadSpeed'] > 0) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 6,
@@ -466,7 +465,8 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                 ),
                                 const SizedBox(width: 4),
                               ],
-                              if (connection['downloadSpeed'] != null && connection['downloadSpeed'] > 0) ...[
+                              if (connection['downloadSpeed'] != null &&
+                                  connection['downloadSpeed'] > 0) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 6,
@@ -522,5 +522,4 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
       ),
     );
   }
-
 }

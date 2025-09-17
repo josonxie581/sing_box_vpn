@@ -566,6 +566,38 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           ),
           const SizedBox(height: 12),
           if (_dnsManager.tailscaleEnabled) ...[
+            if (_dnsManager.tsAuthKeyMissing)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningOrange.withAlpha(24),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.warningOrange.withAlpha(80),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppTheme.warningOrange,
+                      size: 18,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '未设置 Auth Key：首次连接可能需要登录链接授权（见日志页右上角“链接”按钮）',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             _kvRow(
               label: 'State 目录',
               value: _dnsManager.tsStateDirectory.isEmpty
@@ -1127,6 +1159,38 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
           ),
           const SizedBox(height: 12),
           if (_dnsManager.wgEnabled) ...[
+            if (!_dnsManager.wgConfigComplete)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningOrange.withAlpha(24),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.warningOrange.withAlpha(80),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppTheme.warningOrange,
+                      size: 18,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '配置不完整：需至少填写 私钥、Peer 的 address/port/public_key/allowed_ips，未填将跳过注入',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             _toggleRow(
               label: '使用系统 WireGuard (system)',
               value: _dnsManager.wgSystem,

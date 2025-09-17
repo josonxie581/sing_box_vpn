@@ -92,6 +92,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> with WindowListener {
   final SystemTray _systemTray = SystemTray();
+  // ignore: unused_field
   final AppWindow _appWindow = AppWindow();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -341,8 +342,12 @@ class _MyAppState extends State<MyApp> with WindowListener {
     const String baseTitle = 'Gsou';
     try {
       if (vpn.isConnected) {
-        final String up = ImprovedTrafficStatsService.formatSpeed(vpn.uploadSpeed);
-        final String down = ImprovedTrafficStatsService.formatSpeed(vpn.downloadSpeed);
+        final String up = ImprovedTrafficStatsService.formatSpeed(
+          vpn.uploadSpeed,
+        );
+        final String down = ImprovedTrafficStatsService.formatSpeed(
+          vpn.downloadSpeed,
+        );
         final String tip = 'U ' + up + '  D ' + down;
         if (_lastTrayTip != tip) {
           await _systemTray.setToolTip(tip);
@@ -379,7 +384,10 @@ class _MyAppState extends State<MyApp> with WindowListener {
       if (!_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
         // 确保在主线程中执行，并添加延迟以确保状态稳定
         Future.microtask(() {
-          if (mounted && !_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
+          if (mounted &&
+              !_isMinimized &&
+              !_isEnteringOverlay &&
+              !_isRestoringWindow) {
             _enterOverlayMode();
           }
         });

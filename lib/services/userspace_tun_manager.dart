@@ -6,7 +6,6 @@
 /// 2. 不修改系统路由表，而是在应用层拦截
 /// 3. 通过 SOCKS/HTTP 代理接口暴露服务
 
-import 'dart:convert';
 import '../models/proxy_mode.dart';
 
 class UserspaceTunManager {

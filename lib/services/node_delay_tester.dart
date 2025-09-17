@@ -3,10 +3,21 @@ import 'dart:convert';
 import 'dart:io';
 // ignore_for_file: unused_element
 import 'dart:typed_data' show BytesBuilder;
-import 'package:path/path.dart' as path;
 import '../models/vpn_config.dart';
 import 'singbox_ffi.dart';
 import 'connection_manager.dart';
+
+/// 延时测试模式
+enum LatencyTestMode {
+  /// 自动：未连VPN用标准测试；已连VPN用绕过测试（推荐，得到更接近真实的节点直连延时）
+  auto,
+
+  /// 仅系统路由：无论结果是否被VPN影响，都按系统路由表进行测试（你刚要求的模式）
+  systemOnly,
+
+  /// 强制绕过：只要检测到已连VPN，一律使用绕过测试（latency-test-in / 源绑定 / 动态规则等）
+  bypass,
+}
 
 /// 节点延时测试结果
 class NodeDelayResult {
@@ -64,6 +75,9 @@ class NodeDelayTester {
   final int maxConcurrency;
   final String testUrl;
   final bool enableIpInfo;
+  final LatencyTestMode latencyMode;
+  // 单个节点完成时的回调（用于批量测试实时更新）
+  final void Function(NodeDelayResult result)? onResult;
 
   // 进度回调
   Function(int completed, int total)? onProgress;
@@ -80,7 +94,9 @@ class NodeDelayTester {
     this.maxConcurrency = defaultMaxConcurrency,
     this.testUrl = defaultTestUrl,
     this.enableIpInfo = true,
+    this.latencyMode = LatencyTestMode.auto,
     this.onProgress,
+    this.onResult,
   }) {
     // 初始化端口池
     _initPortPool();
@@ -273,6 +289,10 @@ class NodeDelayTester {
 
           completedNodes++;
           onProgress?.call(completedNodes, totalNodes);
+          // 实时回调单个结果
+          try {
+            onResult?.call(result);
+          } catch (_) {}
 
           return result;
         } catch (e) {
@@ -309,14 +329,29 @@ class NodeDelayTester {
       final isVpnConnected = await _detectVpnConnection();
       print('[分流延时测试] VPN连接状态: ${isVpnConnected ? "已连接" : "未连接"}');
 
-      if (!isVpnConnected) {
-        // VPN未连接时，使用标准TCP测试
-        print('[分流延时测试] 使用标准TCP延时测试');
-        return await _standardDelayTest(node);
-      } else {
-        // VPN已连接时，使用分流规则绕过VPN路由
-        print('[分流延时测试] 使用分流规则绕过VPN路由');
-        return await _bypassTestWithRouteRule(node);
+      // 根据模式决定测试路径
+      switch (latencyMode) {
+        case LatencyTestMode.systemOnly:
+          if (isVpnConnected) {
+            print('[分流延时测试] 模式=systemOnly，使用系统路由表方法测试');
+            return await _testWithSystemRouting(node);
+          }
+          print('[分流延时测试] 模式=systemOnly，未连VPN，使用标准测试');
+          return await _standardDelayTest(node);
+        case LatencyTestMode.bypass:
+          if (isVpnConnected) {
+            print('[分流延时测试] 模式=bypass，使用绕过测试');
+            return await _bypassTestWithRouteRule(node);
+          }
+          print('[分流延时测试] 模式=bypass，未连VPN，使用标准测试');
+          return await _standardDelayTest(node);
+        case LatencyTestMode.auto:
+          if (!isVpnConnected) {
+            print('[分流延时测试] 模式=auto，未连VPN，使用标准测试');
+            return await _standardDelayTest(node);
+          }
+          print('[分流延时测试] 模式=auto，已连VPN，使用绕过测试');
+          return await _bypassTestWithRouteRule(node);
       }
     } catch (e) {
       print('[分流延时测试] 测试异常: ${node.name} -> $e');
@@ -440,23 +475,67 @@ class NodeDelayTester {
 
       socket.destroy();
 
-      print('⚡ 快速测试完成: ${node.name}');
-      print('   - 本地地址: $localAddress:$localPort');
-      print('   - 远程地址: $remoteAddress:$remotePort');
-      print('   - 延时: ${delay}ms (${delayMicroseconds}μs)');
-      print('   - Stopwatch: ${stopwatch.elapsedMilliseconds}ms');
+      // 仅输出一行初测摘要，避免把初测延时误认为最终结果
+      print(
+        '📍 初测: ${node.name} local=$localAddress:$localPort -> remote=$remoteAddress:$remotePort, t=${delay}ms (${delayMicroseconds}μs)',
+      );
 
       // 检查是否连接到了正确的远程服务器
       if (remoteAddress != node.server && _isIpAddress(node.server)) {
         print('⚠️ 警告: 连接地址不匹配! 期望: ${node.server}, 实际: $remoteAddress');
       }
 
-      // 如果延时异常小(小于5ms且不是本地连接)，可能被VPN代理影响
+      // 如果结果可疑（过低、FakeIP、或者本地地址与远端地址相同），尝试 ICMP 源绑定回退，获取更接近真实的 RTT
       var finalDelay = delay;
-      if (delay < 5 && !_isLocalAddress(remoteAddress)) {
-        print('⚠️ 警告: 延时异常小($delay ms)，可能被VPN路由影响');
-        // 不修改延时值，但记录警告
+      String? realIpForRecord;
+      final suspicious =
+          delay <= 15 ||
+          _isFakeIp(remoteAddress) ||
+          localAddress == remoteAddress;
+      if (suspicious) {
+        print(
+          '⚠️ 警告: 结果可疑(延时: ${delay}ms, local=$localAddress, remote=$remoteAddress)，尝试ICMP源绑定回退',
+        );
+        try {
+          final ip = _isIpAddress(node.server)
+              ? InternetAddress(node.server)
+              : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
+                    (await InternetAddress.lookup(node.server)).firstWhere(
+                      (a) =>
+                          a.type == InternetAddressType.IPv4 &&
+                          !_isFakeIp(a.address),
+                    );
+          String? srcBind;
+          try {
+            srcBind = await _pickPhysicalIPv4();
+          } catch (_) {}
+          int? icmp;
+          if (srcBind != null && Platform.isWindows) {
+            icmp = await _icmpPingIPv4(
+              ip.address,
+              timeoutMs: 1200,
+              sourceIp: srcBind,
+            );
+          }
+          icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
+          if (icmp != null && icmp >= 0) {
+            print(
+              '[快速测试] ICMP回退成功: ${icmp}ms (目标 ${ip.address}${srcBind != null ? ', 源 ' + srcBind : ''})',
+            );
+            finalDelay = icmp;
+            realIpForRecord = ip.address;
+          } else {
+            print('[快速测试] ICMP回退无结果，保留原始值');
+          }
+        } catch (e) {
+          print('[快速测试] ICMP回退异常: $e');
+        }
       }
+
+      // 打印最终结果（可能是 ICMP 回退后的值）
+      print(
+        '✅ 最终结果: ${node.name} -> ${finalDelay}ms${realIpForRecord != null ? ' (目标IP ' + realIpForRecord + ')' : ''}',
+      );
 
       return NodeDelayResult(
         nodeId: node.id,
@@ -467,6 +546,7 @@ class NodeDelayTester {
         delay: finalDelay,
         isSuccess: true,
         testTime: DateTime.now(),
+        realIpAddress: realIpForRecord,
       );
     } catch (e) {
       print('❌ 快速测试失败: ${node.name} - $e');
@@ -496,6 +576,10 @@ class NodeDelayTester {
 
       final result = await quickTest(node);
       results.add(result);
+      // 实时回调单个结果 测量延时值
+      try {
+        onResult?.call(result);
+      } catch (_) {}
 
       onProgress?.call(results.length, nodes.length);
     }
@@ -597,35 +681,21 @@ class NodeDelayTester {
       }
 
       // 兜底方案（可能导致 sing-box 重启）：FFI 动态路由规则临时直连
-      // 注意：该方案会触发 Reload/重启，TUN 模式下可能短暂影响路由；
-      // 因此仅在前两种方案失败时使用，并在结束后做一次“软重连”修复。
+      // 现已将动态规则限制为仅 TCP 且使用探测端口（UDP-only 为 443），对 hy2/tuic 是安全的，不会影响 UDP 出站
       try {
         final result = await _testWithDynamicDirectRule(node);
         return result;
       } catch (e) {
-        print('[动态规则绕过] 失败: $e，准备回退到备用方案');
+        print('[动态规则绕过] 失败: $e，准备回退到备用方案A/独立进程');
       }
 
-      // 旧方案：使用独立 sing-box 进程（仅在用户本地存在 sing-box.exe 时可用）
-      // try {
-      //   // 创建一个最小化的 sing-box 配置，强制使用 direct 出站
-      //   final tempConfig = _createDirectTestConfig(node);
-      //   final tempConfigFile = await _saveTempConfig(tempConfig);
-      //   print('[独立实例延时测试] 临时配置已保存: ${tempConfigFile.path}');
-      //   try {
-      //     final result = await _testWithIndependentSingBox(
-      //       node,
-      //       tempConfigFile,
-      //     );
-      //     return result;
-      //   } finally {
-      //     if (tempConfigFile.existsSync()) {
-      //       tempConfigFile.deleteSync();
-      //     }
-      //   }
-      // } catch (e) {
-      //   print('[独立实例延时测试] 失败: $e');
-      // }
+      // 备用方案B：使用临时主机路由（需要管理员权限）强制走物理网卡，测完即删
+      try {
+        final result = await _testWithHostRouteByNetsh(node);
+        return result;
+      } catch (e) {
+        print('[主机路由直连] 失败: $e，将回退到系统路由测试');
+      }
     } catch (e) {
       print('[独立实例延时测试] 测试异常: $e');
       // 如果独立实例失败，使用系统路由表方法
@@ -634,6 +704,198 @@ class NodeDelayTester {
 
     // 所有优先方案均未返回，则回退到系统路由测试
     return await _testWithSystemRouting(node);
+  }
+
+  /// 通过添加临时主机路由，强制目标直连物理网卡，然后进行 TCP 测试
+  Future<NodeDelayResult> _testWithHostRouteByNetsh(VPNConfig node) async {
+    if (!Platform.isWindows) {
+      throw UnsupportedError('仅在 Windows 上支持主机路由方案');
+    }
+
+    // 解析目标 IPv4 列表
+    final targets = <InternetAddress>[];
+    if (_isIpAddress(node.server)) {
+      targets.add(InternetAddress(node.server));
+    } else {
+      final a = await _resolveIPv4Direct(node.server, timeoutMs: 1500);
+      if (a != null) targets.add(a);
+      if (targets.isEmpty) {
+        try {
+          final addrs = await InternetAddress.lookup(
+            node.server,
+          ).timeout(const Duration(seconds: 2));
+          for (final x in addrs) {
+            if (x.type == InternetAddressType.IPv4 && !_isFakeIp(x.address)) {
+              targets.add(x);
+            }
+          }
+        } catch (_) {}
+      }
+    }
+    if (targets.isEmpty) {
+      throw StateError('无法解析到真实 IPv4: ${node.server}');
+    }
+
+    // 获取物理网卡的 InterfaceIndex 和网关
+    final ifInfo = await _getBestPhysicalInterface();
+    if (ifInfo == null) {
+      throw StateError('未找到可用的物理网卡或默认网关');
+    }
+    final ifIndex = ifInfo.interfaceIndex;
+    final gateway = ifInfo.gateway;
+
+    final added = <String>[]; // 已添加的目的 IP（用于回收）
+    try {
+      for (final ip in targets) {
+        final ok = await _netshAddHostRoute(ip.address, gateway, ifIndex);
+        if (ok) added.add(ip.address);
+      }
+
+      if (added.isEmpty) {
+        throw StateError('添加主机路由失败');
+      }
+
+      // 给系统一点时间应用路由变更
+      await Future.delayed(const Duration(milliseconds: 150));
+
+      // 执行一次标准 TCP 测试（端口为探测端口，UDP-only 使用 443）
+      final result = await _standardDelayTest(node);
+      return result;
+    } finally {
+      // 清理路由
+      for (final ip in added) {
+        await _netshDelHostRoute(ip);
+      }
+    }
+  }
+
+  /// 选择最合适的物理网卡（排除 VPN/TUN），返回接口索引与默认网关
+  Future<_IfInfo?> _getBestPhysicalInterface() async {
+    try {
+      final script = r'''
+      function Write-IfInfo($idx,$gw){
+        if($idx){
+          # 允许 $gw 为 0.0.0.0（PPPoE/直连 on-link 场景）
+          if(-not $gw){ $gw = '0.0.0.0' }
+          Write-Output "$idx`n$gw"; exit 0
+        }
+      }
+
+      $exclude = 'tun|tap|vpn|wintun|tailscale|zerotier|hyper\-v|vmware|bluetooth|loopback|vEthernet|virtualbox|sing\-box'
+
+      # Strategy 1: Prefer NICs with IPv4 default gateway and Up state
+      $nic = Get-NetIPConfiguration | Where-Object {
+        $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' -and `
+        $_.NetAdapter.InterfaceDescription -notmatch $exclude -and $_.NetAdapter.Name -notmatch $exclude
+      } | Select-Object -First 1
+      if($nic){ Write-IfInfo $nic.InterfaceIndex $nic.IPv4DefaultGateway.NextHop }
+
+      # Strategy 2: Use lowest-metric default route
+      $routes = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object -Property RouteMetric,Publish
+      foreach($r in $routes){
+        # 允许 NextHop 为 0.0.0.0（on-link 默认路由）
+        $idx = $r.InterfaceIndex
+        $ifi = Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $idx -ErrorAction SilentlyContinue
+        if($ifi -and $ifi.ConnectionState -eq 'Connected'){
+          $alias = $ifi.InterfaceAlias
+          $ad = (Get-NetAdapter -InterfaceIndex $idx -ErrorAction SilentlyContinue)
+          $desc = if($ad){$ad.InterfaceDescription}else{''}
+          if(($alias -notmatch $exclude) -and ($desc -notmatch $exclude)){
+            $gw = if($r.NextHop){$r.NextHop}else{'0.0.0.0'}
+            Write-IfInfo $idx $gw
+          }
+        }
+      }
+
+      # Strategy 3: Fallback to any default route
+      $r2 = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -First 1
+      if($r2){
+        $gw = if($r2.NextHop){$r2.NextHop}else{'0.0.0.0'}
+        Write-IfInfo $r2.InterfaceIndex $gw
+      }
+
+      # Strategy 4: As a last resort, pick any Connected IPv4 interface with lowest metric (physical-like)
+      $ifs = Get-NetIPInterface -AddressFamily IPv4 | Where-Object {
+        $_.ConnectionState -eq 'Connected'
+      } | Sort-Object -Property InterfaceMetric
+      foreach($ifi in $ifs){
+        $idx = $ifi.InterfaceIndex
+        $alias = $ifi.InterfaceAlias
+        $ad = (Get-NetAdapter -InterfaceIndex $idx -ErrorAction SilentlyContinue)
+        $desc = if($ad){$ad.InterfaceDescription}else{''}
+        if(($alias -notmatch $exclude) -and ($desc -notmatch $exclude)){
+          Write-IfInfo $idx '0.0.0.0'
+        }
+      }
+      ''';
+      final res = await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        script,
+      ], runInShell: true).timeout(const Duration(seconds: 6));
+      final out = (res.stdout as String? ?? '').trim();
+      if (out.isEmpty) return null;
+      final lines = out.split(RegExp(r'\r?\n'));
+      if (lines.length < 2) return null;
+      final idx = int.tryParse(lines[0].trim());
+      final gw = lines[1].trim();
+      if (idx == null || gw.isEmpty) return null;
+      final info = _IfInfo(interfaceIndex: idx, gateway: gw);
+      print(
+        '[主机路由直连] 物理网卡候选: ifIndex=${info.interfaceIndex}, gateway=${info.gateway}',
+      );
+      return info;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _netshAddHostRoute(
+    String ip,
+    String gateway,
+    int ifIndex,
+  ) async {
+    try {
+      // 当 gateway 为 0.0.0.0（on-link）时，使用 netsh 添加 on-link 路由
+      String cmd;
+      if (gateway == '0.0.0.0') {
+        // 使用临时（非持久）路由，测试完成会删除
+        cmd =
+            'netsh interface ipv4 add route prefix=$ip/32 interface=$ifIndex nexthop=0.0.0.0 store=active';
+      } else {
+        cmd =
+            'route add $ip mask 255.255.255.255 $gateway metric 3 if $ifIndex';
+      }
+
+      final res = await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        cmd,
+      ], runInShell: true).timeout(const Duration(seconds: 3));
+      final code = res.exitCode;
+      if (code == 0) return true;
+      // 若已存在则先删再加
+      await _netshDelHostRoute(ip);
+      final res2 = await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        cmd,
+      ], runInShell: true).timeout(const Duration(seconds: 3));
+      return res2.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _netshDelHostRoute(String ip) async {
+    try {
+      final cmd = 'route delete $ip';
+      await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        cmd,
+      ], runInShell: true).timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   /// 使用持久化的 latency-test-in (socks 127.0.0.1:17890) 入站进行直连测试
@@ -803,24 +1065,31 @@ class NodeDelayTester {
       }
 
       // 构造直连规则：按 IP/端口 直连，域名仅作兜底（当解析失败时）
+      // 重要：仅匹配 TCP，端口使用探测端口（UDP-only 节点使用 443），避免影响 hy2/tuic 的 UDP 正常出站
       final tag = 'latency-bypass-${DateTime.now().millisecondsSinceEpoch}';
+      final probePort = _tcpProbePort(node);
       final ipRule = <String, dynamic>{
         'tag': tag,
         if (resolved.isNotEmpty) 'ip_cidr': resolved,
         if (!_isIpAddress(node.server)) 'domain': ['full:${node.server}'],
-        'port': node.port,
-        'network': ['tcp', 'udp'],
+        'port': probePort,
+        'network': 'tcp', // 单值使用字符串，避免某些运行时解析器仅接受字符串
         'outbound': 'direct',
       };
 
       final ipRuleJson = json.encode(ipRule);
 
-      print('[动态规则绕过] 添加直连规则: $ipRuleJson');
+      print('[动态规则绕过] 添加直连规则(仅TCP): $ipRuleJson');
       final ok1 = ffi.addRouteRule(ipRuleJson);
       if (!ok1) {
-        // 清理已添加的一条
-        ffi.removeRouteRule(ipRuleJson);
-        throw StateError('添加动态路由规则失败');
+        final err = () {
+          try {
+            return ffi.getLastError();
+          } catch (_) {
+            return '';
+          }
+        }();
+        throw StateError('添加动态路由规则失败${err.isNotEmpty ? ': ' + err : ''}');
       }
 
       // 某些实现需要 reload 才生效（若不支持会忽略）
@@ -843,21 +1112,31 @@ class NodeDelayTester {
 
         return result;
       } finally {
-        // 移除动态规则
+        // 移除动态规则（优先移除指定规则）；失败时再清空所有临时规则
         print('[动态规则绕过] 移除直连规则');
+        bool removed = false;
         try {
-          ffi.removeRouteRule(ipRuleJson);
+          removed = ffi.removeRouteRule(ipRuleJson);
         } catch (_) {}
+
         try {
-          // 强制兜底：清空所有临时规则并重载，避免字符串不匹配造成残留
-          ffi.clearRouteRules();
-          // 二次重载，确保回滚到仅含基线的合并配置
           final ok2 = ffi.reloadConfig();
           if (!ok2) {
             await _softReconnectIfUsingTun();
           }
         } catch (_) {}
-        // 动态规则路径会重启 sing-box，TUN 有概率不稳定；统一做一次软修复
+
+        if (!removed) {
+          try {
+            ffi.clearRouteRules();
+            final ok3 = ffi.reloadConfig();
+            if (!ok3) {
+              await _softReconnectIfUsingTun();
+            }
+          } catch (_) {}
+        }
+
+        // 动态规则路径可能导致路由抖动；最后再做一次软修复
         await _softReconnectIfUsingTun();
       }
     } catch (e) {
@@ -934,38 +1213,6 @@ class NodeDelayTester {
     await tempFile.writeAsString(configJson);
 
     return tempFile;
-  }
-
-  /// 使用独立的sing-box进程进行测试
-  Future<NodeDelayResult> _testWithIndependentSingBox(
-    VPNConfig node,
-    File configFile,
-  ) async {
-    print('[独立进程测试] 启动独立sing-box实例');
-
-    // 检查sing-box可执行文件是否存在
-    final String singboxPath;
-    if (Platform.isWindows) {
-      final exeDir = path.dirname(Platform.resolvedExecutable);
-      singboxPath = path.join(exeDir, 'singbox.exe');
-
-      // 如果exe目录没有，尝试开发环境路径
-      if (!File(singboxPath).existsSync()) {
-        final devPath = path.join(
-          Directory.current.path,
-          'windows',
-          'singbox.exe',
-        );
-        if (!File(devPath).existsSync()) {
-          throw Exception('找不到sing-box可执行文件');
-        }
-        return await _testWithProcess(node, devPath, configFile);
-      }
-    } else {
-      throw UnsupportedError('当前只支持Windows平台');
-    }
-
-    return await _testWithProcess(node, singboxPath, configFile);
   }
 
   /// 使用Process运行独立的sing-box进程进行测试
@@ -1260,7 +1507,8 @@ class NodeDelayTester {
         node.server,
         probePort,
         timeout: Duration(milliseconds: timeout),
-        sourceAddress: sourceIp,
+        // 明确使用 InternetAddress 以避免在某些 Dart 版本中对 String 的兼容性问题
+        sourceAddress: InternetAddress(sourceIp),
       );
 
       sw.stop();
@@ -1358,12 +1606,19 @@ class NodeDelayTester {
       );
 
       stopwatch.stop();
+      final delay = stopwatch.elapsedMilliseconds;
+      final remote = socket.remoteAddress.address;
+      final local = socket.address.address;
+      final localPort = socket.port;
+      final remotePort = socket.remotePort;
       socket.destroy();
 
-      final delay = stopwatch.elapsedMilliseconds;
-      print('[标准测试] ${node.name} port=$port: ${delay}ms');
+      print(
+        '[标准测试] ${node.name} port=$port: ${delay}ms (local $local:$localPort -> remote $remote:$remotePort)',
+      );
 
-      return NodeDelayResult(
+      // 基础结果（先按系统路由值返回）
+      var base = NodeDelayResult(
         nodeId: node.id,
         nodeName: node.name,
         nodeServer: node.server,
@@ -1372,7 +1627,66 @@ class NodeDelayTester {
         delay: delay,
         isSuccess: true,
         testTime: DateTime.now(),
+        realIpAddress: remote,
       );
+
+      // 在 systemOnly 路径下，如果命中 FakeIP 或延时过低，则尝试一次“物理网卡源绑定的 ICMP”回退，给出更接近真实的值
+      if (!isVpnBypass) {
+        final isFake = _isFakeIp(remote);
+        final tooLow = delay <= 15; // 极低延时，疑似本机/回环
+        if (isFake || tooLow) {
+          print(
+            '[系统路由测试] 发现${isFake ? ' FakeIP' : ''}${tooLow ? ' 异常低延时' : ''}，尝试ICMP源绑定回退',
+          );
+          try {
+            final ip = _isIpAddress(node.server)
+                ? InternetAddress(node.server)
+                : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
+                      (await InternetAddress.lookup(node.server)).firstWhere(
+                        (a) =>
+                            a.type == InternetAddressType.IPv4 &&
+                            !_isFakeIp(a.address),
+                      );
+            String? srcBind;
+            try {
+              srcBind = await _pickPhysicalIPv4();
+            } catch (_) {}
+            int? icmp;
+            if (srcBind != null && Platform.isWindows) {
+              icmp = await _icmpPingIPv4(
+                ip.address,
+                timeoutMs: 1200,
+                sourceIp: srcBind,
+              );
+            }
+            icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
+            if (icmp != null && icmp >= 0) {
+              print(
+                '[系统路由测试] ICMP回退成功: ${icmp}ms (目标 ${ip.address}${srcBind != null ? ', 源 ' + srcBind : ''})',
+              );
+              base = NodeDelayResult(
+                nodeId: node.id,
+                nodeName: node.name,
+                nodeServer: node.server,
+                nodePort: port,
+                nodeType: node.type,
+                delay: icmp,
+                isSuccess: true,
+                testTime: DateTime.now(),
+                realIpAddress: ip.address,
+              );
+            } else {
+              print('[系统路由测试] ICMP回退无结果，保留系统路由测得的值');
+            }
+          } catch (e) {
+            print('[系统路由测试] ICMP回退异常: $e');
+          }
+          // 结束 (isFake || tooLow)
+        }
+        // 结束 (!isVpnBypass)
+      }
+
+      return base;
     } catch (e) {
       stopwatch.stop();
       // 针对 UDP-only 节点的 TCP 端口拒绝，尝试对 443 端口做一次兜底测量
@@ -1384,16 +1698,19 @@ class NodeDelayTester {
               msg.contains('拒绝') ||
               msg.toLowerCase().contains('refused'));
       if (overridePort == null && isUdp && refused) {
-        try {
-          final fallbackPort = 443;
-          final retry = await _standardDelayTest(
-            node,
-            isVpnBypass: isVpnBypass,
-            overridePort: fallbackPort,
-          );
-          return retry;
-        } catch (_) {}
-        // 仍不行，尝试 ICMP 探测作为最后兜底
+        // 如果探测端口原本就已经是 443，则不再重复尝试相同端口
+        final currentProbePort = _tcpProbePort(node);
+        if (currentProbePort != 443) {
+          try {
+            final retry = await _standardDelayTest(
+              node,
+              isVpnBypass: isVpnBypass,
+              overridePort: 443,
+            );
+            return retry;
+          } catch (_) {}
+        }
+        // 仍不行，尝试 ICMP 探测作为兜底；优先绑定物理网卡源地址确保不经由 VPN
         try {
           final ip = _isIpAddress(node.server)
               ? InternetAddress(node.server)
@@ -1401,7 +1718,23 @@ class NodeDelayTester {
                     (await InternetAddress.lookup(
                       node.server,
                     )).firstWhere((a) => a.type == InternetAddressType.IPv4);
-          final icmp = await _icmpPingIPv4(ip.address, timeoutMs: 1200);
+
+          String? srcBind;
+          try {
+            srcBind = await _pickPhysicalIPv4();
+          } catch (_) {}
+
+          // Windows 下优先使用带源地址绑定的 ping，提高绕过 VPN 的命中率
+          int? icmp;
+          if (srcBind != null && Platform.isWindows) {
+            icmp = await _icmpPingIPv4(
+              ip.address,
+              timeoutMs: 1200,
+              sourceIp: srcBind,
+            );
+          }
+          icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
+
           if (icmp != null && icmp >= 0) {
             return NodeDelayResult(
               nodeId: node.id,
@@ -1421,16 +1754,25 @@ class NodeDelayTester {
   }
 
   /// Windows 下调用系统 ping 进行单次 ICMP 测量，返回毫秒；失败返回 null
-  Future<int?> _icmpPingIPv4(String ipv4, {int timeoutMs = 1000}) async {
+  Future<int?> _icmpPingIPv4(
+    String ipv4, {
+    int timeoutMs = 1000,
+    String? sourceIp,
+  }) async {
     try {
       // -n 1 仅一次；-w 超时（毫秒）
-      final result = await Process.run('ping', [
-        '-n',
-        '1',
-        '-w',
-        timeoutMs.toString(),
-        ipv4,
-      ], runInShell: true).timeout(Duration(milliseconds: timeoutMs + 500));
+      final args = <String>['-n', '1', '-w', timeoutMs.toString()];
+      // Windows 支持 -S 绑定源地址（需为本机接口 IPv4）
+      if (Platform.isWindows && sourceIp != null && sourceIp.isNotEmpty) {
+        args.addAll(['-S', sourceIp]);
+      }
+      args.add(ipv4);
+
+      final result = await Process.run(
+        'ping',
+        args,
+        runInShell: true,
+      ).timeout(Duration(milliseconds: timeoutMs + 500));
 
       final out = (result.stdout as String?) ?? '';
       final err = (result.stderr as String?) ?? '';
@@ -1650,4 +1992,11 @@ class _Semaphore {
       completer.complete();
     }
   }
+}
+
+/// 物理网卡信息（用于 route add 选择 ifIndex 和默认网关）
+class _IfInfo {
+  final int interfaceIndex;
+  final String gateway;
+  _IfInfo({required this.interfaceIndex, required this.gateway});
 }

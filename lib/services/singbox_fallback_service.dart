@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'package:process_run/process_run.dart';
 
 /// sing-box 回退服务（使用外部 exe）
 class SingBoxFallbackService {

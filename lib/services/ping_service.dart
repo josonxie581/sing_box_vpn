@@ -139,6 +139,7 @@ class PingService {
     final tester = NodeDelayTester(
       timeout: 8000, // 稍长的超时，因为要创建临时实例
       enableIpInfo: false,
+      latencyMode: LatencyTestMode.systemOnly,
     );
 
     try {
@@ -179,7 +180,11 @@ class PingService {
   static Future<int> _testOtherVPNServer(VPNConfig config) async {
     print('[DEBUG] 测试非当前连接的VPN服务器');
     // 已连接状态下，必须绕过当前VPN路由进行真实延时测试
-    final tester = NodeDelayTester(timeout: 8000, enableIpInfo: false);
+    final tester = NodeDelayTester(
+      timeout: 8000,
+      enableIpInfo: false,
+      latencyMode: LatencyTestMode.systemOnly,
+    );
     try {
       final result = await tester.realTest(config);
       if (result.isSuccess) {
@@ -196,7 +201,11 @@ class PingService {
 
   /// 标准TCP测试
   static Future<int> _testStandardTCP(VPNConfig config) async {
-    final tester = NodeDelayTester(timeout: 5000, enableIpInfo: false);
+    final tester = NodeDelayTester(
+      timeout: 5000,
+      enableIpInfo: false,
+      latencyMode: LatencyTestMode.systemOnly,
+    );
 
     final result = await tester.quickTest(config);
 
@@ -220,34 +229,30 @@ class PingService {
     final results = <String, int>{};
 
     try {
-      print('[DEBUG] 开始批量延时测试，节点数量: ${configs.length}');
+      print('[DEBUG] 开始批量延时测试（逐个使用单个测试方法 realTest），节点数量: ${configs.length}');
 
-      // 使用 NodeDelayTester 进行批量快速测试
+      // 与单个测试保持一致：统一使用 realTest，避免 quickTest 带来的偏差
       final tester = NodeDelayTester(
-        timeout: 5000,
-        maxConcurrency: 3, // 限制并发数
+        timeout: 8000,
         enableIpInfo: false,
+        latencyMode: LatencyTestMode.systemOnly,
       );
 
-      final testResults = await tester.quickTestMultiple(configs);
-
-      // 将结果转换为原有的映射格式
-      for (final result in testResults) {
-        results[result.nodeId] = result.delay;
+      for (final cfg in configs) {
+        try {
+          final r = await tester.realTest(cfg);
+          results[cfg.id] = r.isSuccess ? r.delay : -1;
+        } catch (e) {
+          results[cfg.id] = -1;
+        }
       }
 
+      final successCount = results.values.where((v) => v >= 0).length;
       print(
-        '[DEBUG] 批量延时测试完成，成功测试: ${testResults.where((r) => r.isSuccess).length}/${configs.length}',
+        '[DEBUG] 批量延时测试完成（realTest），成功测试: ${successCount}/${configs.length}',
       );
     } catch (e) {
-      print('[DEBUG] 批量延时测试异常: $e');
-      // 如果批量测试失败，返回空结果或继续使用进度回调方式
-      await pingConfigsWithProgress(
-        configs,
-        onEach: (c, p) => results[c.id] = p,
-        isConnected: isConnected,
-        currentConfig: currentConfig,
-      );
+      print('[DEBUG] 批量延时测试异常（realTest）: $e');
     }
 
     return results;
@@ -275,86 +280,33 @@ class PingService {
     if (configs.isEmpty) return;
 
     try {
-      print('[DEBUG] 开始进度回调批量延时测试，节点数量: ${configs.length}');
-
-      // 使用 NodeDelayTester 进行带进度回调的批量测试
-      final tester = NodeDelayTester(
-        timeout: 5000,
-        maxConcurrency:
-            concurrency ??
-            (() {
-              final total = configs.length;
-              if (total <= 10) return 4;
-              if (total <= 20) return 6;
-              if (total <= 60) return 10;
-              if (total <= 120) return 14;
-              return 18;
-            })(),
-        enableIpInfo: false,
-        onProgress: onProgress,
+      print(
+        '[DEBUG] 开始进度回调批量延时测试（逐个使用单个测试方法 realTest），节点数量: ${configs.length}',
       );
 
-      final testResults = await tester.quickTestMultiple(configs);
+      // 与单个测试保持一致：统一使用 realTest，顺序执行；按用户需求，最终再统一展示
+      final tester = NodeDelayTester(
+        timeout: 8000,
+        enableIpInfo: false,
+        latencyMode: LatencyTestMode.systemOnly,
+      );
 
-      // 调用每个节点的回调
-      for (final result in testResults) {
-        final config = configs.firstWhere((c) => c.id == result.nodeId);
-        onEach?.call(config, result.delay);
-      }
-
-      print('[DEBUG] 进度回调批量延时测试完成');
-    } catch (e) {
-      print('[DEBUG] 进度回调批量延时测试异常: $e');
-
-      // 如果NodeDelayTester失败，使用原有的简单实现作为后备
-      final total = configs.length;
-      final conc =
-          concurrency ??
-          (() {
-            if (total <= 10) return 4;
-            if (total <= 20) return 6;
-            if (total <= 60) return 10;
-            if (total <= 120) return 14;
-            return 18;
-          })();
-
-      final queue = List<VPNConfig>.from(configs);
-      int running = 0;
       int done = 0;
-      final completer = Completer<void>();
-
-      void scheduleNext() {
-        if (queue.isEmpty && running == 0) {
-          completer.complete();
-          return;
-        }
-        while (running < conc && queue.isNotEmpty) {
-          final cfg = queue.removeAt(0);
-          running++;
-          pingConfig(
-                cfg,
-                isConnected: isConnected,
-                currentConfig: currentConfig,
-              )
-              .then((ping) {
-                onEach?.call(cfg, ping);
-              })
-              .catchError((_) {
-                onEach?.call(cfg, -1);
-              })
-              .whenComplete(() {
-                running--;
-                done++;
-                if (onProgress != null && (done == total || done % 3 == 0)) {
-                  onProgress(done, total);
-                }
-                scheduleNext();
-              });
+      for (final cfg in configs) {
+        try {
+          final r = await tester.realTest(cfg);
+          onEach?.call(cfg, r.isSuccess ? r.delay : -1);
+        } catch (e) {
+          onEach?.call(cfg, -1);
+        } finally {
+          done++;
+          onProgress?.call(done, configs.length);
         }
       }
 
-      scheduleNext();
-      await completer.future;
+      print('[DEBUG] 进度回调批量延时测试完成（realTest）');
+    } catch (e) {
+      print('[DEBUG] 进度回调批量延时测试异常（realTest）: $e');
     }
   }
 

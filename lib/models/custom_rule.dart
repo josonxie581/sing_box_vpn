@@ -47,13 +47,23 @@ class CustomRule {
         rule['source_ip_cidr'] = [value];
         break;
       case RuleType.port:
-        final ports = value.split(',').map((e) => int.tryParse(e.trim())).where((e) => e != null).cast<int>().toList();
+        final ports = value
+            .split(',')
+            .map((e) => int.tryParse(e.trim()))
+            .where((e) => e != null)
+            .cast<int>()
+            .toList();
         if (ports.isNotEmpty) {
           rule['port'] = ports;
         }
         break;
       case RuleType.sourcePort:
-        final ports = value.split(',').map((e) => int.tryParse(e.trim())).where((e) => e != null).cast<int>().toList();
+        final ports = value
+            .split(',')
+            .map((e) => int.tryParse(e.trim()))
+            .where((e) => e != null)
+            .cast<int>()
+            .toList();
         if (ports.isNotEmpty) {
           rule['source_port'] = ports;
         }
@@ -87,7 +97,9 @@ class CustomRule {
       outbound: json['outbound'],
       enabled: json['enabled'] ?? true,
       createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : null,
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'])
+          : null,
     );
   }
 
@@ -134,9 +146,7 @@ class CustomRule {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CustomRule &&
-          runtimeType == other.runtimeType &&
-          id == other.id;
+      other is CustomRule && runtimeType == other.runtimeType && id == other.id;
 
   @override
   int get hashCode => id.hashCode;
@@ -214,7 +224,9 @@ enum RuleType {
   }
 
   static bool _isValidDomain(String domain) {
-    final domainRegex = RegExp(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$');
+    final domainRegex = RegExp(
+      r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$',
+    );
     return domainRegex.hasMatch(domain);
   }
 
@@ -245,7 +257,7 @@ enum RuleType {
     final ipv4Match = ipv4Regex.firstMatch(ip);
     if (ipv4Match != null) {
       final octets = ipv4Match.groups([1, 2, 3, 4]);
-      if (octets.every((octet) => octet != null && int.parse(octet!) <= 255)) {
+      if (octets.every((octet) => octet != null && int.parse(octet) <= 255)) {
         return prefixLength >= 0 && prefixLength <= 32;
       }
     }

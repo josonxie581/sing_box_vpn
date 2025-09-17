@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
@@ -6,6 +7,7 @@ import '../models/vpn_config.dart';
 import '../models/proxy_mode.dart';
 import '../services/config_manager.dart';
 import '../services/connection_manager.dart';
+import '../services/dns_manager.dart';
 import '../services/improved_traffic_stats_service.dart';
 import '../services/ping_service.dart';
 import '../services/connection_stats_service.dart';
@@ -469,29 +471,36 @@ class VPNProviderV2 extends ChangeNotifier {
     _isPingingAll = true;
     notifyListeners();
 
-    for (final config in configs) {
-      try {
-        final delay = await PingService.pingConfig(
-          config,
-          isConnected: isConnected,
-          currentConfig: currentConfig,
-        );
-        _configPings[config.id] = delay;
-      } catch (e) {
-        _configPings[config.id] = -1;
+    try {
+      // 实时更新：每个节点完成即刻刷新对应延时
+      await PingService.pingConfigsWithProgress(
+        configs,
+        concurrency: null,
+        isConnected: isConnected,
+        currentConfig: currentConfig,
+        onEach: (cfg, ping) {
+          _configPings[cfg.id] = ping;
+          // 实时通知UI更新每个节点的延时显示
+          notifyListeners();
+        },
+        onProgress: (done, total) {
+          // 可选：可在此处记录进度供日后使用，目前保持静默
+        },
+      );
+      // 兜底：全部完成后再次通知一次，确保UI一致
+      notifyListeners();
+
+      // 自动选择最佳服务器（仅在启用自动选择功能时）
+      if (_autoSelectBestServer && isConnected) {
+        print('[DEBUG] 自动选择最佳服务器功能已启用，开始选择最佳服务器');
+        _selectBestServer();
+      } else if (isConnected) {
+        print('[DEBUG] 自动选择最佳服务器功能未启用，跳过切换');
       }
+    } finally {
+      _isPingingAll = false;
+      notifyListeners();
     }
-
-    // 自动选择最佳服务器（仅在启用自动选择功能时）
-    if (_autoSelectBestServer && isConnected) {
-      print('[DEBUG] 自动选择最佳服务器功能已启用，开始选择最佳服务器');
-      _selectBestServer();
-    } else if (isConnected) {
-      print('[DEBUG] 自动选择最佳服务器功能未启用，跳过切换');
-    }
-
-    _isPingingAll = false;
-    notifyListeners();
   }
 
   void _selectBestServer() {
@@ -672,6 +681,48 @@ class VPNProviderV2 extends ChangeNotifier {
     if (fromLogs != null) return fromLogs;
     final probed = await probeLoginUrlOnce();
     return probed;
+  }
+
+  // ============== 最小连通性检查（快速健康探测） ==============
+  /// 返回检查结果文本：
+  /// - 系统DNS解析（gstatic.com）
+  /// - 本地端口占用情况（mixed-in 端口）
+  /// - 路由模式/是否连接的简报
+  Future<String> quickHealthCheck() async {
+    final buf = StringBuffer();
+    buf.writeln('快速健康探测');
+    buf.writeln('- 连接状态: ${isConnected ? '已连接' : '未连接'}');
+    buf.writeln('- 代理模式: ${proxyMode.name}');
+    buf.writeln('- TUN: ${useTun ? '开启' : '关闭'}');
+    // DNS 解析
+    try {
+      final res = await DnsManager().testDomainResolution('gstatic.com');
+      if (res.success) {
+        buf.writeln(
+          '- DNS 解析: 正常 (${res.duration?.inMilliseconds ?? 0}ms) → ${res.resolvedAddresses.firstOrNull ?? ''}',
+        );
+      } else {
+        buf.writeln('- DNS 解析: 失败 ${res.error ?? ''}');
+      }
+    } catch (e) {
+      buf.writeln('- DNS 解析: 异常 $e');
+    }
+    // 端口检查（简单尝试绑定同端口判断占用）
+    try {
+      final s = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        localPort,
+      );
+      await s.close();
+      buf.writeln('- 本地端口 ${localPort}: 可用');
+    } catch (_) {
+      buf.writeln('- 本地端口 ${localPort}: 已占用');
+    }
+    // Clash API 简报
+    buf.writeln(
+      '- Clash API: ${enableClashApi ? '启用' : '未启用'} @ 127.0.0.1:$clashApiPort',
+    );
+    return buf.toString();
   }
 
   // 刷新所有配置的ping

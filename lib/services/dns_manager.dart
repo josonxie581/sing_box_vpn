@@ -139,6 +139,15 @@ class DnsManager {
   String get wgUdpTimeout => _wgUdpTimeout;
   int get wgWorkers => _wgWorkers;
 
+  // 补充：配置完整性便捷判断（供 UI 显示提示条）
+  bool get wgConfigComplete =>
+      _wgPrivateKey.trim().isNotEmpty &&
+      _wgPeerAddress.trim().isNotEmpty &&
+      _wgPeerPort > 0 &&
+      _wgPeerPublicKey.trim().isNotEmpty &&
+      _wgPeerAllowedIps.isNotEmpty;
+  bool get tsAuthKeyMissing => _tailscaleEnabled && _tsAuthKey.trim().isEmpty;
+
   // Setters（修改后立即持久化）
   set tunHijackDns(bool value) {
     _tunHijackDns = value;

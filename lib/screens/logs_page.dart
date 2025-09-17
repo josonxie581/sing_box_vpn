@@ -148,6 +148,65 @@ class _LogsPageState extends State<LogsPage> {
               );
             },
           ),
+          // 最小连通性检查
+          IconButton(
+            icon: const Icon(
+              Icons.health_and_safety,
+              color: AppTheme.textSecondary,
+            ),
+            tooltip: '最小连通性检查',
+            onPressed: () async {
+              final report = await provider.quickHealthCheck();
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: AppTheme.bgCard,
+                  title: const Text(
+                    '快速健康探测',
+                    style: TextStyle(color: AppTheme.textPrimary),
+                  ),
+                  content: SingleChildScrollView(
+                    child: SelectableText(
+                      report,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                        height: 1.4,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: report));
+                        Navigator.of(ctx).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('检测结果已复制'),
+                            backgroundColor: AppTheme.successGreen,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        '复制',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text(
+                        '关闭',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           // 自动滚动开关
           IconButton(
             icon: Icon(

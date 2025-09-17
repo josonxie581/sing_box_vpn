@@ -90,6 +90,7 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
       timeout: _timeout,
       maxConcurrency: _maxConcurrency,
       enableIpInfo: _enableIpInfo,
+      latencyMode: LatencyTestMode.systemOnly,
       onProgress: (completed, total) {
         setState(() {
           _completedTests = completed;
@@ -140,6 +141,7 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
     _delayTester = NodeDelayTester(
       timeout: _timeout,
       enableIpInfo: _enableIpInfo,
+      latencyMode: LatencyTestMode.systemOnly,
     );
 
     try {
@@ -205,10 +207,11 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
     final failedCount = results.length - successCount;
 
     if (successCount > 0) {
-      final avgLatency = results
-          .where((r) => r.isSuccess && r.delay >= 0)
-          .map((r) => r.delay)
-          .reduce((a, b) => a + b) ~/
+      final avgLatency =
+          results
+              .where((r) => r.isSuccess && r.delay >= 0)
+              .map((r) => r.delay)
+              .reduce((a, b) => a + b) ~/
           successCount;
 
       final bestNode = results.firstWhere((r) => r.isSuccess);
@@ -263,8 +266,7 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
                 Text('HTTP 状态码: ${result.httpStatusCode}'),
               if (result.realIpAddress != null)
                 Text('IP 地址: ${result.realIpAddress}'),
-              if (result.ipLocation != null)
-                Text('位置: ${result.ipLocation}'),
+              if (result.ipLocation != null) Text('位置: ${result.ipLocation}'),
               // 注意：NodeDelayResult 不包含速度测试信息
             ] else ...[
               Text('状态: 失败', style: TextStyle(color: Colors.red)),
@@ -340,9 +342,9 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -531,15 +533,11 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor:
-              result.isSuccess ? Colors.green : Colors.red,
+          backgroundColor: result.isSuccess ? Colors.green : Colors.red,
           child: result.isSuccess
               ? Text(
                   '${result.delay}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.white),
                 )
               : Icon(Icons.error, color: Colors.white),
         ),
@@ -547,11 +545,15 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${result.nodeType} - ${result.nodeServer}:${result.nodePort}'),
+            Text(
+              '${result.nodeType} - ${result.nodeServer}:${result.nodePort}',
+            ),
             if (result.isSuccess) ...[
               if (result.ipLocation != null)
-                Text('位置: ${result.ipLocation}',
-                    style: TextStyle(fontSize: 12)),
+                Text(
+                  '位置: ${result.ipLocation}',
+                  style: TextStyle(fontSize: 12),
+                ),
               // 注意：NodeDelayResult 不包含速度测试信息
             ] else if (result.errorMessage != null)
               Text(
@@ -637,8 +639,9 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
                   hintText: '默认 3',
                 ),
                 keyboardType: TextInputType.number,
-                controller:
-                    TextEditingController(text: _maxConcurrency.toString()),
+                controller: TextEditingController(
+                  text: _maxConcurrency.toString(),
+                ),
                 onChanged: (value) {
                   final parsed = int.tryParse(value);
                   if (parsed != null && parsed > 0) {

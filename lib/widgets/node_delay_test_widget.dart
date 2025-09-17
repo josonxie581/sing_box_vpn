@@ -37,7 +37,11 @@ class _NodeDelayTestWidgetState extends State<NodeDelayTestWidget> {
       _result = null;
     });
 
-    _tester = NodeDelayTester(timeout: 8000, enableIpInfo: false);
+    _tester = NodeDelayTester(
+      timeout: 8000,
+      enableIpInfo: false,
+      latencyMode: LatencyTestMode.systemOnly,
+    );
 
     try {
       // 使用真实延时测试（带绕行），避免被当前VPN路由影响
@@ -61,7 +65,10 @@ class _NodeDelayTestWidgetState extends State<NodeDelayTestWidget> {
       _result = null;
     });
 
-    _tester = NodeDelayTester(timeout: 3000);
+    _tester = NodeDelayTester(
+      timeout: 3000,
+      latencyMode: LatencyTestMode.systemOnly,
+    );
 
     try {
       final result = await _tester!.quickTest(widget.node);
@@ -261,6 +268,8 @@ class _BatchDelayTestDialogState extends State<BatchDelayTestDialog> {
       timeout: _useQuickTest ? 3000 : 5000,
       maxConcurrency: 3,
       enableIpInfo: !_useQuickTest,
+      latencyMode: LatencyTestMode.systemOnly,
+      // 不启用逐项实时结果，待全部完成后统一显示
       onProgress: (completed, total) {
         setState(() {
           _completedCount = completed;
