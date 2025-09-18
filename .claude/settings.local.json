@@ -15,7 +15,15 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:clash.gitbook.io)",
       "Bash(timeout:*)",
-      "Bash(dart:*)"
+      "Bash(dart:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(copy app_icon.ico app_icon_backup.ico)",
+      "Bash(flutter clean:*)",
+      "Bash(touch:*)",
+      "Bash(mkdir:*)",
+      "Bash(copy assets/gsou_icon.ico assets/app_icon.ico)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

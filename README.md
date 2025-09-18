@@ -1,12 +1,23 @@
 # Gsou - Sing-box VPN 客户端
 
+### 一个免费，没广告的代理客户端 - windows 
+###### 无需安装(运行需要管员权限，为了使用TUN模式)，不需要设置，打开设置好服务节点就能使用
+-    支持ymal节点配置文件导入
+-    暂不支持远程订阅
+-    支持二维码的扫描导入节点
+-    代理协议：Shadowsocks/ShadowTLS/VLESS/AnyTLS/Hysteria2/TUIC/VMess/Trojan
+-    支持路由规则设置
+
+最小化窗口显示悬浮上传下载速度
+![最小化悬浮显示上传下载速度](Doc/suspend.gif)
+主界面
 ![应用主界面](Doc/main.png)
 
-一个基于 Flutter 开发的现代化 sing-box VPN 客户端，支持 Windows 平台。
+一个基于 Flutter 开发的 sing-box VPN 客户端，仅支持 Windows 平台。
 
 ## 项目简介
 
-Gsou 是一个功能强大的 VPN 客户端应用，基于 sing-box 核心构建，提供简洁美观的用户界面和丰富的功能特性。
+Gsou 是一个简单的 VPN 客户端应用，基于 sing-box 核心构建。
 
 ### 主要特性
 
@@ -14,7 +25,7 @@ Gsou 是一个功能强大的 VPN 客户端应用，基于 sing-box 核心构建
 - 🎯 **系统托盘支持**: 后台运行，系统托盘快速访问
 - 🌐 **多协议支持**: 支持多种代理协议和配置格式
 - 🔧 **灵活配置**: 支持导入配置文件和二维码扫描
-- ⚡ **高性能**: 基于 sing-box 核心，性能优异
+- ⚡ **高性能**: 基于 sing-box 核心
 
 ## 系统要求
 
@@ -68,7 +79,7 @@ Gsou 是一个功能强大的 VPN 客户端应用，基于 sing-box 核心构建
 
 2. **克隆项目**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/josonxie581/sing_box_vpn.git
    cd sing_box_vpn
    ```
 
