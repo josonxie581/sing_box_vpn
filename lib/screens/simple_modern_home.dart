@@ -45,13 +45,165 @@ class SimpleModernHome extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const SizedBox(height: 8),
-                        // 当前配置显示（小卡片 + 绝对居中按钮）
+                        // 第一行：上传（左）+ 连接按钮（中间）+ 下载（右） - 全部在一个卡片内
+                        Container(
+                          height: 100,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgCard,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: AppTheme.borderColor.withAlpha(80),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                offset: const Offset(0, 4),
+                                blurRadius: 12,
+                                spreadRadius: 0,
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              // 上传数据（左侧）
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.arrow_upward,
+                                          size: 16,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '上传',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      ImprovedTrafficStatsService.formatSpeed(
+                                        provider.uploadSpeed,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color.fromARGB(255, 199, 230, 22),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      ImprovedTrafficStatsService.formatBytes(
+                                        provider.uploadBytes,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color.fromARGB(255, 54, 98, 231),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // 连接按钮（中间）
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                child: AnimatedConnectionButton(
+                                  isConnected: provider.isConnected,
+                                  isConnecting: provider.isConnecting,
+                                  isDisconnecting: provider.isDisconnecting,
+                                  size: 80,
+                                  onTap: () async {
+                                    if (provider.isConnected) {
+                                      provider.disconnect();
+                                    } else {
+                                      if (provider.currentConfig != null) {
+                                        provider.connect(
+                                          provider.currentConfig!,
+                                        );
+                                      } else if (provider.configs.isNotEmpty) {
+                                        await provider.setCurrentConfig(
+                                          provider.configs.first,
+                                        );
+                                        provider.connect(
+                                          provider.configs.first,
+                                        );
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('请先添加服务器配置'),
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  },
+                                ),
+                              ),
+                              // 下载数据（右侧）
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.arrow_downward,
+                                          size: 16,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '下载',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      ImprovedTrafficStatsService.formatSpeed(
+                                        provider.downloadSpeed,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color.fromARGB(255, 199, 230, 22),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      ImprovedTrafficStatsService.formatBytes(
+                                        provider.downloadBytes,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color.fromARGB(255, 54, 98, 231),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // 第二行：当前节点配置信息 + 延时
                         HoverScale(
                           enabled: true,
-                          scale: 1.04,
+                          scale: 1.02,
                           child: Container(
-                            width: double.infinity,
-                            height: 120,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
                               color: AppTheme.bgCard,
                               borderRadius: BorderRadius.circular(16),
@@ -65,211 +217,117 @@ class SimpleModernHome extends StatelessWidget {
                                   blurRadius: 12,
                                   spreadRadius: 0,
                                 ),
-                                BoxShadow(
-                                  color: AppTheme.primaryNeon.withOpacity(0.05),
-                                  offset: const Offset(0, 1),
-                                  blurRadius: 3,
-                                  spreadRadius: 0,
-                                ),
                               ],
                             ),
-                            child: Stack(
+                            child: Row(
                               children: [
-                                // 顶部标题与状态点
-                                Positioned(
-                                  top: 10,
-                                  left: 12,
-                                  child: Row(
+                                // 配置名称
+                                Icon(
+                                  Icons.public,
+                                  color: AppTheme.primaryNeon,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(
-                                        Icons.list_alt,
-                                        color: AppTheme.primaryNeon,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 8),
                                       Text(
-                                        '当前配置',
+                                        provider.currentConfig?.name ?? '暂无配置',
                                         style: TextStyle(
                                           fontSize: 13,
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w500,
                                           color: AppTheme.textPrimary,
                                         ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      const SizedBox(width: 8),
                                       if (provider.currentConfig != null)
-                                        Container(
-                                          width: 6,
-                                          height: 6,
-                                          decoration: BoxDecoration(
-                                            color: provider.isConnected
-                                                ? AppTheme.successGreen
-                                                : AppTheme.warningOrange,
-                                            shape: BoxShape.circle,
+                                        Text(
+                                          _getConfigTypeDisplay(provider.currentConfig!),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: AppTheme.textSecondary,
                                           ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                     ],
                                   ),
                                 ),
-                                // 名称与类型（靠上，避免遮挡中心按钮）
+                                // 延时显示
                                 if (provider.currentConfig != null)
-                                  Positioned(
-                                    left: 12,
-                                    right: 12,
-                                    top: 36,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                provider.currentConfig!.name,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: AppTheme.textPrimary,
-                                                ),
-                                              ),
-                                            ),
-                                            // 延时显示
-                                            Builder(
-                                              builder: (context) {
-                                                // 构建延时显示组件
-                                                return _buildCurrentConfigPing(
-                                                  provider,
-                                                );
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          _getConfigTypeDisplay(
-                                            provider.currentConfig!,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: AppTheme.textSecondary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else
-                                  const Positioned(
-                                    left: 12,
-                                    top: 40,
-                                    child: Text(
-                                      '暂无配置',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ),
-
-                                // 中央连接/断开按钮（水平+垂直居中）
-                                Align(
-                                  alignment: Alignment.center,
-                                  child: AnimatedConnectionButton(
-                                    isConnected: provider.isConnected,
-                                    isConnecting: provider.isConnecting,
-                                    isDisconnecting: provider.isDisconnecting,
-                                    size: 80,
-                                    onTap: () async {
-                                      if (provider.isConnected) {
-                                        provider.disconnect();
-                                      } else {
-                                        if (provider.currentConfig != null) {
-                                          provider.connect(
-                                            provider.currentConfig!,
-                                          );
-                                        } else if (provider
-                                            .configs
-                                            .isNotEmpty) {
-                                          await provider.setCurrentConfig(
-                                            provider.configs.first,
-                                          );
-                                          provider.connect(
-                                            provider.configs.first,
-                                          );
-                                        } else {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('请先添加服务器配置'),
-                                            ),
-                                          );
-                                        }
-                                      }
+                                  Builder(
+                                    builder: (context) {
+                                      return _buildCurrentConfigPing(provider);
                                     },
                                   ),
-                                ),
                               ],
                             ),
                           ),
                         ),
 
-                        const SizedBox(height: 20),
-                        // 连接时长与流量统计（始终显示；未连接时显示 0）
-                        Row(
-                          children: [
-                            Expanded(
-                              child: HoverScale(
-                                scale: 1.05,
-                                child: GestureDetector(
-                                  onTap: () =>
-                                      _showConnectionStatusPage(context),
-                                  child: _buildMiniStatCard(
-                                    icon: Icons.timer,
-                                    label: '连接时长',
-                                    value:
-                                        ImprovedTrafficStatsService.formatDuration(
-                                          provider.connectionDuration,
-                                        ),
-                                    rightValue: '${provider.activeConnections}',
-                                    rightLabel: '连接数',
+                        const SizedBox(height: 10),
+                        // 连接时长统计
+                        HoverScale(
+                          scale: 1.02,
+                          child: GestureDetector(
+                            onTap: () => _showConnectionStatusPage(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.bgCard,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.06),
+                                    offset: const Offset(0, 2),
+                                    blurRadius: 6,
+                                    spreadRadius: 0,
                                   ),
-                                ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  // 左侧空白占位
+                                  Expanded(
+                                    child: Container(),
+                                  ),
+                                  // 中间时长显示
+                                  Text(
+                                    ImprovedTrafficStatsService.formatDuration(
+                                      provider.connectionDuration,
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  // 右侧连接数
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Text(
+                                        '${provider.activeConnections}',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: _buildMiniTrafficCard(
-                                icon: Icons.arrow_upward,
-                                label: '上传',
-                                value: ImprovedTrafficStatsService.formatSpeed(
-                                  provider.uploadSpeed,
-                                ),
-                                sub: ImprovedTrafficStatsService.formatBytes(
-                                  provider.uploadBytes,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: _buildMiniTrafficCard(
-                                icon: Icons.arrow_downward,
-                                label: '下载',
-                                value: ImprovedTrafficStatsService.formatSpeed(
-                                  provider.downloadSpeed,
-                                ),
-                                sub: ImprovedTrafficStatsService.formatBytes(
-                                  provider.downloadBytes,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 12),
 
-                        // 代理模式按钮（三个卡片）
+                        // 代理模式按钮（两个卡片）
                         Row(
                           children: [
                             Expanded(
@@ -293,17 +351,6 @@ class SimpleModernHome extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            // Expanded(
-                            //   child: GestureDetector(
-                            //     onTap: () =>
-                            //         provider.setProxyMode(ProxyMode.custom),
-                            //     child: _buildModeButton(
-                            //       '自定义',
-                            //       provider.proxyMode == ProxyMode.custom,
-                            //     ),
-                            //   ),
-                            // ),
                           ],
                         ),
                         const SizedBox(height: 18),
@@ -354,8 +401,8 @@ class SimpleModernHome extends StatelessWidget {
                                 child: GestureDetector(
                                   onTap: () => _showRoutingRulesPage(context),
                                   child: Container(
-                                    height: 80,
-                                    padding: const EdgeInsets.all(16),
+                                    height: 60,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                     decoration: BoxDecoration(
                                       color: AppTheme.bgCard,
                                       borderRadius: BorderRadius.circular(14),
@@ -378,9 +425,9 @@ class SimpleModernHome extends StatelessWidget {
                                         Icon(
                                           Icons.route,
                                           color: AppTheme.primaryNeon,
-                                          size: 20,
+                                          size: 18,
                                         ),
-                                        const SizedBox(width: 12),
+                                        const SizedBox(width: 10),
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment:
@@ -391,16 +438,16 @@ class SimpleModernHome extends StatelessWidget {
                                               Text(
                                                 '分流',
                                                 style: TextStyle(
-                                                  fontSize: 14,
+                                                  fontSize: 13,
                                                   fontWeight: FontWeight.w600,
                                                   color: AppTheme.textPrimary,
                                                 ),
                                               ),
-                                              SizedBox(height: 2),
+                                              SizedBox(height: 1),
                                               Text(
                                                 '路由规则',
                                                 style: TextStyle(
-                                                  fontSize: 12,
+                                                  fontSize: 11,
                                                   color: AppTheme.textSecondary,
                                                 ),
                                               ),
@@ -460,7 +507,7 @@ class SimpleModernHome extends StatelessWidget {
     String? rightLabel,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(14),
@@ -476,7 +523,7 @@ class SimpleModernHome extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: AppTheme.textSecondary),
+          Icon(icon, size: 16, color: AppTheme.textSecondary),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -487,7 +534,7 @@ class SimpleModernHome extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 22,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: AppTheme.textPrimary,
                   ),
@@ -536,8 +583,10 @@ class SimpleModernHome extends StatelessWidget {
     required String label,
     required String value,
     required String sub,
+    double? height,
   }) {
     return Container(
+      height: height,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
@@ -630,8 +679,8 @@ class SimpleModernHome extends StatelessWidget {
   // 构建功能按钮
   Widget _buildFeatureButton(String title, IconData icon) {
     return Container(
-      height: 80, // 统一高度与DNS卡片一致
-      padding: const EdgeInsets.all(16),
+      height: 60, // 统一高度
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(14),
@@ -647,8 +696,8 @@ class SimpleModernHome extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.primaryNeon, size: 20),
-          const SizedBox(width: 12),
+          Icon(icon, color: AppTheme.primaryNeon, size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -657,15 +706,15 @@ class SimpleModernHome extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   title == '节点配置' ? '服务器管理' : '功能设置',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
               ],
             ),
@@ -679,8 +728,8 @@ class SimpleModernHome extends StatelessWidget {
   // 构建 DNS 卡片
   Widget _buildDnsCard() {
     return Container(
-      height: 80, // 统一高度
-      padding: const EdgeInsets.all(16),
+      height: 60, // 统一高度
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(14),
@@ -696,8 +745,8 @@ class SimpleModernHome extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.dns, color: AppTheme.primaryNeon, size: 20),
-          const SizedBox(width: 12),
+          Icon(Icons.dns, color: AppTheme.primaryNeon, size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -706,15 +755,15 @@ class SimpleModernHome extends StatelessWidget {
                 Text(
                   '设置',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   'DNS设置/域名解析',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
               ],
             ),
@@ -728,8 +777,8 @@ class SimpleModernHome extends StatelessWidget {
   // 构建日志卡片
   Widget _buildLogsCard(BuildContext context, VPNProviderV2 provider) {
     return Container(
-      height: 80, // 统一高度
-      padding: const EdgeInsets.all(16),
+      height: 60, // 统一高度
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(14),
@@ -745,37 +794,38 @@ class SimpleModernHome extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.article_outlined, color: AppTheme.primaryNeon, size: 20),
-          const SizedBox(width: 12),
+          Icon(Icons.article_outlined, color: AppTheme.primaryNeon, size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
                     Text(
                       '日志',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
+                        horizontal: 4,
+                        vertical: 1,
                       ),
                       decoration: BoxDecoration(
                         color: AppTheme.primaryNeon.withAlpha(50),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         '${provider.logs.length}',
                         style: const TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           color: AppTheme.primaryNeon,
                           fontWeight: FontWeight.w600,
                         ),
@@ -784,14 +834,13 @@ class SimpleModernHome extends StatelessWidget {
                     const Spacer(),
                   ],
                 ),
-                const SizedBox(height: 2),
                 Text(
                   provider.logs.isNotEmpty
                       ? provider.logs.last.length > 25
                             ? '${provider.logs.last.substring(0, 25)}...'
                             : provider.logs.last
                       : '暂无日志',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

@@ -44,7 +44,10 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
     String info = '连接状态信息\n\n';
     for (int i = 0; i < connections.length; i++) {
       final conn = connections[i];
-      info += '${i + 1}. ${conn['host']}\n';
+      final displayHost = conn['domain']?.isNotEmpty == true
+          ? conn['domain']
+          : conn['host'];
+      info += '${i + 1}. $displayHost\n';
       info += '   ${conn['localPort']} ${conn['process']}\n';
       info +=
           '   ${conn['protocol']} ↑${ImprovedTrafficStatsService.formatBytes(conn['uploadBytes'])} ↓${ImprovedTrafficStatsService.formatBytes(conn['downloadBytes'])}\n';
@@ -353,7 +356,9 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  connection['host'],
+                                  connection['domain']?.isNotEmpty == true
+                                      ? connection['domain']
+                                      : connection['host'],
                                   style: const TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,

@@ -30,6 +30,7 @@ class VPNProviderV2 extends ChangeNotifier {
   bool _isPingingAll = false;
   int _pingIntervalMinutes = 10;
   bool _autoSelectBestServer = false;
+  bool _autoRefreshEnabled = true; // 自动刷新开关，默认开启
 
   // 连接时长定时器
   Timer? _durationUpdateTimer;
@@ -133,6 +134,7 @@ class VPNProviderV2 extends ChangeNotifier {
   Map<String, int> get configPings => _configPings;
   bool get isPingingAll => _isPingingAll;
   bool get autoSelectBestServer => _autoSelectBestServer;
+  bool get autoRefreshEnabled => _autoRefreshEnabled;
   int get pingIntervalMinutes => _pingIntervalMinutes;
 
   // 其他属性
@@ -225,9 +227,11 @@ class VPNProviderV2 extends ChangeNotifier {
       print('[DEBUG] VPN连接成功，不再测试延时');
 
       // 启动自动选择最佳服务器（但不立即测试）
-      if (_autoSelectBestServer) {
-        _startPingTimer();
-      }
+      // if (_autoSelectBestServer) {
+      //   _startPingTimer();
+      // }
+
+      _startPingTimer();
 
       // 启动连接时长更新定时器
       _startDurationUpdateTimer();
@@ -354,9 +358,22 @@ class VPNProviderV2 extends ChangeNotifier {
     _autoSelectBestServer = enabled;
     await _savePreference('auto_select_best_server', enabled);
 
-    if (enabled && isConnected) {
+    if (enabled && isConnected && _autoRefreshEnabled) {
       _startPingTimer();
     } else {
+      _stopPingTimer();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> setAutoRefreshEnabled(bool enabled) async {
+    _autoRefreshEnabled = enabled;
+    await _savePreference('auto_refresh_enabled', enabled);
+
+    if (enabled && _autoSelectBestServer && isConnected) {
+      _startPingTimer();
+    } else if (!enabled) {
       _stopPingTimer();
     }
 
@@ -380,9 +397,14 @@ class VPNProviderV2 extends ChangeNotifier {
   void _startPingTimer() {
     _stopPingTimer();
 
-    // 只有在启用自动选择最佳服务器时才启动定时器
+    // 只有在启用自动选择最佳服务器且启用自动刷新时才启动定时器
     if (!_autoSelectBestServer) {
       print('[DEBUG] 自动选择最佳服务器功能未启用，不启动延时测试定时器');
+      return;
+    }
+
+    if (!_autoRefreshEnabled) {
+      print('[DEBUG] 自动刷新功能未启用，不启动延时测试定时器');
       return;
     }
 
@@ -479,8 +501,10 @@ class VPNProviderV2 extends ChangeNotifier {
         isConnected: isConnected,
         currentConfig: currentConfig,
         onEach: (cfg, ping) {
-          final sanitized = _sanitizeLatency(cfg, ping);
-          _configPings[cfg.id] = sanitized;
+          final sanitized = _sanitizeLatency(cfg, ping);
+
+          _configPings[cfg.id] = sanitized;
+
           notifyListeners();
         },
         onProgress: (done, total) {
@@ -490,12 +514,16 @@ class VPNProviderV2 extends ChangeNotifier {
       // 兜底：全部完成后再次通知一次，确保UI一致
       notifyListeners();
 
-      // 自动选择最佳服务器（仅在启用自动选择功能时）
-      if (_autoSelectBestServer && isConnected) {
-        print('[DEBUG] 自动选择最佳服务器功能已启用，开始选择最佳服务器');
+      // 自动选择最佳服务器（仅在启用自动选择功能且启用自动刷新时）
+      if (_autoSelectBestServer && _autoRefreshEnabled && isConnected) {
+        print('[DEBUG] 自动选择最佳服务器功能已启用且自动刷新已开启，开始选择最佳服务器');
         _selectBestServer();
       } else if (isConnected) {
-        print('[DEBUG] 自动选择最佳服务器功能未启用，跳过切换');
+        if (!_autoSelectBestServer) {
+          print('[DEBUG] 自动选择最佳服务器功能未启用，跳过切换');
+        } else if (!_autoRefreshEnabled) {
+          print('[DEBUG] 自动刷新功能未启用，跳过切换');
+        }
       }
     } finally {
       _isPingingAll = false;
@@ -506,6 +534,11 @@ class VPNProviderV2 extends ChangeNotifier {
   void _selectBestServer() {
     if (!_autoSelectBestServer) {
       print('[DEBUG] 自动选择最佳服务器功能未启用，取消选择');
+      return;
+    }
+
+    if (!_autoRefreshEnabled) {
+      print('[DEBUG] 自动刷新功能未启用，不切换节点');
       return;
     }
 
@@ -543,13 +576,18 @@ class VPNProviderV2 extends ChangeNotifier {
   Future<void> pingConfig(VPNConfig config) async {
     try {
       print('测试延时: ${config.name}, 连接状态: $isConnected');
-      final delay = await PingService.pingConfig(
-        config,
-        isConnected: isConnected,
-        currentConfig: currentConfig,
-      );
-      final sanitized = _sanitizeLatency(config, delay);
-      print('测试延时: ${config.name} -> ${sanitized}ms');
+      final delay = await PingService.pingConfig(
+        config,
+
+        isConnected: isConnected,
+
+        currentConfig: currentConfig,
+      );
+
+      final sanitized = _sanitizeLatency(config, delay);
+
+      print('测试延时: ${config.name} -> ${sanitized}ms');
+
       _configPings[config.id] = sanitized;
     } catch (e) {
       print('延时测试失败: ${config.name}, 错误: $e');
@@ -845,42 +883,22 @@ class VPNProviderV2 extends ChangeNotifier {
 
   // ============== 私有方法 ==============
 
-  /// 应用启动时测试当前选中配置的延时
+  /// 应用启动时批量测试所有配置的延时
   Future<void> _testAllConfigsOnStartup() async {
-    // 延迟执行，避免影响UI初始化
-    await Future.delayed(Duration(milliseconds: 500));
+    // 延迟执行，避免影响UI初始化，并等待DLL加载完成
+    await Future.delayed(Duration(milliseconds: 1500));
 
-    // 获取当前选中的配置
-    final current = currentConfig ?? configs.firstOrNull;
-    if (current == null) return;
+    if (configs.isEmpty) {
+      print('[DEBUG] 没有配置需要测试延时');
+      return;
+    }
 
-    print('[DEBUG] 开始测试当前配置的延时: ${current.name}');
+    print('[DEBUG] 开始批量测试所有配置的延时，共${configs.length}个');
 
-    // 测试当前配置的延时
-    PingService.pingConfig(current, isConnected: false, currentConfig: null)
-        .then((delay) {
-          // 保存延时结果
-          _configPings[current.id] = delay;
+    // 批量测试所有配置的延时
+    await _pingAllConfigs();
 
-          // 强制UI更新
-          notifyListeners();
-          print('[DEBUG] UI更新通知已发送');
-
-          // 验证数据是否正确保存
-          final savedPing = getConfigPing(current.id);
-          print('[DEBUG] 验证保存的延时: ${savedPing}ms');
-
-          // 额外的UI刷新
-          Future.delayed(Duration(milliseconds: 100), () {
-            notifyListeners();
-            print('[DEBUG] 延迟UI更新通知已发送');
-          });
-        })
-        .catchError((error) {
-          print('[DEBUG] 启动延时测试异常: ${current.name} -> $error');
-          _configPings[current.id] = -1;
-          notifyListeners();
-        });
+    print('[DEBUG] 启动时批量延时测试完成');
   }
 
   Future<void> _loadPreferences() async {
@@ -904,6 +922,7 @@ class VPNProviderV2 extends ChangeNotifier {
     );
 
     _autoSelectBestServer = prefs.getBool('auto_select_best_server') ?? false;
+    _autoRefreshEnabled = prefs.getBool('auto_refresh_enabled') ?? true;
     _pingIntervalMinutes = prefs.getInt('ping_interval_minutes') ?? 10;
 
     // 加载已保存的当前配置

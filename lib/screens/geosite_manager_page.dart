@@ -67,7 +67,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.bgCard,
         title: const Text(
-          '一键下载全部',
+          '一键下载',
           style: TextStyle(color: AppTheme.textPrimary),
         ),
         content: Column(
@@ -721,7 +721,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                     ElevatedButton.icon(
                       onPressed: _isLoading ? null : _downloadAllCommonRulesets,
                       icon: const Icon(Icons.cloud_download, size: 16),
-                      label: const Text('一键下载全部'),
+                      label: const Text('一键下载'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.successGreen,
                         foregroundColor: Colors.white,

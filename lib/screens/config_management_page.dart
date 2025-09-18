@@ -127,6 +127,8 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             children: [
               // 自动选择设置
               _buildAutoSelectSettings(provider),
+              // 自动刷新设置
+              _buildAutoRefreshSettings(provider),
               // 配置列表
               Expanded(
                 child: ListView.builder(
@@ -1075,6 +1077,197 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
               (states) => states.contains(WidgetState.selected)
                   ? AppTheme.accentNeon.withOpacity(0.3)
                   : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建自动刷新设置
+  Widget _buildAutoRefreshSettings(VPNProviderV2 provider) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: provider.autoRefreshEnabled
+              ? AppTheme.accentNeon.withOpacity(0.3)
+              : AppTheme.borderColor.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          // 左侧图标和文字
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: provider.autoRefreshEnabled
+                  ? AppTheme.accentNeon.withOpacity(0.2)
+                  : AppTheme.textSecondary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              Icons.refresh,
+              size: 20,
+              color: provider.autoRefreshEnabled
+                  ? AppTheme.accentNeon
+                  : AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '自动刷新',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (provider.autoRefreshEnabled)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentNeon.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'AUTO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.accentNeon,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  provider.autoRefreshEnabled
+                      ? '开启后将定期刷新所有节点延时（需要开启自动选择最佳服务器才能切换节点）'
+                      : '手动刷新延时，不自动更新',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+                if (provider.autoRefreshEnabled) ...[
+                  const SizedBox(height: 8),
+                  _buildRefreshIntervalSelector(provider),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          // 开关
+          Switch(
+            value: provider.autoRefreshEnabled,
+            onChanged: (v) async {
+              await provider.setAutoRefreshEnabled(v);
+            },
+            thumbColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) => states.contains(WidgetState.selected)
+                  ? AppTheme.accentNeon
+                  : null,
+            ),
+            trackColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) => states.contains(WidgetState.selected)
+                  ? AppTheme.accentNeon.withOpacity(0.3)
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建自动刷新间隔时间选择器
+  Widget _buildRefreshIntervalSelector(VPNProviderV2 provider) {
+    final intervals = [1, 2, 3, 5, 10, 15, 20, 30, 60]; // 可选的分钟数
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.bgDark.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: AppTheme.accentNeon.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 16, color: AppTheme.accentNeon),
+          const SizedBox(width: 8),
+          Text(
+            '刷新间隔:',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.bgCard,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: AppTheme.accentNeon.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: provider.pingIntervalMinutes,
+                  isDense: true,
+                  dropdownColor: AppTheme.bgCard,
+                  icon: Icon(
+                    Icons.keyboard_arrow_down,
+                    color: AppTheme.accentNeon,
+                    size: 18,
+                  ),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  items: intervals.map<DropdownMenuItem<int>>((int minutes) {
+                    return DropdownMenuItem<int>(
+                      value: minutes,
+                      child: Text(
+                        '${minutes}分钟',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (int? newValue) {
+                    if (newValue != null) {
+                      provider.setPingIntervalMinutes(newValue);
+                    }
+                  },
+                ),
+              ),
             ),
           ),
         ],

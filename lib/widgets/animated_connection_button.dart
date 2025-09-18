@@ -27,12 +27,17 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
   late AnimationController _pulseController;
   late AnimationController _rotationController;
   late AnimationController _glowController;
+  late AnimationController _hoverController;
+  late AnimationController _rippleController;
 
   late Animation<double> _pulseAnimation;
   late Animation<double> _rotationAnimation;
   late Animation<double> _glowAnimation;
+  late Animation<double> _hoverAnimation;
+  late Animation<double> _rippleAnimation;
 
   bool _isPressed = false;
+  bool _isHovered = false;
 
   @override
   void initState() {
@@ -56,6 +61,18 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
       vsync: this,
     );
 
+    // 悬停动画控制器
+    _hoverController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    // 波纹动画控制器
+    _rippleController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
@@ -66,6 +83,14 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
 
     _glowAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
+
+    _hoverAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _hoverController, curve: Curves.easeOutBack),
+    );
+
+    _rippleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _rippleController, curve: Curves.easeOut),
     );
 
     _updateAnimations();
@@ -114,6 +139,8 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
     _pulseController.dispose();
     _rotationController.dispose();
     _glowController.dispose();
+    _hoverController.dispose();
+    _rippleController.dispose();
     super.dispose();
   }
 
@@ -142,7 +169,23 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
     if (widget.isConnected) return '已连接';
     if (widget.isConnecting) return '连接中...';
     if (widget.isDisconnecting) return '断开中...';
+    if (_isHovered) return '开始连接';
     return '点击连接';
+  }
+
+  void _handleHoverEnter() {
+    if (!widget.isConnected && !widget.isConnecting && !widget.isDisconnecting) {
+      setState(() => _isHovered = true);
+      _hoverController.forward();
+      _rippleController.repeat();
+    }
+  }
+
+  void _handleHoverExit() {
+    setState(() => _isHovered = false);
+    _hoverController.reverse();
+    _rippleController.stop();
+    _rippleController.reset();
   }
 
   @override
@@ -152,39 +195,74 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
         _pulseAnimation,
         _rotationAnimation,
         _glowAnimation,
+        _hoverAnimation,
+        _rippleAnimation,
       ]),
       builder: (context, child) {
-        return GestureDetector(
-          onTapDown: (_) => setState(() => _isPressed = true),
-          onTapUp: (_) => setState(() => _isPressed = false),
-          onTapCancel: () => setState(() => _isPressed = false),
-          onTap: widget.onTap,
-          child: Transform.scale(
-            scale: _isPressed ? 0.95 : 1.0,
-            child: Container(
-              width: widget.size,
-              height: widget.size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  // 主阴影
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                  // 发光效果
-                  if (widget.isConnected || widget.isConnecting)
-                    BoxShadow(
-                      color: _getButtonColor().withOpacity(
-                        0.4 * _glowAnimation.value,
+        return MouseRegion(
+          onEnter: (_) => _handleHoverEnter(),
+          onExit: (_) => _handleHoverExit(),
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTapDown: (_) => setState(() => _isPressed = true),
+            onTapUp: (_) => setState(() => _isPressed = false),
+            onTapCancel: () => setState(() => _isPressed = false),
+            onTap: widget.onTap,
+            child: Transform.scale(
+              scale: _isPressed ? 0.95 : (_isHovered ? _hoverAnimation.value : 1.0),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // 悬停时的波纹效果（只在未连接时显示）
+                  if (_isHovered && !widget.isConnected && !widget.isConnecting && !widget.isDisconnecting)
+                    Positioned.fill(
+                      child: Transform.scale(
+                        scale: 1 + _rippleAnimation.value,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppTheme.primaryNeon.withOpacity(
+                                (1 - _rippleAnimation.value) * 0.5,
+                              ),
+                              width: 2,
+                            ),
+                          ),
+                        ),
                       ),
-                      blurRadius: 30 * _glowAnimation.value,
-                      spreadRadius: 2 * _glowAnimation.value,
                     ),
-                ],
-              ),
-              child: Transform.scale(
+                  // 主按钮容器
+                  Container(
+                    width: widget.size,
+                    height: widget.size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        // 主阴影
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                        // 发光效果
+                        if (widget.isConnected || widget.isConnecting)
+                          BoxShadow(
+                            color: _getButtonColor().withOpacity(
+                              0.4 * _glowAnimation.value,
+                            ),
+                            blurRadius: 30 * _glowAnimation.value,
+                            spreadRadius: 2 * _glowAnimation.value,
+                          ),
+                        // 悬停发光效果（只在未连接时显示）
+                        if (_isHovered && !widget.isConnected && !widget.isConnecting && !widget.isDisconnecting)
+                          BoxShadow(
+                            color: AppTheme.primaryNeon.withOpacity(0.6),
+                            blurRadius: 25,
+                            spreadRadius: 5,
+                          ),
+                      ],
+                    ),
+                    child: Transform.scale(
                 scale: _pulseAnimation.value,
                 child: Container(
                   decoration: BoxDecoration(
@@ -233,12 +311,14 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          _getStatusText(),
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
                           style: TextStyle(
-                            fontSize: widget.size * 0.12,
+                            fontSize: widget.size * (_isHovered && !widget.isConnected ? 0.14 : 0.12),
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: _isHovered && !widget.isConnected
+                                ? AppTheme.primaryNeon
+                                : Colors.white,
                             shadows: [
                               Shadow(
                                 color: Colors.black.withOpacity(0.5),
@@ -247,11 +327,17 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
                               ),
                             ],
                           ),
+                          child: Text(
+                            _getStatusText(),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
