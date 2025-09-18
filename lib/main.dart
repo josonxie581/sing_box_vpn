@@ -62,9 +62,9 @@ void main() async {
   }
 
   const windowOptions = WindowOptions(
-    size: Size(600, 760),
-    minimumSize: Size(600, 760),
-    maximumSize: Size(600, 12000),
+    size: Size(500, 760),
+    minimumSize: Size(500, 760),
+    maximumSize: Size(500, 12000),
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
@@ -77,8 +77,8 @@ void main() async {
     await windowManager.focus();
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(false);
-    await windowManager.setMinimumSize(const Size(600, 760));
-    await windowManager.setMaximumSize(const Size(600, 12000));
+    await windowManager.setMinimumSize(const Size(500, 760));
+    await windowManager.setMaximumSize(const Size(500, 12000));
     await windowManager.setPreventClose(true); // 防止直接关闭
   });
 
@@ -411,10 +411,10 @@ class _MyAppState extends State<MyApp> with WindowListener {
   @override
   void onWindowResize() {
     if (_isMinimized) return;
-    // 保持窗口宽度为600
+    // 保持窗口宽度为500
     windowManager.getSize().then((size) {
-      if (size.width != 600) {
-        windowManager.setSize(Size(600, size.height));
+      if (size.width != 500) {
+        windowManager.setSize(Size(500, size.height));
       }
     });
   }

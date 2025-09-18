@@ -81,16 +81,25 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
             const SizedBox(height: 8),
             Text(
               '• Geosite 规则集：${stats['geosite']} 个',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
             ),
             Text(
               '• GeoIP 规则集：${stats['geoip']} 个',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               '已下载：${stats['downloaded']} 个',
-              style: const TextStyle(color: AppTheme.successGreen, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.successGreen,
+                fontSize: 14,
+              ),
             ),
             Text(
               '待下载：$missingCount 个',
@@ -105,10 +114,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
               ),
               child: const Text(
                 '⚠️ 下载过程可能需要较长时间，请保持网络连接稳定',
-                style: TextStyle(
-                  color: AppTheme.primaryNeon,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: AppTheme.primaryNeon, fontSize: 12),
               ),
             ),
           ],
@@ -155,8 +161,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
       if (successCount == totalCount) {
         _showMessage('全部规则集下载完成！($successCount/$totalCount)');
       } else {
-        _showMessage('下载完成：$successCount/$totalCount 个规则集成功',
-                    isError: successCount < totalCount * 0.8);
+        _showMessage(
+          '下载完成：$successCount/$totalCount 个规则集成功',
+          isError: successCount < totalCount * 0.8,
+        );
       }
 
       await _loadDownloadedRulesets();
@@ -202,8 +210,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
       if (successCount == totalCount) {
         _showMessage('$categoryName 分类下载完成！($successCount/$totalCount)');
       } else {
-        _showMessage('$categoryName 分类下载完成：$successCount/$totalCount 个规则集成功',
-                    isError: successCount < totalCount * 0.8);
+        _showMessage(
+          '$categoryName 分类下载完成：$successCount/$totalCount 个规则集成功',
+          isError: successCount < totalCount * 0.8,
+        );
       }
 
       await _loadDownloadedRulesets();
@@ -278,16 +288,25 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
             const SizedBox(height: 8),
             Text(
               '• Geosite 规则集：${stats['geosite']} 个',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
             ),
             Text(
               '• GeoIP 规则集：${stats['geoip']} 个',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               '当前已下载：$downloadedCount 个',
-              style: const TextStyle(color: AppTheme.successGreen, fontSize: 14),
+              style: const TextStyle(
+                color: AppTheme.successGreen,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -303,7 +322,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                   Expanded(
                     child: Text(
                       '这将重新下载所有规则集，覆盖现有文件',
-                      style: TextStyle(color: AppTheme.warningOrange, fontSize: 12),
+                      style: TextStyle(
+                        color: AppTheme.warningOrange,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
@@ -337,7 +359,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
 
     try {
       final results = await _geositeManager.downloadAllCommonRulesets(
-        forceUpdate: true,  // 强制更新
+        forceUpdate: true, // 强制更新
         onStatus: (status) {
           setState(() {
             _statusMessage = status;
@@ -354,8 +376,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
       if (successCount == totalCount) {
         _showMessage('全部规则集更新完成！($successCount/$totalCount)');
       } else {
-        _showMessage('更新完成：$successCount/$totalCount 个规则集成功',
-                    isError: successCount < totalCount * 0.8);
+        _showMessage(
+          '更新完成：$successCount/$totalCount 个规则集成功',
+          isError: successCount < totalCount * 0.8,
+        );
       }
 
       await _loadDownloadedRulesets();
@@ -464,7 +488,9 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
   }
 
   Widget _buildRulesetCard(String categoryName, List<String> rulesets) {
-    final downloadedCount = rulesets.where((r) => _downloadedRulesets.contains(r)).length;
+    final downloadedCount = rulesets
+        .where((r) => _downloadedRulesets.contains(r))
+        .length;
     final totalCount = rulesets.length;
 
     return Card(
@@ -490,7 +516,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                 children: [
                   // 统计信息
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: downloadedCount == totalCount
                           ? AppTheme.successGreen.withAlpha(30)
@@ -512,14 +541,18 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                   // 批量下载按钮
                   if (downloadedCount < totalCount)
                     InkWell(
-                      onTap: _isLoading ? null : () => _downloadCategoryRulesets(categoryName),
+                      onTap: _isLoading
+                          ? null
+                          : () => _downloadCategoryRulesets(categoryName),
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         child: Icon(
                           Icons.cloud_download,
                           size: 16,
-                          color: _isLoading ? AppTheme.textSecondary : AppTheme.primaryNeon,
+                          color: _isLoading
+                              ? AppTheme.textSecondary
+                              : AppTheme.primaryNeon,
                         ),
                       ),
                     ),
@@ -549,9 +582,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                 ),
                 const SizedBox(width: 8),
                 Icon(
-                  isDownloaded
-                      ? Icons.check_circle
-                      : Icons.download_outlined,
+                  isDownloaded ? Icons.check_circle : Icons.download_outlined,
                   color: isDownloaded
                       ? AppTheme.successGreen
                       : AppTheme.textSecondary,
@@ -560,10 +591,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
             ),
             title: Text(
               ruleset,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 14,
-              ),
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
             ),
             subtitle: isDownloading
                 ? LinearProgressIndicator(
@@ -576,7 +604,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                 : null,
             trailing: isDownloaded
                 ? IconButton(
-                    icon: const Icon(Icons.delete_outline, color: AppTheme.errorRed),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppTheme.errorRed,
+                    ),
                     onPressed: () => _deleteRuleset(ruleset),
                   )
                 : IconButton(
@@ -591,7 +622,10 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                               ),
                             ),
                           )
-                        : const Icon(Icons.download, color: AppTheme.primaryNeon),
+                        : const Icon(
+                            Icons.download,
+                            color: AppTheme.primaryNeon,
+                          ),
                     onPressed: isDownloading
                         ? null
                         : () => _downloadRuleset(ruleset),
@@ -616,10 +650,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 12,
-          ),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
       ],
     );
@@ -637,9 +668,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
             decoration: BoxDecoration(
               color: AppTheme.bgCard,
               border: Border(
-                bottom: BorderSide(
-                  color: AppTheme.borderColor.withAlpha(50),
-                ),
+                bottom: BorderSide(color: AppTheme.borderColor.withAlpha(50)),
               ),
             ),
             child: Row(
@@ -663,17 +692,17 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    '规则集管理',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
+                // const SizedBox(width: 12),
+                // const Expanded(
+                //   child: Text(
+                //     '规则集管理',
+                //     style: TextStyle(
+                //       fontSize: 20,
+                //       fontWeight: FontWeight.bold,
+                //       color: AppTheme.textPrimary,
+                //     ),
+                //   ),
+                // ),
                 // 快速下载按钮
                 Wrap(
                   spacing: 8,
@@ -709,21 +738,21 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                         minimumSize: const Size(100, 36),
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryNeon.withAlpha(30),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'Geosite + GeoIP',
-                        style: TextStyle(
-                          color: AppTheme.primaryNeon,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
+                    // Container(
+                    //   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    //   decoration: BoxDecoration(
+                    //     color: AppTheme.primaryNeon.withAlpha(30),
+                    //     borderRadius: BorderRadius.circular(4),
+                    //   ),
+                    //   child: Text(
+                    //     'Geosite + GeoIP',
+                    //     style: TextStyle(
+                    //       color: AppTheme.primaryNeon,
+                    //       fontSize: 12,
+                    //       fontWeight: FontWeight.w500,
+                    //     ),
+                    //   ),
+                    // ),
                   ],
                 ),
               ],
@@ -791,22 +820,30 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                                   backgroundColor: AppTheme.bgCard,
                                   title: const Text(
                                     '清理所有规则集',
-                                    style: TextStyle(color: AppTheme.textPrimary),
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
+                                    ),
                                   ),
                                   content: const Text(
                                     '确定要删除所有已下载的规则集吗？',
-                                    style: TextStyle(color: AppTheme.textSecondary),
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                    ),
                                   ),
                                   actions: [
                                     TextButton(
-                                      onPressed: () => Navigator.of(context).pop(false),
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(false),
                                       child: const Text('取消'),
                                     ),
                                     TextButton(
-                                      onPressed: () => Navigator.of(context).pop(true),
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(true),
                                       child: const Text(
                                         '清理',
-                                        style: TextStyle(color: AppTheme.errorRed),
+                                        style: TextStyle(
+                                          color: AppTheme.errorRed,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -916,15 +953,17 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                     children: [
                       // Geosite 分类
                       _buildSectionHeader('Geosite 域名规则'),
-                      ...GeositeManager.geositeCategories.entries
-                          .map((entry) => _buildRulesetCard(entry.key, entry.value)),
+                      ...GeositeManager.geositeCategories.entries.map(
+                        (entry) => _buildRulesetCard(entry.key, entry.value),
+                      ),
 
                       const SizedBox(height: 20),
 
                       // GeoIP 分类
                       _buildSectionHeader('GeoIP 地址规则'),
-                      ...GeositeManager.geoipCategories.entries
-                          .map((entry) => _buildRulesetCard(entry.key, entry.value)),
+                      ...GeositeManager.geoipCategories.entries.map(
+                        (entry) => _buildRulesetCard(entry.key, entry.value),
+                      ),
 
                       // 底部说明
                       const SizedBox(height: 20),

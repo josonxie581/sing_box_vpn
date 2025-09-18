@@ -1498,9 +1498,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
       onTap: () async {
         // 导航到 Geosite 管理页面
         final result = await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => const GeositeManagerPage(),
-          ),
+          MaterialPageRoute(builder: (context) => const GeositeManagerPage()),
         );
 
         // 页面返回后重新加载状态
@@ -1576,11 +1574,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                 ],
               ),
             ),
-            const Icon(
-              Icons.chevron_right,
-              color: AppTheme.textHint,
-              size: 20,
-            ),
+            const Icon(Icons.chevron_right, color: AppTheme.textHint, size: 20),
           ],
         ),
       ),

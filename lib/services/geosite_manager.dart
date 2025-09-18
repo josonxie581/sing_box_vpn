@@ -9,64 +9,63 @@ import 'package:path/path.dart' as path;
 /// 符合 sing-box 1.8+ 规范
 class GeositeManager {
   // 使用官方推荐的远程规则集URL
-  static const String _geositeBaseUrl = 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
-  static const String _geoipBaseUrl = 'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set';
-  static const String _mirrorUrl = 'https://mirror.ghproxy.com/https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
+  static const String _geositeBaseUrl =
+      'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
+  static const String _geoipBaseUrl =
+      'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set';
+  static const String _mirrorUrl =
+      'https://mirror.ghproxy.com/https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
 
   // 常用的 geosite 规则集
   static const List<String> commonRuleSets = [
-    'geosite-cn',           // 中国大陆网站
+    'geosite-cn', // 中国大陆网站
     'geosite-geolocation-!cn', // 非中国网站
     'geosite-ads', // 广告
-    'geosite-google',       // Google
-    'geosite-youtube',      // YouTube
-    'geosite-twitter',      // Twitter
-    'geosite-facebook',     // Facebook
-    'geosite-telegram',     // Telegram
-    'geosite-netflix',      // Netflix
-    'geosite-spotify',      // Spotify
-    'geosite-apple',        // Apple
-    'geosite-microsoft',    // Microsoft
-    'geosite-github',       // GitHub
-    'geosite-steam',        // Steam
-    'geosite-bilibili',     // Bilibili
-    'geosite-tiktok',       // TikTok
-    'geosite-disney',       // Disney+
-    'geosite-openai',       // OpenAI
-    'geosite-anthropic',    // Anthropic
+    'geosite-google', // Google
+    'geosite-youtube', // YouTube
+    'geosite-twitter', // Twitter
+    'geosite-facebook', // Facebook
+    'geosite-telegram', // Telegram
+    'geosite-netflix', // Netflix
+    'geosite-spotify', // Spotify
+    'geosite-apple', // Apple
+    'geosite-microsoft', // Microsoft
+    'geosite-github', // GitHub
+    'geosite-steam', // Steam
+    'geosite-bilibili', // Bilibili
+    'geosite-tiktok', // TikTok
+    'geosite-disney', // Disney+
+    'geosite-openai', // OpenAI
+    'geosite-anthropic', // Anthropic
   ];
 
   // 常用的 geoIP 规则集
   static const List<String> commonGeoIPRuleSets = [
-    'geoip-cn',            // 中国IP地址
-    'geoip-private',       // 私有IP地址
-    'geoip-us',            // 美国IP地址
-    'geoip-jp',            // 日本IP地址
-    'geoip-hk',            // 香港IP地址
-    'geoip-tw',            // 台湾IP地址
-    'geoip-sg',            // 新加坡IP地址
-    'geoip-kr',            // 韩国IP地址
-    'geoip-de',            // 德国IP地址
-    'geoip-gb',            // 英国IP地址
-    'geoip-fr',            // 法国IP地址
-    'geoip-ca',            // 加拿大IP地址
-    'geoip-au',            // 澳大利亚IP地址
-    'geoip-ru',            // 俄罗斯IP地址
-    'geoip-in',            // 印度IP地址
-    'geoip-br',            // 巴西IP地址
-    'geoip-cloudflare',    // Cloudflare IP地址
-    'geoip-telegram',      // Telegram IP地址
-    'geoip-netflix',       // Netflix IP地址
-    'geoip-google',        // Google IP地址
+    'geoip-cn', // 中国IP地址
+    // 'geoip-private', // 私有IP地址
+    'geoip-us', // 美国IP地址
+    'geoip-jp', // 日本IP地址
+    'geoip-hk', // 香港IP地址
+    'geoip-tw', // 台湾IP地址
+    'geoip-sg', // 新加坡IP地址
+    'geoip-kr', // 韩国IP地址
+    'geoip-de', // 德国IP地址
+    'geoip-gb', // 英国IP地址
+    'geoip-fr', // 法国IP地址
+    'geoip-ca', // 加拿大IP地址
+    'geoip-au', // 澳大利亚IP地址
+    'geoip-ru', // 俄罗斯IP地址
+    'geoip-in', // 印度IP地址
+    'geoip-br', // 巴西IP地址
+    'geoip-cloudflare', // Cloudflare IP地址
+    'geoip-telegram', // Telegram IP地址
+    'geoip-netflix', // Netflix IP地址
+    'geoip-google', // Google IP地址
   ];
 
   // Geosite 规则集分类
   static const Map<String, List<String>> geositeCategories = {
-    '常用': [
-      'geosite-cn',
-      'geosite-geolocation-!cn',
-      'geosite-ads',
-    ],
+    '常用': ['geosite-cn', 'geosite-geolocation-!cn', 'geosite-ads'],
     '社交媒体': [
       'geosite-twitter',
       'geosite-facebook',
@@ -110,10 +109,7 @@ class GeositeManager {
 
   // GeoIP 规则集分类
   static const Map<String, List<String>> geoipCategories = {
-    '基础': [
-      'geoip-cn',
-      'geoip-private',
-    ],
+    '基础': ['geoip-cn'],
     '亚太地区': [
       'geoip-jp',
       'geoip-hk',
@@ -132,12 +128,12 @@ class GeositeManager {
       'geoip-ru',
       'geoip-br',
     ],
-    '服务商': [
-      'geoip-cloudflare',
-      'geoip-telegram',
-      'geoip-netflix',
-      'geoip-google',
-    ],
+    // '服务商': [
+    //   'geoip-cloudflare',
+    //   'geoip-telegram',
+    //   'geoip-netflix',
+    //   'geoip-google',
+    // ],
   };
 
   // 兼容性：保留原有的 ruleCategories
@@ -164,7 +160,16 @@ class GeositeManager {
     if (Platform.isWindows) {
       // Windows生产环境：放到exe文件目录下
       final exeDir = File(Platform.resolvedExecutable).parent.path;
-      rulesetDir = Directory(path.join(exeDir, 'data', 'flutter_assets', 'assets', 'rulesets', 'geo'));
+      rulesetDir = Directory(
+        path.join(
+          exeDir,
+          'data',
+          'flutter_assets',
+          'assets',
+          'rulesets',
+          'geo',
+        ),
+      );
     } else {
       // 其他平台使用应用支持目录
       final appDir = await getApplicationSupportDirectory();
@@ -255,7 +260,12 @@ class GeositeManager {
         // 如果使用主URL失败，尝试镜像
         if (!useMirror) {
           print('[GeositeManager] 尝试使用镜像下载...');
-          return downloadRuleset(rulesetName, useMirror: true, forceUpdate: forceUpdate, onProgress: onProgress);
+          return downloadRuleset(
+            rulesetName,
+            useMirror: true,
+            forceUpdate: forceUpdate,
+            onProgress: onProgress,
+          );
         }
         return false;
       }
@@ -282,13 +292,16 @@ class GeositeManager {
 
       print('[GeositeManager] 规则集下载成功: $rulesetName (${bytes.length} bytes)');
       return true;
-
     } catch (e) {
       print('[GeositeManager] 下载规则集失败: $e');
       // 如果是网络错误且未使用镜像，尝试镜像
       if (!useMirror && e.toString().contains('Connection')) {
         print('[GeositeManager] 尝试使用镜像下载...');
-        return downloadRuleset(rulesetName, useMirror: true, onProgress: onProgress);
+        return downloadRuleset(
+          rulesetName,
+          useMirror: true,
+          onProgress: onProgress,
+        );
       }
       return false;
     }
@@ -379,7 +392,9 @@ class GeositeManager {
         // 这里可以添加取消机制的检查
       }
 
-      onStatus?.call('正在下载: $ruleset (${completed + 1}/${uniqueRulesets.length})');
+      onStatus?.call(
+        '正在下载: $ruleset (${completed + 1}/${uniqueRulesets.length})',
+      );
 
       final success = await downloadRuleset(
         ruleset,
@@ -454,7 +469,9 @@ class GeositeManager {
     }
 
     final successCount = results.values.where((v) => v).length;
-    onStatus?.call('$categoryName 分类下载完成: $successCount/${rulesets.length} 个规则集成功');
+    onStatus?.call(
+      '$categoryName 分类下载完成: $successCount/${rulesets.length} 个规则集成功',
+    );
 
     return results;
   }
@@ -474,9 +491,15 @@ class GeositeManager {
     final uniqueRulesets = allRulesets.toSet().toList();
     final downloadedRulesets = await getDownloadedRulesets();
 
-    final geositeCount = uniqueRulesets.where((r) => r.startsWith('geosite-')).length;
-    final geoipCount = uniqueRulesets.where((r) => r.startsWith('geoip-')).length;
-    final downloadedCount = uniqueRulesets.where((r) => downloadedRulesets.contains(r)).length;
+    final geositeCount = uniqueRulesets
+        .where((r) => r.startsWith('geosite-'))
+        .length;
+    final geoipCount = uniqueRulesets
+        .where((r) => r.startsWith('geoip-'))
+        .length;
+    final downloadedCount = uniqueRulesets
+        .where((r) => downloadedRulesets.contains(r))
+        .length;
 
     return {
       'total': uniqueRulesets.length,

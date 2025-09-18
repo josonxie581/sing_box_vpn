@@ -110,23 +110,6 @@ class SimpleModernHome extends StatelessWidget {
                                     ],
                                   ),
                                 ),
-
-                                // 顶部右侧连接状态文字
-                                // Positioned(
-                                //   top: 10,
-                                //   right: 12,
-                                //   child: Text(
-                                //     provider.isConnected ? '已连接' : '未连接',
-                                //     style: TextStyle(
-                                //       fontSize: 11,
-                                //       color: provider.isConnected
-                                //           ? AppTheme.successGreen
-                                //           : AppTheme.textSecondary,
-                                //       fontWeight: FontWeight.w500,
-                                //     ),
-                                //   ),
-                                // ),
-
                                 // 名称与类型（靠上，避免遮挡中心按钮）
                                 if (provider.currentConfig != null)
                                   Positioned(
@@ -294,7 +277,7 @@ class SimpleModernHome extends StatelessWidget {
                                 onTap: () =>
                                     provider.setProxyMode(ProxyMode.rule),
                                 child: _buildModeButton(
-                                  '智能',
+                                  '规则',
                                   provider.proxyMode == ProxyMode.rule,
                                 ),
                               ),
@@ -721,7 +704,7 @@ class SimpleModernHome extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  'DNS',
+                  '设置',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -730,7 +713,7 @@ class SimpleModernHome extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '智能解析',
+                  'DNS设置/域名解析',
                   style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
               ],
