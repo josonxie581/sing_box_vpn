@@ -71,6 +71,8 @@ func dbg(msg string) {
 		_, _ = f.WriteString(fmt.Sprintf("%s [NATIVE] %s\n", timestamp(), msg))
 		_ = f.Close()
 	}
+	// 同时输出到标准输出，便于在控制台查看（若有）
+	fmt.Println(fmt.Sprintf("%s [NATIVE] %s", timestamp(), msg))
 }
 
 func timestamp() string { return time.Now().Format("2006-01-02T15:04:05.000Z07:00") }
@@ -92,6 +94,9 @@ func (w *ffiPlatformWriter) WriteMessage(level log.Level, message string) {
 		cmsg := C.CString(message)
 		C.callLog(logCB, cmsg)
 		C.free(unsafe.Pointer(cmsg))
+	} else {
+		// 无回调时，直接输出到标准输出，便于开发时在终端/调试器看到
+		fmt.Println(message)
 	}
 }
 
@@ -238,19 +243,31 @@ func StartSingBox(configJSON *C.char) int {
 
 //export StopSingBox
 func StopSingBox() int {
-	mu.Lock()
-	defer mu.Unlock()
 
+	dbg("->StopSingBox enter prelock")
+	// 先获取锁检查状态，并在关闭前尽早传播取消信号，避免 Close 阻塞于网络/DNS 超时
+	mu.Lock()
 	if instance == nil {
 		if logCB != nil {
 			msg := C.CString("sing-box 未运行")
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
 		}
+		mu.Unlock()
 		return -1 // 未运行
 	}
 
-	err := instance.Close()
+	// 提前取消 context，帮助打断正在进行的拨号/请求/解析
+	if cancel != nil {
+		cancel()
+		cancel = nil
+	}
+	// 保存当前实例引用，释放锁后再执行可能耗时的 Close
+	i := instance
+	mu.Unlock()
+
+	// 执行优雅关闭（不持锁，避免阻塞其它调用）
+	err := i.Close()
 	if err != nil {
 		if logCB != nil {
 			msg := C.CString(fmt.Sprintf("停止失败: %v", err))
@@ -260,16 +277,22 @@ func StopSingBox() int {
 		return -2
 	}
 
+	// 关闭完成后，清理全局状态
+	mu.Lock()
 	instance = nil
 	// 停止后清空当前与基线配置，等待下次 Start 设置
 	currentConfigJSON = ""
 	baseConfigJSON = ""
+	// 为后续 Start 重新准备一个新的可取消上下文
+	ctx, cancel = context.WithCancel(context.Background())
+	mu.Unlock()
 
 	if logCB != nil {
 		msg := C.CString("sing-box 已停止")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
 	}
+	dbg("->StopSingBox leave success")
 
 	return 0
 }
@@ -325,20 +348,23 @@ func GetVersion() *C.char {
 //export Cleanup
 func Cleanup() {
 	mu.Lock()
-	defer mu.Unlock()
-
-	if instance != nil {
-		instance.Close()
-		instance = nil
-	}
-
+	// 先取消 context，尽快打断后台操作
 	if cancel != nil {
 		cancel()
+		cancel = nil
 	}
+	i := instance
+	instance = nil
 	// 清理配置记录
 	baseConfigJSON = ""
 	currentConfigJSON = ""
 	dynamicRuleJSONs = nil
+	mu.Unlock()
+
+	// 在不持锁状态下关闭实例，避免阻塞其它调用
+	if i != nil {
+		_ = i.Close()
+	}
 
 	if logCB != nil {
 		msg := C.CString("资源清理完成")

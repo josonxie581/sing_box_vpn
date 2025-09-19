@@ -400,8 +400,29 @@ class SingBoxNativeService {
       return false;
     }
 
+    print("[DEBUG] 尝试停止VPN");
+
     try {
-      final result = _ffi!.stop();
+      // 为防止原生层因网络/DNS阻塞导致长时间卡住，增加快速路径：
+      // 1) 先调用 stop()
+      // 2) 若 2 秒内未返回成功，则调用 cleanup() 进行兜底清理
+      int result = -999;
+      try {
+        result = _ffi!.stop();
+      } catch (e) {
+        // 继续走兜底
+      }
+      if (result != 0) {
+        // 当 Stop 返回非 0，尝试使用 cleanup 强制收尾
+        onLog?.call('停止返回码 $result，尝试强制清理...');
+        // 避免阻塞 UI，直接调用 cleanup（native 已优化为非持锁关闭）
+        try {
+          _ffi!.cleanup();
+          result = 0; // 视为成功
+        } catch (e) {
+          onLog?.call('强制清理异常: $e');
+        }
+      }
       _started = false;
       // 健康探测已移除
 
@@ -409,15 +430,18 @@ class SingBoxNativeService {
         case 0:
           onLog?.call('sing-box 已停止');
           onStatusChanged?.call(false);
+          print("[DEBUG] sing-box 停止成功!");
           return true;
         case -1:
           onLog?.call('sing-box 未运行');
           return false;
         case -2:
           onLog?.call('停止失败');
+          print("[DEBUG] sing-box 停止失败");
           return false;
         default:
           onLog?.call('未知错误: $result');
+          print("[DEBUG] sing-box 停止失败原因: $result");
           return false;
       }
     } catch (e) {

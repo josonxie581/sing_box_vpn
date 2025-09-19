@@ -190,6 +190,8 @@ class ConnectionManager {
       return false;
     }
 
+    print("[DEBUG] 尝试断开VPN");
+
     _updateStatus(ConnectionStatus.disconnecting, '正在断开...');
 
     try {

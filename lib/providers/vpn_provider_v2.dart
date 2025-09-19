@@ -221,6 +221,7 @@ class VPNProviderV2 extends ChangeNotifier {
   // ============== 连接管理 ==============
 
   Future<bool> connect(VPNConfig config) async {
+    print("[DEBUG] 尝试连接VPN: ${config.name}");
     final success = await _connectionManager.connect(config);
 
     if (success) {
