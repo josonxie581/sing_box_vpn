@@ -12,8 +12,11 @@ static inline void callLog(LogCallback cb, const char* msg) {
 import "C"
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -23,6 +26,9 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	sjson "github.com/sagernet/sing/common/json"
+
+	// 使用 sagernet fork 的 quic-go
+	quic "github.com/sagernet/quic-go"
 )
 
 var (
@@ -557,6 +563,39 @@ func ReloadConfig() int {
 	return 0
 }
 
+//export ReplaceConfig
+func ReplaceConfig(configJSON *C.char) int {
+	// 更新基线配置并以此重启（保留动态规则），用于在线热切换节点
+	if configJSON == nil {
+		setLastError(fmt.Errorf("nil config"))
+		return -4
+	}
+	newCfg := C.GoString(configJSON)
+
+	// 先更新内存中的基线配置
+	mu.Lock()
+	if instance == nil {
+		mu.Unlock()
+		setLastError(fmt.Errorf("not running"))
+		return -1
+	}
+	baseConfigJSON = newCfg
+	currentConfigJSON = newCfg
+	mu.Unlock()
+
+	// 合并动态规则并执行重启
+	merged, err := buildMergedConfig()
+	if err != nil {
+		setLastError(err)
+		return -2
+	}
+	if err := restartWithConfig(merged); err != nil {
+		setLastError(err)
+		return -3
+	}
+	return 0
+}
+
 //export ClearRouteRules
 func ClearRouteRules() int {
 	mu.Lock()
@@ -567,4 +606,68 @@ func ClearRouteRules() int {
 
 func main() {
 	// 这个函数需要存在，但不会被调用
+}
+
+// ====================== 额外：严格探测（TLS/QUIC 最小握手） ======================
+
+func parseALPN(csv string) []string {
+	csv = strings.TrimSpace(csv)
+	if csv == "" {
+		return nil
+	}
+	parts := strings.Split(csv, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+//export ProbeTLS
+func ProbeTLS(host *C.char, port C.int, sni *C.char, insecure C.int, alpnCsv *C.char, timeoutMs C.int) C.int {
+	h := C.GoString(host)
+	p := int(port)
+	addr := fmt.Sprintf("%s:%d", h, p)
+	serverName := C.GoString(sni)
+	alpn := parseALPN(C.GoString(alpnCsv))
+	dialer := &net.Dialer{Timeout: time.Duration(int(timeoutMs)) * time.Millisecond}
+	tlsConf := &tls.Config{ServerName: serverName, InsecureSkipVerify: insecure != 0}
+	if len(alpn) > 0 {
+		tlsConf.NextProtos = alpn
+	}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConf)
+	if err != nil {
+		setLastError(fmt.Errorf("tls probe: %w", err))
+		return -1
+	}
+	_ = conn.Close()
+	return 0
+}
+
+//export ProbeQUIC
+func ProbeQUIC(host *C.char, port C.int, sni *C.char, insecure C.int, alpnCsv *C.char, timeoutMs C.int) C.int {
+	h := C.GoString(host)
+	p := int(port)
+	addr := fmt.Sprintf("%s:%d", h, p)
+	serverName := C.GoString(sni)
+	alpn := parseALPN(C.GoString(alpnCsv))
+	if len(alpn) == 0 {
+		// 兜底：提供常见的 QUIC ALPN，提升握手成功率
+		alpn = []string{"h3", "tuic"}
+	}
+	tlsConf := &tls.Config{ServerName: serverName, InsecureSkipVerify: insecure != 0, NextProtos: alpn}
+	qconf := &quic.Config{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(int(timeoutMs))*time.Millisecond)
+	defer cancel()
+	conn, err := quic.DialAddr(ctx, addr, tlsConf, qconf)
+	if err != nil {
+		setLastError(fmt.Errorf("quic probe: %w", err))
+		return -1
+	}
+	// 用 0 错误码关闭
+	_ = conn.CloseWithError(0, "probe")
+	return 0
 }

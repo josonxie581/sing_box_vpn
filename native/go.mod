@@ -3,6 +3,7 @@ module singbox_native
 go 1.23.1
 
 require (
+	github.com/sagernet/quic-go v0.52.0-beta.1
 	github.com/sagernet/sing v0.8.0-beta.1
 	github.com/sagernet/sing-box v0.0.0
 	golang.org/x/sys v0.35.0
@@ -73,7 +74,6 @@ require (
 	github.com/sagernet/gvisor v0.0.0-20250909151924-850a370d8506 // indirect
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a // indirect
 	github.com/sagernet/nftables v0.3.0-beta.4 // indirect
-	github.com/sagernet/quic-go v0.52.0-beta.1 // indirect
 	github.com/sagernet/sing-mux v0.3.3 // indirect
 	github.com/sagernet/sing-quic v0.5.2-0.20250909100920-da23407a63d5 // indirect
 	github.com/sagernet/sing-shadowsocks v0.2.8 // indirect

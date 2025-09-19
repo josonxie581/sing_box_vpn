@@ -98,7 +98,10 @@ extern __declspec(dllexport) void RegisterLogCallback(LogCallback cb);
 extern __declspec(dllexport) GoInt AddRouteRule(char* ruleJSON);
 extern __declspec(dllexport) GoInt RemoveRouteRule(char* ruleJSON);
 extern __declspec(dllexport) GoInt ReloadConfig();
+extern __declspec(dllexport) GoInt ReplaceConfig(char* configJSON);
 extern __declspec(dllexport) GoInt ClearRouteRules();
+extern __declspec(dllexport) int ProbeTLS(char* host, int port, char* sni, int insecure, char* alpnCsv, int timeoutMs);
+extern __declspec(dllexport) int ProbeQUIC(char* host, int port, char* sni, int insecure, char* alpnCsv, int timeoutMs);
 
 #ifdef __cplusplus
 }

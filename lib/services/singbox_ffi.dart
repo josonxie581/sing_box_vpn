@@ -24,11 +24,17 @@ class SingBoxFFI {
   late final Function _getVersion;
   Pointer<Utf8> Function()? _getLastError;
   void Function(Pointer<Utf8>)? _freeCString;
+  // 严格探测
+  int Function(Pointer<Utf8>, int, Pointer<Utf8>, int, Pointer<Utf8>, int)?
+  _probeTLS;
+  int Function(Pointer<Utf8>, int, Pointer<Utf8>, int, Pointer<Utf8>, int)?
+  _probeQUIC;
 
   // 新增：动态路由规则管理
   int Function(Pointer<Utf8>)? _addRouteRule;
   int Function(Pointer<Utf8>)? _removeRouteRule;
   int Function()? _reloadConfig;
+  int Function(Pointer<Utf8>)? _replaceConfig;
   int Function()? _clearRouteRules;
 
   // 回调函数
@@ -55,7 +61,9 @@ class SingBoxFFI {
       final _ = instance;
 
       stopwatch.stop();
-      print('[SingBoxFFI] sing-box 动态库预加载完成，耗时: ${stopwatch.elapsedMilliseconds}ms');
+      print(
+        '[SingBoxFFI] sing-box 动态库预加载完成，耗时: ${stopwatch.elapsedMilliseconds}ms',
+      );
     } catch (e) {
       print('[SingBoxFFI] sing-box 动态库预加载失败: $e');
       // 不抛出异常，允许应用继续运行
@@ -236,6 +244,15 @@ class SingBoxFFI {
       _reloadConfig = null;
     }
     try {
+      _replaceConfig = _lib
+          .lookup<NativeFunction<Int32 Function(Pointer<Utf8>)>>(
+            'ReplaceConfig',
+          )
+          .asFunction<int Function(Pointer<Utf8>)>();
+    } catch (_) {
+      _replaceConfig = null;
+    }
+    try {
       _clearRouteRules = _lib
           .lookup<NativeFunction<Int32 Function()>>('ClearRouteRules')
           .asFunction<int Function()>();
@@ -309,6 +326,108 @@ class SingBoxFFI {
     return s;
   }
 
+  /// TLS 严格探测（最小握手）
+  bool probeTLS({
+    required String host,
+    required int port,
+    String sni = '',
+    bool insecure = false,
+    List<String>? alpn,
+    int timeoutMs = 1500,
+  }) {
+    try {
+      _probeTLS ??= _lib
+          .lookup<
+            NativeFunction<
+              Int32 Function(
+                Pointer<Utf8>,
+                Int32,
+                Pointer<Utf8>,
+                Int32,
+                Pointer<Utf8>,
+                Int32,
+              )
+            >
+          >('ProbeTLS')
+          .asFunction<
+            int Function(
+              Pointer<Utf8>,
+              int,
+              Pointer<Utf8>,
+              int,
+              Pointer<Utf8>,
+              int,
+            )
+          >();
+    } catch (_) {
+      _probeTLS = null;
+    }
+    if (_probeTLS == null) return false;
+    final h = host.toNativeUtf8();
+    final s = sni.toNativeUtf8();
+    final a = (alpn == null || alpn.isEmpty ? '' : alpn.join(','))
+        .toNativeUtf8();
+    try {
+      final r = _probeTLS!(h, port, s, insecure ? 1 : 0, a, timeoutMs);
+      return r == 0;
+    } finally {
+      malloc.free(h);
+      malloc.free(s);
+      malloc.free(a);
+    }
+  }
+
+  /// QUIC 严格探测（最小握手，适用于 TUIC/Hysteria 等）
+  bool probeQUIC({
+    required String host,
+    required int port,
+    String sni = '',
+    bool insecure = false,
+    List<String>? alpn,
+    int timeoutMs = 1500,
+  }) {
+    try {
+      _probeQUIC ??= _lib
+          .lookup<
+            NativeFunction<
+              Int32 Function(
+                Pointer<Utf8>,
+                Int32,
+                Pointer<Utf8>,
+                Int32,
+                Pointer<Utf8>,
+                Int32,
+              )
+            >
+          >('ProbeQUIC')
+          .asFunction<
+            int Function(
+              Pointer<Utf8>,
+              int,
+              Pointer<Utf8>,
+              int,
+              Pointer<Utf8>,
+              int,
+            )
+          >();
+    } catch (_) {
+      _probeQUIC = null;
+    }
+    if (_probeQUIC == null) return false;
+    final h = host.toNativeUtf8();
+    final s = sni.toNativeUtf8();
+    final a = (alpn == null || alpn.isEmpty ? '' : alpn.join(','))
+        .toNativeUtf8();
+    try {
+      final r = _probeQUIC!(h, port, s, insecure ? 1 : 0, a, timeoutMs);
+      return r == 0;
+    } finally {
+      malloc.free(h);
+      malloc.free(s);
+      malloc.free(a);
+    }
+  }
+
   /// 设置日志回调（当前为空实现，原生回调未启用）
   void setLogCallback(void Function(String) callback) {
     // no-op: 若后续启用原生回调，请基于 Dart_Port/SendPort 实现线程安全回调
@@ -355,6 +474,21 @@ class SingBoxFFI {
 
     final result = _reloadConfig!();
     return result == 0;
+  }
+
+  /// 在线热替换配置（运行中切换节点不触发断开）
+  bool replaceConfig(String configJson) {
+    if (_replaceConfig == null) {
+      print('FFI: ReplaceConfig函数不可用，可能需要更新DLL');
+      return false;
+    }
+    final ptr = configJson.toNativeUtf8();
+    try {
+      final r = _replaceConfig!(ptr);
+      return r == 0;
+    } finally {
+      malloc.free(ptr);
+    }
   }
 
   /// 清空所有临时路由规则

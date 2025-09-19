@@ -13,6 +13,10 @@ class SingBoxNativeService {
   // ignore: unused_field
   bool _started = false; // 记录当前是否已成功执行 start
   Future<bool>? _initFuture; // 进行中的初始化（防止并发重入）
+  // 运行序号：每次成功 start 增加，防止旧探测误操作新连接
+  int _runSeq = 0;
+  int _lastProbeScheduledSeq = 0; // 已调度的最近探测批次
+  Future<bool>? _stopFuture;
 
   // Batch B: 首段文件日志
   IOSink? _earlyFileLogSink; // 早期文件日志（捕捉 UI 不显示阶段）
@@ -25,6 +29,8 @@ class SingBoxNativeService {
   // 回调函数
   Function(String)? onLog;
   Function(bool)? onStatusChanged;
+  // 新增：用于传递更细粒度的连接状态文案（例如：已连接/连接正常/连接但异常/未连接）
+  Function(String)? onStatusText;
 
   // 已存在 isRunning getter，避免重复定义
 
@@ -141,9 +147,36 @@ class SingBoxNativeService {
     }
 
     _ffi ??= SingBoxFFI.instance;
+    // 若存在正在停止流程，先等待其完成，避免与新启动竞态
+    final existingStop = _stopFuture;
+    if (existingStop != null) {
+      try {
+        await existingStop;
+      } catch (_) {}
+    }
     if (_ffi!.isRunning) {
-      onLog?.call('sing-box 已经在运行');
-      return false;
+      // 在线热切换：运行中直接替换配置并热重启（不中断 TUN、连接连续性更好）
+      try {
+        final configJson = jsonEncode(config);
+        final ok = _ffi!.replaceConfig(configJson);
+        if (ok) {
+          onLog?.call('已在线切换到新配置（热重启）');
+          onStatusText?.call('已连接'); // 保持已连接文案
+          final runSeq = (++_runSeq);
+          _schedulePostStartProbe(config, runSeq);
+          return true;
+        } else {
+          final detail = _ffi!.getLastError();
+          onLog?.call(
+            detail.isEmpty ? '在线切换失败，回退为冷启动' : '在线切换失败：$detail，回退为冷启动',
+          );
+        }
+      } catch (e) {
+        onLog?.call('在线切换异常：$e，回退为冷启动');
+      }
+      // 回退：热切换不可用或失败时，走原来的冷启动路线
+      onLog?.call('回退：准备停止当前实例以冷启动新配置');
+      await stop();
     }
 
     try {
@@ -240,9 +273,12 @@ class SingBoxNativeService {
         case 0:
           onLog?.call('sing-box 启动成功');
           onStatusChanged?.call(true);
+          onStatusText?.call('已连接');
           _started = true;
           _captureTunStackSuccess(config);
-          // 健康探测已移除
+          // 启动后做一次轻量可用性探测（不影响主流程）
+          final runSeq = (++_runSeq);
+          _schedulePostStartProbe(config, runSeq);
           return true;
         case -1:
           onLog?.call('sing-box 已经在运行');
@@ -392,20 +428,219 @@ class SingBoxNativeService {
     }
   }
 
+  void _schedulePostStartProbe(Map<String, dynamic> config, int runSeq) {
+    // 每个 runSeq 只调度一次，确保新连接一定会进行探测
+    if (_lastProbeScheduledSeq == runSeq) return;
+    _lastProbeScheduledSeq = runSeq;
+    // fire-and-forget，不阻塞 UI
+    Future(() async {
+      try {
+        await _postStartProbe(config, runSeq);
+      } catch (_) {
+        // 忽略探测异常
+      } finally {
+        // 无需复位 _lastProbeScheduledSeq，这个值用于避免重复调度；
+        // 当下一次 start 增加 runSeq 时会自然失效。
+      }
+    });
+  }
+
+  Future<void> _postStartProbe(Map<String, dynamic> config, int runSeq) async {
+    // 等待路由/TUN 稳定一下
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!isRunning) return;
+    // 若已切换到新连接，放弃本次旧探测
+    if (runSeq != _runSeq) return;
+
+    try {
+      // 1) 尝试对最终出站做一次 TCP 端口连通性探测（1.5s 超时）
+      final outbounds =
+          (config['outbounds'] as List?)?.cast<Map<String, dynamic>>() ??
+          const [];
+      final route = (config['route'] as Map?)?.cast<String, dynamic>() ?? {};
+      final finalTag = route['final']?.toString();
+
+      Map<String, dynamic>? ob;
+      if (finalTag != null && finalTag.isNotEmpty) {
+        ob = outbounds.firstWhere(
+          (e) => (e['tag']?.toString() ?? '') == finalTag,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+      ob ??= outbounds.firstWhere((e) {
+        final t = (e['type']?.toString() ?? '').toLowerCase();
+        return t.isNotEmpty && t != 'direct' && t != 'block' && t != 'dns';
+      }, orElse: () => <String, dynamic>{});
+
+      bool tcpOk = false;
+      bool httpOk = false; // 记录 HTTP 出网探测结果
+      String? obType = ob['type']?.toString().toLowerCase();
+      final host = ob['server']?.toString();
+      final port = (ob['server_port'] is int)
+          ? ob['server_port'] as int
+          : int.tryParse(ob['server_port']?.toString() ?? '');
+
+      if (host != null && host.isNotEmpty && port != null && port > 0) {
+        // TUIC/Hysteria 基于 QUIC/UDP，跳过 TCP 探测；其它尝试 TCP 端口与 TLS 最小握手
+        if (obType != 'hysteria' && obType != 'tuic') {
+          try {
+            final socket = await Socket.connect(
+              host,
+              port,
+              timeout: const Duration(milliseconds: 1500),
+            );
+            socket.destroy();
+            tcpOk = true;
+            onLog?.call('后端端口快速探测通过: $host:$port');
+          } catch (_) {
+            // TCP 探测失败，继续做 HTTP 出网探测以确认是否真不可用
+          }
+
+          // 尝试 TLS 最小握手（若该出站启用 TLS）
+          if (tcpOk) {
+            final tlsCfg = (ob['tls'] as Map?)?.cast<String, dynamic>();
+            final tlsEnabled =
+                tlsCfg != null &&
+                (tlsCfg['enabled'] == true || tlsCfg.isNotEmpty);
+            if (tlsEnabled) {
+              final sni = (tlsCfg['server_name']?.toString() ?? host);
+              final insecure = (tlsCfg['insecure'] == true);
+              List<String>? alpn;
+              final rawAlpn = tlsCfg['alpn'];
+              if (rawAlpn is List) {
+                alpn = rawAlpn.whereType<String>().toList();
+              }
+              final ok = _ffi!.probeTLS(
+                host: host,
+                port: port,
+                sni: sni,
+                insecure: insecure,
+                alpn: alpn,
+                timeoutMs: 1500,
+              );
+              if (!ok) {
+                onLog?.call('TLS 握手探测失败（可能证书/SNI/ALPN不匹配或服务未就绪）');
+                tcpOk = false; // 降级为不通过，让后续 HTTP 探测给出路径可用性结论
+              } else {
+                onLog?.call('TLS 握手探测通过');
+              }
+            }
+          }
+        }
+      }
+
+      // TUIC/Hysteria：尝试 QUIC 握手
+      if (host != null &&
+          port != null &&
+          (obType == 'tuic' || obType == 'hysteria')) {
+        try {
+          final tlsCfg = (ob['tls'] as Map?)?.cast<String, dynamic>();
+          final sni = (tlsCfg?['server_name']?.toString() ?? host);
+          final insecure = (tlsCfg?['insecure'] == true);
+          List<String>? alpn;
+          final rawAlpn = tlsCfg?['alpn'];
+          if (rawAlpn is List) {
+            alpn = rawAlpn.whereType<String>().toList();
+          }
+          final ok = _ffi!.probeQUIC(
+            host: host,
+            port: port,
+            sni: sni,
+            insecure: insecure,
+            alpn: alpn,
+            timeoutMs: 1500,
+          );
+          if (ok) {
+            onLog?.call('QUIC/TUIC 握手探测通过');
+            tcpOk = true; // 视为整体可用
+          } else {
+            onLog?.call('QUIC/TUIC 握手探测失败');
+          }
+        } catch (_) {}
+      }
+
+      if (!tcpOk) {
+        // 2) 通过 TUN 的 HTTP 出网探测（2~3s 超时）
+        httpOk = await _probeHttpConnectivity();
+        if (!httpOk) {
+          onLog?.call('检测到远端不可用或 VPS 无服务（本地仅完成启动）。');
+          // 状态提示并自动停止
+          onStatusText?.call('连接但异常');
+          // 再次确认此次探测仍属当前运行批次
+          if (isRunning && runSeq == _runSeq) {
+            await stop();
+          }
+        } else {
+          onLog?.call('快速联网探测通过。');
+          onStatusText?.call('连接正常');
+        }
+      } else {
+        // TCP/TLS/QUIC 探测已通过，认为整体可用
+        onStatusText?.call('连接正常');
+      }
+    } catch (e) {
+      onLog?.call('快速探测异常: $e');
+    }
+  }
+
+  Future<bool> _probeHttpConnectivity() async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 2);
+      // 使用微软连接测试，HTTP 明文，避免证书问题
+      final uri = Uri.parse('http://www.msftconnecttest.com/connecttest.txt');
+      final req = await client.getUrl(uri).timeout(const Duration(seconds: 2));
+      req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-probe');
+      final resp = await req.close().timeout(const Duration(seconds: 2));
+      if (resp.statusCode == 200) {
+        // 内容很小，最多读 256 字节检查关键字
+        final bytes = await resp.fold<List<int>>(<int>[], (acc, chunk) {
+          if (acc.length < 256) acc.addAll(chunk);
+          return acc;
+        });
+        final body = utf8.decode(bytes, allowMalformed: true);
+        if (body.contains('Microsoft Connect Test')) {
+          return true;
+        }
+        // 某些网络会返回其它内容，这里放宽：只要 200 就算可联网
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 停止 sing-box
   Future<bool> stop() async {
     _ffi ??= SingBoxFFI.instance;
+    // 合并并发 stop 调用
+    final inflight = _stopFuture;
+    if (inflight != null) {
+      return await inflight;
+    }
+
+    final completer = Completer<bool>();
+    _stopFuture = completer.future;
+
     if (!_ffi!.isRunning) {
       onLog?.call('sing-box 未运行');
-      return false;
+      // 将未运行视为已停止的幂等成功，避免上层因 false 认为切换失败
+      _started = false;
+      onStatusChanged?.call(false);
+      onStatusText?.call('未连接');
+      completer.complete(true);
+      _stopFuture = null;
+      return await completer.future;
     }
 
     print("[DEBUG] 尝试停止VPN");
 
+    bool ok = false;
     try {
       // 为防止原生层因网络/DNS阻塞导致长时间卡住，增加快速路径：
       // 1) 先调用 stop()
-      // 2) 若 2 秒内未返回成功，则调用 cleanup() 进行兜底清理
+      // 2) 若返回非 0，则调用 cleanup() 进行兜底清理
       int result = -999;
       try {
         result = _ffi!.stop();
@@ -415,7 +650,6 @@ class SingBoxNativeService {
       if (result != 0) {
         // 当 Stop 返回非 0，尝试使用 cleanup 强制收尾
         onLog?.call('停止返回码 $result，尝试强制清理...');
-        // 避免阻塞 UI，直接调用 cleanup（native 已优化为非持锁关闭）
         try {
           _ffi!.cleanup();
           result = 0; // 视为成功
@@ -424,30 +658,41 @@ class SingBoxNativeService {
         }
       }
       _started = false;
-      // 健康探测已移除
 
       switch (result) {
         case 0:
           onLog?.call('sing-box 已停止');
           onStatusChanged?.call(false);
+          onStatusText?.call('未连接');
           print("[DEBUG] sing-box 停止成功!");
-          return true;
+          ok = true;
+          break;
         case -1:
           onLog?.call('sing-box 未运行');
-          return false;
+          ok = false;
+          break;
         case -2:
           onLog?.call('停止失败');
           print("[DEBUG] sing-box 停止失败");
-          return false;
+          ok = false;
+          break;
         default:
           onLog?.call('未知错误: $result');
           print("[DEBUG] sing-box 停止失败原因: $result");
-          return false;
+          ok = false;
+          break;
       }
     } catch (e) {
       onLog?.call('停止异常: $e');
-      return false;
+      ok = false;
+    } finally {
+      final toComplete = completer;
+      // 确保 _stopFuture 清理
+      _stopFuture = null;
+      toComplete.complete(ok);
     }
+
+    return await completer.future;
   }
 
   /// 重启 sing-box
