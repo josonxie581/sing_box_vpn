@@ -82,11 +82,11 @@ void main() async {
     await windowManager.setPreventClose(true); // 防止直接关闭
 
     // 设置窗口图标
-    // try {
-    //   await windowManager.setIcon('assets/app_icon.ico');
-    // } catch (e) {
-    //   print('设置窗口图标失败: $e');
-    // }
+    try {
+      await windowManager.setIcon('assets/app_icon.ico');
+    } catch (e) {
+      print('设置窗口图标失败: $e');
+    }
   });
 
   runApp(
@@ -325,11 +325,11 @@ class _MyAppState extends State<MyApp> with WindowListener {
       await windowManager.setClosable(true);
 
       // 重新设置窗口图标
-      // try {
-      //   await windowManager.setIcon('assets/app_icon.ico');
-      // } catch (e) {
-      //   print('恢复窗口图标失败: $e');
-      // }
+      try {
+        await windowManager.setIcon('assets/app_icon.ico');
+      } catch (e) {
+        print('恢复窗口图标失败: $e');
+      }
 
       // 恢复窗口大小
       await windowManager.setMinimumSize(const Size(450, 710));

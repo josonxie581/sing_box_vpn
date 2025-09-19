@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gsou/utils/safe_navigator.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:zxing2/qrcode.dart';
 import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
@@ -372,6 +374,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                           case 'copy':
                             _copyConfigToClipboard(context, config);
                             break;
+                          case 'qrcode':
+                            _showQRCodeDialog(context, config);
+                            break;
                         }
                       },
                       itemBuilder: (context) {
@@ -462,6 +467,23 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                                 SizedBox(width: 8),
                                 Text(
                                   '测试延时',
+                                  style: TextStyle(color: AppTheme.textPrimary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'qrcode',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.qr_code,
+                                  color: AppTheme.accentNeon,
+                                  size: 18,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '生成二维码',
                                   style: TextStyle(color: AppTheme.textPrimary),
                                 ),
                               ],
@@ -1618,6 +1640,681 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             child: const Text(
               '关闭',
               style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 将配置转换为订阅链接格式
+  String _configToSubscriptionLink(VPNConfig config) {
+    switch (config.type.toLowerCase()) {
+      case 'shadowsocks':
+        final method = config.settings['method'] ?? 'aes-256-gcm';
+        final password = config.settings['password'] ?? '';
+        final auth = '$method:$password';
+        final serverInfo = '${config.server}:${config.port}';
+        final encoded = base64.encode(utf8.encode('$auth@$serverInfo'));
+        final name = Uri.encodeComponent(config.name);
+        return 'ss://$encoded#$name';
+
+      case 'vmess':
+        final vmessConfig = {
+          'v': '2',
+          'ps': config.name,
+          'add': config.server,
+          'port': config.port.toString(),
+          'id': config.settings['uuid'] ?? '',
+          'aid': config.settings['alterId'] ?? 0,
+          'scy': config.settings['security'] ?? 'auto',
+          'net': config.settings['network'] ?? 'tcp',
+          'type': 'none',
+          'host': config.settings['host'] ?? '',
+          'path': config.settings['path'] ?? '/',
+          'tls': config.settings['tls'] ?? '',
+          'sni': config.settings['sni'] ?? '',
+        };
+        final jsonStr = jsonEncode(vmessConfig);
+        final encoded = base64.encode(utf8.encode(jsonStr));
+        return 'vmess://$encoded';
+
+      case 'vless':
+        final uuid = config.settings['uuid'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['network'] != null && config.settings['network'] != 'tcp') {
+          params['type'] = config.settings['network'];
+        }
+
+        if (config.settings['tlsEnabled'] == true) {
+          if (config.settings['realityEnabled'] == true) {
+            params['security'] = 'reality';
+            if (config.settings['realityPublicKey'] != null) {
+              params['pbk'] = config.settings['realityPublicKey'];
+            }
+            if (config.settings['realityShortId'] != null) {
+              params['sid'] = config.settings['realityShortId'];
+            }
+          } else {
+            params['security'] = 'tls';
+          }
+        }
+
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+
+        if (config.settings['flow'] != null) {
+          params['flow'] = config.settings['flow'];
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final baseUrl = 'vless://$uuid@$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'trojan':
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+
+        if (config.settings['skipCertVerify'] == true) {
+          params['allowInsecure'] = '1';
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final baseUrl = 'trojan://$password@$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'hysteria2':
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+
+        if (config.settings['skipCertVerify'] == true) {
+          params['insecure'] = '1';
+        }
+
+        if (config.settings['alpn'] is List) {
+          params['alpn'] = (config.settings['alpn'] as List).join(',');
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final baseUrl = 'hysteria2://$password@$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'hysteria':
+        // Hysteria v1
+        final password = config.settings['password'] ?? '';
+        final auth = config.settings['auth'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        // 认证信息
+        if (auth.isNotEmpty) {
+          params['auth'] = auth;
+        } else if (password.isNotEmpty) {
+          params['auth_str'] = password;
+        }
+
+        // 带宽设置
+        if (config.settings['up_mbps'] != null) {
+          params['up_mbps'] = config.settings['up_mbps'].toString();
+        }
+        if (config.settings['down_mbps'] != null) {
+          params['down_mbps'] = config.settings['down_mbps'].toString();
+        }
+        if (config.settings['up'] != null) {
+          params['up'] = config.settings['up'].toString();
+        }
+        if (config.settings['down'] != null) {
+          params['down'] = config.settings['down'].toString();
+        }
+
+        // TLS设置
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+        if (config.settings['skipCertVerify'] == true) {
+          params['insecure'] = '1';
+        }
+        if (config.settings['alpn'] is List) {
+          params['alpn'] = (config.settings['alpn'] as List).join(',');
+        }
+        if (config.settings['obfs'] != null) {
+          params['obfs'] = config.settings['obfs'];
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final userInfo = password.isNotEmpty ? '$password@' : '';
+        final baseUrl = 'hysteria://$userInfo$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'tuic':
+        final uuid = config.settings['uuid'] ?? '';
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        // 认证信息
+        if (uuid.isNotEmpty) {
+          params['uuid'] = uuid;
+        }
+        if (password.isNotEmpty) {
+          params['password'] = password;
+        }
+
+        // 其他设置
+        if (config.settings['udpRelayMode'] != null) {
+          params['udp-relay-mode'] = config.settings['udpRelayMode'];
+        }
+        if (config.settings['congestion'] != null) {
+          params['congestion'] = config.settings['congestion'];
+        }
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+        if (config.settings['skipCertVerify'] == true) {
+          params['insecure'] = '1';
+        }
+        if (config.settings['alpn'] is List) {
+          params['alpn'] = (config.settings['alpn'] as List).join(',');
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final userInfo = uuid.isNotEmpty && password.isNotEmpty ? '$uuid:$password@' : password.isNotEmpty ? '$password@' : '';
+        final baseUrl = 'tuic://$userInfo$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'anytls':
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+        if (config.settings['skipCertVerify'] == true) {
+          params['insecure'] = '1';
+        }
+        if (config.settings['alpn'] is List) {
+          params['alpn'] = (config.settings['alpn'] as List).join(',');
+        }
+        if (config.settings['idle_session_check_interval'] != null) {
+          params['idle_session_check_interval'] = config.settings['idle_session_check_interval'];
+        }
+        if (config.settings['idle_session_timeout'] != null) {
+          params['idle_session_timeout'] = config.settings['idle_session_timeout'];
+        }
+        if (config.settings['min_idle_session'] != null) {
+          params['min_idle_session'] = config.settings['min_idle_session'].toString();
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final baseUrl = 'anytls://$password@$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'shadowtls':
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['version'] != null) {
+          params['version'] = config.settings['version'].toString();
+        }
+        if (config.settings['sni'] != null) {
+          params['sni'] = config.settings['sni'];
+        }
+        if (config.settings['skipCertVerify'] == true) {
+          params['insecure'] = '1';
+        }
+        if (config.settings['alpn'] is List) {
+          params['alpn'] = (config.settings['alpn'] as List).join(',');
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final baseUrl = 'shadowtls://$password@$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'socks':
+        final username = config.settings['username'] ?? '';
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['tlsEnabled'] == true) {
+          params['tls'] = '1';
+          if (config.settings['sni'] != null) {
+            params['sni'] = config.settings['sni'];
+          }
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final userInfo = username.isNotEmpty && password.isNotEmpty
+            ? '${Uri.encodeComponent(username)}:${Uri.encodeComponent(password)}@'
+            : '';
+        final baseUrl = 'socks://$userInfo$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'http':
+        final username = config.settings['username'] ?? '';
+        final password = config.settings['password'] ?? '';
+        final host = config.server;
+        final port = config.port;
+        final params = <String, String>{};
+
+        if (config.settings['tlsEnabled'] == true) {
+          params['tls'] = '1';
+          if (config.settings['sni'] != null) {
+            params['sni'] = config.settings['sni'];
+          }
+        }
+
+        final queryString = params.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+
+        final name = Uri.encodeComponent(config.name);
+        final userInfo = username.isNotEmpty && password.isNotEmpty
+            ? '${Uri.encodeComponent(username)}:${Uri.encodeComponent(password)}@'
+            : '';
+        final baseUrl = 'http://$userInfo$host:$port';
+        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+
+      case 'wireguard':
+        // WireGuard 协议没有标准的订阅链接格式，返回JSON
+        final jsonStr = jsonEncode(config.toJson());
+        return 'wg://' + base64.encode(utf8.encode(jsonStr));
+
+      default:
+        // 对于不支持的协议，返回JSON格式
+        final jsonStr = jsonEncode(config.toJson());
+        return jsonStr;
+    }
+  }
+
+  /// 显示二维码对话框
+  void _showQRCodeDialog(BuildContext context, VPNConfig config) {
+    final subscriptionLink = _configToSubscriptionLink(config);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: Row(
+          children: [
+            Icon(Icons.qr_code, color: AppTheme.accentNeon, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '节点二维码: ${config.name}',
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 二维码显示
+              Container(
+                width: 280,
+                height: 280,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: FutureBuilder<Uint8List?>(
+                  future: _generateQRCode(subscriptionLink),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(
+                        child: CircularProgressIndicator(
+                          color: AppTheme.primaryNeon,
+                        ),
+                      );
+                    }
+
+                    if (snapshot.hasError || snapshot.data == null) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              color: AppTheme.errorRed,
+                              size: 48,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '生成二维码失败',
+                              style: TextStyle(
+                                color: AppTheme.errorRed,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return Image.memory(
+                      snapshot.data!,
+                      fit: BoxFit.contain,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              // 配置信息
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgDark,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.borderColor.withOpacity(0.3),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 14,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '配置信息',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow('类型', _getConfigTypeDisplay(config)),
+                    _buildInfoRow('服务器', '${config.server}:${config.port}'),
+                    if (config.remarks.isNotEmpty)
+                      _buildInfoRow('备注', config.remarks),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 提示信息
+              Text(
+                '使用支持该协议的客户端扫描二维码即可导入配置',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: subscriptionLink));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('订阅链接已复制到剪贴板'),
+                    backgroundColor: AppTheme.successGreen,
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              }
+            },
+            child: const Text(
+              '复制链接',
+              style: TextStyle(color: AppTheme.accentNeon),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              '关闭',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 生成二维码图像
+  Future<Uint8List?> _generateQRCode(String data) async {
+    try {
+      final qrCode = Encoder.encode(data, ErrorCorrectionLevel.l);
+      final matrix = qrCode.matrix;
+
+      if (matrix == null) return null;
+
+      // 计算缩放比例
+      final size = 280;
+      final scale = size ~/ matrix.width;
+      final outputSize = matrix.width * scale;
+
+      // 转换为图像数据
+      final bytes = Uint8List(outputSize * outputSize * 4);
+
+      for (int y = 0; y < outputSize; y++) {
+        for (int x = 0; x < outputSize; x++) {
+          final offset = (y * outputSize + x) * 4;
+          // 计算原始矩阵中的位置
+          final sourceX = x ~/ scale;
+          final sourceY = y ~/ scale;
+
+          // 获取颜色（黑色或白色）
+          final isBlack = sourceX < matrix.width &&
+                          sourceY < matrix.height &&
+                          matrix.get(sourceX, sourceY) == 1;
+          final color = isBlack ? 0xFF000000 : 0xFFFFFFFF;
+
+          bytes[offset] = (color >> 16) & 0xFF; // R
+          bytes[offset + 1] = (color >> 8) & 0xFF; // G
+          bytes[offset + 2] = color & 0xFF; // B
+          bytes[offset + 3] = (color >> 24) & 0xFF; // A
+        }
+      }
+
+      // 创建PNG图像
+      final image = await _createPngImage(bytes, outputSize, outputSize);
+      return image;
+    } catch (e) {
+      print('生成二维码失败: $e');
+      return null;
+    }
+  }
+
+  /// 创建PNG图像
+  Future<Uint8List> _createPngImage(Uint8List pixels, int width, int height) async {
+    // 简单的PNG编码实现
+    final png = BytesBuilder();
+
+    // PNG签名
+    png.add([137, 80, 78, 71, 13, 10, 26, 10]);
+
+    // IHDR块
+    final ihdr = BytesBuilder();
+    ihdr.add(_intToBytes(width, 4));
+    ihdr.add(_intToBytes(height, 4));
+    ihdr.addByte(8); // 位深度
+    ihdr.addByte(6); // 颜色类型 (RGBA)
+    ihdr.addByte(0); // 压缩方法
+    ihdr.addByte(0); // 滤波方法
+    ihdr.addByte(0); // 隔行扫描方法
+    _writePngChunk(png, 'IHDR', ihdr.toBytes());
+
+    // IDAT块 (简化处理，不压缩)
+    final idat = BytesBuilder();
+    for (int y = 0; y < height; y++) {
+      idat.addByte(0); // 滤波类型
+      for (int x = 0; x < width; x++) {
+        final offset = (y * width + x) * 4;
+        idat.add(pixels.sublist(offset, offset + 4));
+      }
+    }
+
+    // 使用zlib压缩（简化版本）
+    final compressed = _zlibCompress(idat.toBytes());
+    _writePngChunk(png, 'IDAT', compressed);
+
+    // IEND块
+    _writePngChunk(png, 'IEND', Uint8List(0));
+
+    return png.toBytes();
+  }
+
+  void _writePngChunk(BytesBuilder png, String type, Uint8List data) {
+    png.add(_intToBytes(data.length, 4));
+    png.add(utf8.encode(type));
+    png.add(data);
+
+    // CRC32
+    final crcData = BytesBuilder();
+    crcData.add(utf8.encode(type));
+    crcData.add(data);
+    png.add(_intToBytes(_crc32(crcData.toBytes()), 4));
+  }
+
+  Uint8List _intToBytes(int value, int length) {
+    final bytes = Uint8List(length);
+    for (int i = length - 1; i >= 0; i--) {
+      bytes[i] = value & 0xFF;
+      value >>= 8;
+    }
+    return bytes;
+  }
+
+  int _crc32(Uint8List data) {
+    int crc = 0xFFFFFFFF;
+    for (final byte in data) {
+      crc ^= byte;
+      for (int i = 0; i < 8; i++) {
+        crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
+      }
+    }
+    return crc ^ 0xFFFFFFFF;
+  }
+
+  Uint8List _zlibCompress(Uint8List data) {
+    // 简化的zlib压缩（存储模式，不实际压缩）
+    final result = BytesBuilder();
+    result.add([0x78, 0x01]); // zlib头
+
+    // 存储块
+    int offset = 0;
+    while (offset < data.length) {
+      final remaining = data.length - offset;
+      final blockSize = remaining > 65535 ? 65535 : remaining;
+      final isLast = offset + blockSize >= data.length;
+
+      result.addByte(isLast ? 1 : 0);
+      result.add(_intToBytes(blockSize, 2).reversed.toList());
+      result.add(_intToBytes(~blockSize & 0xFFFF, 2).reversed.toList());
+      result.add(data.sublist(offset, offset + blockSize));
+
+      offset += blockSize;
+    }
+
+    // Adler32校验和
+    int a = 1, b = 0;
+    for (final byte in data) {
+      a = (a + byte) % 65521;
+      b = (b + a) % 65521;
+    }
+    result.add(_intToBytes((b << 16) | a, 4));
+
+    return result.toBytes();
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 11,
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
