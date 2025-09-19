@@ -21,6 +21,7 @@ green() { echo -e "\e[1;32m$1\033[0m"; }
 yellow() { echo -e "\e[1;33m$1\033[0m"; }
 purple() { echo -e "\e[1;35m$1\033[0m"; }
 blue() { echo -e "\e[1;34m$1\033[0m"; }
+cyan() { echo -e "\e[1;36m$1\033[0m"; }
 reading() { read -p "$(red "$1")" "$2"; }
 
 # 设置环境变量
@@ -92,6 +93,236 @@ secure_init() {
 
     command -v curl &>/dev/null && COMMAND="curl -fsSL -o" || COMMAND="wget -qO"
 }
+
+# BBR检测和启用功能
+check_bbr_status() {
+    purple "🔍 检查BBR状态..."
+
+    local current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
+    local available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
+
+    if [[ "$current_cc" == "bbr" ]]; then
+        green "✅ BBR已启用 (当前: $current_cc)"
+        return 0
+    else
+        yellow "⚠️ BBR未启用 (当前: $current_cc)"
+        if echo "$available_cc" | grep -q "bbr"; then
+            yellow "📋 BBR可用，准备启用..."
+            return 1
+        else
+            yellow "❌ 系统不支持BBR或内核版本过低"
+            return 2
+        fi
+    fi
+}
+
+enable_bbr() {
+    purple "🚀 正在启用BBR..."
+
+    # 检查内核版本
+    local kernel_version=$(uname -r | cut -d. -f1-2)
+    local major_version=$(echo $kernel_version | cut -d. -f1)
+    local minor_version=$(echo $kernel_version | cut -d. -f2)
+
+    if [[ $major_version -lt 4 ]] || [[ $major_version -eq 4 && $minor_version -lt 9 ]]; then
+        yellow "⚠️ 内核版本 $kernel_version 可能不支持BBR (需要4.9+)"
+        return 1
+    fi
+
+    # 备份原配置
+    if [[ -f /etc/sysctl.conf ]]; then
+        cp /etc/sysctl.conf /etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+    fi
+
+    # 配置BBR参数
+    cat >> /etc/sysctl.conf << EOF
+
+# BBR TCP拥塞控制优化 (Auto-configured by sing-box script)
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# 网络性能优化
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.ipv4.tcp_rmem = 4096 65536 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_fastopen = 3
+EOF
+
+    # 应用配置
+    sysctl -p >/dev/null 2>&1 || true
+
+    # 验证BBR启用状态
+    sleep 2
+    local new_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
+
+    if [[ "$new_cc" == "bbr" ]]; then
+        green "✅ BBR启用成功！"
+        green "📊 当前拥塞控制算法: $new_cc"
+
+        # 显示更多信息
+        local qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
+        green "📊 队列规则: $qdisc"
+
+        return 0
+    else
+        red "❌ BBR启用失败"
+        yellow "当前算法: $new_cc"
+        return 1
+    fi
+}
+
+auto_enable_bbr() {
+    echo -e "\n${blue}================== BBR优化 ==================${re}"
+
+    check_bbr_status
+    local bbr_status=$?
+
+    case $bbr_status in
+        0)
+            green "BBR已经启用，无需配置"
+            ;;
+        1)
+            purple "正在自动启用BBR..."
+            if enable_bbr; then
+                green "🎉 BBR启用成功！网络性能已优化"
+            else
+                yellow "⚠️ BBR启用失败，但不影响sing-box运行"
+            fi
+            ;;
+        2)
+            yellow "系统不支持BBR，跳过BBR配置"
+            yellow "建议升级内核到4.9+版本以获得更好的网络性能"
+            ;;
+    esac
+
+    echo -e "${blue}============================================${re}\n"
+}
+
+# 连接诊断功能
+diagnose_connection() {
+    echo -e "\n${blue}================ 连接诊断 =================${re}"
+
+    # 检查服务状态
+    purple "🔍 检查服务运行状态..."
+    local singbox_running=false
+    local cloudflared_running=false
+
+    if pgrep -f "./sing-box" >/dev/null; then
+        green "✅ sing-box 进程运行中"
+        singbox_running=true
+    else
+        red "❌ sing-box 进程未运行"
+    fi
+
+    if pgrep -f "./cloudflared" >/dev/null; then
+        green "✅ cloudflared 进程运行中"
+        cloudflared_running=true
+    else
+        yellow "⚠️ cloudflared 进程未运行"
+    fi
+
+    # 检查端口监听
+    purple "\n🔍 检查端口监听状态..."
+    for port in $VMESS_PORT $TUIC_PORT $HY2_PORT; do
+        local listen_result=$(netstat -tulpn 2>/dev/null | grep ":$port ")
+        if [[ -n "$listen_result" ]]; then
+            green "✅ 端口 $port 正在监听"
+            echo "   $listen_result" | sed 's/^/   /'
+        else
+            red "❌ 端口 $port 未监听"
+        fi
+    done
+
+    # 测试端口连通性
+    purple "\n🔍 测试端口连通性..."
+    local server_ip=$(get_ip)
+    for port in $VMESS_PORT; do  # 先测试主要端口
+        if timeout 3 bash -c "</dev/tcp/$server_ip/$port" 2>/dev/null; then
+            green "✅ 端口 $port 可以连接"
+        else
+            red "❌ 端口 $port 无法连接"
+        fi
+    done
+
+    # 检查防火墙状态
+    purple "\n🔍 检查防火墙状态..."
+    if command -v ufw >/dev/null 2>&1; then
+        local ufw_status=$(ufw status 2>/dev/null | grep "Status:" | awk '{print $2}')
+        if [[ "$ufw_status" == "active" ]]; then
+            yellow "⚠️ UFW防火墙已启用，检查端口规则..."
+            for port in $VMESS_PORT $TUIC_PORT $HY2_PORT; do
+                if ufw status | grep -q "$port"; then
+                    green "✅ 端口 $port 防火墙规则已设置"
+                else
+                    red "❌ 端口 $port 防火墙规则缺失"
+                fi
+            done
+        else
+            green "✅ UFW防火墙未启用"
+        fi
+    fi
+
+    # 检查iptables
+    if command -v iptables >/dev/null 2>&1; then
+        local iptables_rules=$(iptables -L INPUT 2>/dev/null | grep -E "ACCEPT|DROP|REJECT" | wc -l)
+        if [[ $iptables_rules -gt 3 ]]; then
+            yellow "⚠️ 检测到iptables规则，可能影响连接"
+        else
+            green "✅ iptables规则正常"
+        fi
+    fi
+
+    # 检查配置文件
+    purple "\n🔍 检查配置文件..."
+    if [[ -f "$WORKDIR/config.json" ]]; then
+        if ./sing-box check -c config.json >/dev/null 2>&1; then
+            green "✅ 配置文件格式正确"
+        else
+            red "❌ 配置文件有错误"
+            yellow "执行以下命令查看详细错误："
+            echo "cd $WORKDIR && ./sing-box check -c config.json"
+        fi
+    else
+        red "❌ 配置文件不存在"
+    fi
+
+    # 检查网络连接
+    purple "\n🔍 检查网络连接..."
+    local server_ip=$(get_ip)
+    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        green "✅ 外网连接正常"
+    else
+        red "❌ 外网连接异常"
+    fi
+
+    # 显示建议
+    echo -e "\n${blue}================== 建议 ==================${re}"
+
+    if [[ "$singbox_running" == false ]]; then
+        red "🔧 sing-box未运行，尝试启动："
+        echo "   singbox start"
+    fi
+
+    if netstat -tulpn 2>/dev/null | grep -q ":$VMESS_PORT " && [[ "$singbox_running" == true ]]; then
+        green "🎯 基础服务正常，可能是客户端配置问题"
+        echo "   1. 检查客户端UUID是否正确"
+        echo "   2. 检查服务器IP和端口"
+        echo "   3. 确认跳过证书验证已开启"
+    else
+        red "🔧 服务异常，尝试以下步骤："
+        echo "   1. singbox stop && singbox start"
+        echo "   2. 检查防火墙设置"
+        echo "   3. 查看详细日志: singbox logs"
+    fi
+
+    echo -e "${blue}=========================================${re}\n"
+}
+
 
 # 检测系统架构
 detect_arch() {
@@ -787,13 +1018,15 @@ generate_config() {
     "servers": [
       {
         "tag": "google-dns",
-        "address": "udp://8.8.8.8"
+        "type": "udp",
+        "server": "8.8.8.8"
       },
       {
-        "tag": "cloudflare-dns",
-        "address": "udp://1.1.1.1"
+        "tag": "local",
+        "type": "local"
       }
-    ]
+    ],
+    "final": "google-dns"
   },
   "inbounds": [
     {
@@ -860,8 +1093,7 @@ generate_config() {
   "outbounds": [
     {
       "type": "direct",
-      "tag": "direct",
-      "domain_strategy": "prefer_ipv4"
+      "tag": "direct"
     },
     {
       "type": "block",
@@ -869,189 +1101,9 @@ generate_config() {
     }
   ],
   "route": {
-    "rules": [
-      {
-        "domain": [
-          "openai.com",
-          "chat.openai.com",
-          "api.openai.com",
-          "platform.openai.com",
-          "auth0.openai.com",
-          "cdn.openai.com",
-          "challenges.cloudflare.com",
-          "chatgpt.com",
-          "oaistatic.com",
-          "oaiusercontent.com",
-          "chatgpt.livekit.cloud"
-        ],
-        "domain_suffix": [
-          ".openai.com",
-          ".chatgpt.com",
-          ".oaistatic.com",
-          ".oaiusercontent.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "netflix.com",
-          "netflix.net",
-          "nflxext.com",
-          "nflximg.com",
-          "nflximg.net",
-          "nflxso.net",
-          "nflxvideo.net"
-        ],
-        "domain_suffix": [
-          ".netflix.com",
-          ".netflix.net",
-          ".nflxext.com",
-          ".nflximg.com",
-          ".nflximg.net",
-          ".nflxso.net",
-          ".nflxvideo.net",
-          ".netflixdnstest0.com",
-          ".netflixdnstest1.com",
-          ".netflixdnstest2.com",
-          ".netflixdnstest3.com",
-          ".netflixdnstest4.com",
-          ".netflixdnstest5.com",
-          ".netflixdnstest6.com",
-          ".netflixdnstest7.com",
-          ".netflixdnstest8.com",
-          ".netflixdnstest9.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "youtube.com",
-          "googlevideo.com",
-          "ytimg.com",
-          "googleapis.com",
-          "youtu.be",
-          "youtube-nocookie.com",
-          "ggpht.com"
-        ],
-        "domain_suffix": [
-          ".youtube.com",
-          ".googlevideo.com",
-          ".ytimg.com",
-          ".youtu.be",
-          ".youtube-nocookie.com",
-          ".ggpht.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "disney.com",
-          "disneyplus.com",
-          "disney-plus.net",
-          "dssott.com",
-          "bamgrid.com",
-          "bam.nr-data.net",
-          "disneystreaming.com",
-          "cdn.registerdisney.go.com"
-        ],
-        "domain_suffix": [
-          ".disney.com",
-          ".disneyplus.com",
-          ".disney-plus.net",
-          ".dssott.com",
-          ".bamgrid.com",
-          ".disneystreaming.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "hbo.com",
-          "hbogo.com",
-          "hbomax.com",
-          "hbonow.com",
-          "maxgo.com"
-        ],
-        "domain_suffix": [
-          ".hbo.com",
-          ".hbogo.com",
-          ".hbomax.com",
-          ".hbonow.com",
-          ".maxgo.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain_suffix": [
-          ".spotify.com",
-          ".spotifycdn.com",
-          ".scdn.co"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain_suffix": [
-          ".tiktok.com",
-          ".tiktokcdn.com",
-          ".tiktokv.com",
-          ".tiktok-us.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "claude.ai",
-          "anthropic.com"
-        ],
-        "domain_suffix": [
-          ".claude.ai",
-          ".anthropic.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "domain": [
-          "bard.google.com",
-          "gemini.google.com",
-          "makersuite.google.com"
-        ],
-        "domain_suffix": [
-          ".ai.google",
-          ".bard.google.com",
-          ".gemini.google.com"
-        ],
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      },
-      {
-        "ip_cidr": [
-          "224.0.0.0/3",
-          "169.254.0.0/16",
-          "192.168.0.0/16",
-          "10.0.0.0/8",
-          "172.16.0.0/12",
-          "127.0.0.1/32",
-          "::1/128",
-          "fc00::/7",
-          "fe80::/10"
-        ],
-        "outbound": "direct"
-      },
-      {
-        "inbound": ["vmess-ws-in", "tuic-in", "hysteria-in"],
-        "outbound": "direct"
-      }
-    ],
     "final": "direct",
-    "auto_detect_interface": true
+    "auto_detect_interface": true,
+    "default_domain_resolver": "google-dns"
   }
 }
 EOF
@@ -1432,19 +1484,81 @@ generate_links() {
 
     yellow "注意：客户端的跳过证书验证需设置为true\n"
 
+    # 生成VMESS链接（标准格式）
+    local vmess_json=$(cat <<JSON
+{
+  "v": "2",
+  "ps": "$NAME-vmess",
+  "add": "$available_ip",
+  "port": "$VMESS_PORT",
+  "id": "$UUID",
+  "aid": "0",
+  "scy": "auto",
+  "net": "ws",
+  "type": "none",
+  "host": "",
+  "path": "/vmess",
+  "tls": "",
+  "sni": "",
+  "alpn": ""
+}
+JSON
+)
+
+    # 同时生成argo域名版本的vmess链接（如果可用）
+    local argo_vmess_json=""
+    if [[ "$argodomain" != "temp-domain-pending" && "$argodomain" != "config-domain-missing" ]]; then
+        argo_vmess_json=$(cat <<JSON
+{
+  "v": "2",
+  "ps": "$NAME-vmess-argo",
+  "add": "$argodomain",
+  "port": "443",
+  "id": "$UUID",
+  "aid": "0",
+  "scy": "auto",
+  "net": "ws",
+  "type": "none",
+  "host": "$argodomain",
+  "path": "/vmess",
+  "tls": "tls",
+  "sni": "$argodomain",
+  "alpn": ""
+}
+JSON
+)
+    fi
+
     # 生成节点信息
-    cat > "${FILE_PATH}/list.txt" <<EOF
-vmess://$(echo "{ \"v\": \"2\", \"ps\": \"$NAME-vmess\", \"add\": \"$available_ip\", \"port\": \"$VMESS_PORT\", \"id\": \"$UUID\", \"aid\": \"0\", \"scy\": \"none\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"\", \"path\": \"/vmess\", \"tls\": \"\", \"sni\": \"\", \"alpn\": \"\", \"fp\": \"\"}" | base64 -w0)
+    {
+        echo "vmess://$(echo "$vmess_json" | base64 -w0)"
 
-hysteria2://$UUID@$available_ip:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$NAME-hy2
+        # 如果有argo域名，也添加argo版本的vmess链接
+        if [[ -n "$argo_vmess_json" ]]; then
+            echo ""
+            echo "vmess://$(echo "$argo_vmess_json" | base64 -w0)"
+        fi
 
-tuic://$UUID:$UUID@$available_ip:$TUIC_PORT?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=www.bing.com&allow_insecure=1&insecure=1#$NAME-tuic
-EOF
+        echo ""
+        echo "hysteria2://$UUID@$available_ip:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$NAME-hy2"
+        echo ""
+        echo "tuic://$UUID:$UUID@$available_ip:$TUIC_PORT?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=www.bing.com&allow_insecure=1&insecure=1#$NAME-tuic"
+    } > "${FILE_PATH}/list.txt"
 
     echo -e "\n${green}节点配置信息:${re}"
     echo "=================================================="
     cat "${FILE_PATH}/list.txt"
     echo "=================================================="
+
+    # 简单检查文件是否生成成功
+    echo -e "\n${blue}检查订阅文件生成状态...${re}"
+
+    if [[ -f "${FILE_PATH}/list.txt" ]] && [[ -s "${FILE_PATH}/list.txt" ]]; then
+        local vmess_count=$(grep -c "^vmess://" "${FILE_PATH}/list.txt" 2>/dev/null || echo "0")
+        green "✅ 订阅文件生成成功！(包含 $vmess_count 个vmess链接)"
+    else
+        red "❌ 订阅文件生成失败"
+    fi
 
     # 生成base64订阅文件（仅供本地使用）
     base64 -w0 "${FILE_PATH}/list.txt" > "${FILE_PATH}/v2.log"
@@ -1844,9 +1958,10 @@ EOF
 # 创建快捷命令
 create_quick_command() {
     local COMMAND_NAME="singbox"
-    local SCRIPT_PATH="$HOME/bin/$COMMAND_NAME"
+    local SCRIPT_PATH="/usr/local/bin/$COMMAND_NAME"
 
-    mkdir -p "$HOME/bin"
+    # 确保目录存在
+    mkdir -p "/usr/local/bin"
 
     cat > "$SCRIPT_PATH" <<EOF
 #!/bin/bash
@@ -1901,6 +2016,9 @@ case "\$1" in
         ;;
     clean|cleanup)
         cleanup_ports
+        ;;
+    diag|diagnose|check)
+        diagnose_connection
         ;;
     auto|autostart)
         case "$2" in
@@ -1994,10 +2112,12 @@ EOF
 
     chmod +x "$SCRIPT_PATH"
 
-    # 添加到PATH
-    if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-        echo "export PATH=\"\$HOME/bin:\$PATH\"" >> "$HOME/.bashrc"
-        export PATH="$HOME/bin:$PATH"
+    # /usr/local/bin 通常已在PATH中，无需额外添加
+    # 验证命令可执行
+    if command -v singbox &>/dev/null; then
+        green "✅ singbox 命令已可用"
+    else
+        yellow "⚠️ 如果命令不可用，请运行: export PATH=\"/usr/local/bin:\$PATH\""
     fi
 
     green "快捷命令 'singbox' 创建成功"
@@ -2415,6 +2535,9 @@ install_singbox() {
 
     # 安全初始化
     secure_init
+
+    # 自动启用BBR优化
+    auto_enable_bbr
 
     # 检查端口
     check_port

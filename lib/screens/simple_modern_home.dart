@@ -72,7 +72,8 @@ class SimpleModernHome extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(
                                           Icons.arrow_upward,
@@ -97,7 +98,12 @@ class SimpleModernHome extends StatelessWidget {
                                       style: const TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: Color.fromARGB(255, 199, 230, 22),
+                                        color: Color.fromARGB(
+                                          255,
+                                          199,
+                                          230,
+                                          22,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -115,7 +121,9 @@ class SimpleModernHome extends StatelessWidget {
                               ),
                               // 连接按钮（中间）
                               Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 child: AnimatedConnectionButton(
                                   isConnected: provider.isConnected,
                                   isConnecting: provider.isConnecting,
@@ -137,7 +145,9 @@ class SimpleModernHome extends StatelessWidget {
                                           provider.configs.first,
                                         );
                                       } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
                                           const SnackBar(
                                             content: Text('请先添加服务器配置'),
                                           ),
@@ -153,7 +163,8 @@ class SimpleModernHome extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(
                                           Icons.arrow_downward,
@@ -178,7 +189,12 @@ class SimpleModernHome extends StatelessWidget {
                                       style: const TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: Color.fromARGB(255, 199, 230, 22),
+                                        color: Color.fromARGB(
+                                          255,
+                                          199,
+                                          230,
+                                          22,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -203,7 +219,10 @@ class SimpleModernHome extends StatelessWidget {
                           enabled: true,
                           scale: 1.02,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               color: AppTheme.bgCard,
                               borderRadius: BorderRadius.circular(16),
@@ -230,7 +249,8 @@ class SimpleModernHome extends StatelessWidget {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Text(
@@ -245,7 +265,9 @@ class SimpleModernHome extends StatelessWidget {
                                       ),
                                       if (provider.currentConfig != null)
                                         Text(
-                                          _getConfigTypeDisplay(provider.currentConfig!),
+                                          _getConfigTypeDisplay(
+                                            provider.currentConfig!,
+                                          ),
                                           style: TextStyle(
                                             fontSize: 10,
                                             color: AppTheme.textSecondary,
@@ -275,11 +297,16 @@ class SimpleModernHome extends StatelessWidget {
                           child: GestureDetector(
                             onTap: () => _showConnectionStatusPage(context),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.bgCard,
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
+                                border: Border.all(
+                                  color: AppTheme.borderColor.withAlpha(80),
+                                ),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withOpacity(0.06),
@@ -292,16 +319,14 @@ class SimpleModernHome extends StatelessWidget {
                               child: Row(
                                 children: [
                                   // 左侧空白占位
-                                  Expanded(
-                                    child: Container(),
-                                  ),
+                                  Expanded(child: Container()),
                                   // 中间时长显示
                                   Text(
                                     ImprovedTrafficStatsService.formatDuration(
                                       provider.connectionDuration,
                                     ),
                                     style: const TextStyle(
-                                      fontSize: 16,
+                                      fontSize: 20,
                                       fontWeight: FontWeight.bold,
                                       color: AppTheme.textPrimary,
                                     ),
@@ -402,7 +427,10 @@ class SimpleModernHome extends StatelessWidget {
                                   onTap: () => _showRoutingRulesPage(context),
                                   child: Container(
                                     height: 60,
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: AppTheme.bgCard,
                                       borderRadius: BorderRadius.circular(14),
