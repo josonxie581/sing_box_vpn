@@ -342,7 +342,7 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
   );
   // 统一构建标签（需包含 gVisor 与 Wintun 支持以满足双向回退）
   const buildTags =
-      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_gvisor,with_tailscale';
+      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_gvisor';
   stdout.writeln('使用构建标签: ' + buildTags);
   result = await Process.run(
     goExe,
