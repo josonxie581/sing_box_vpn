@@ -8,7 +8,8 @@ import 'geosite_manager.dart';
 /// 路由配置服务
 /// 管理 geosite 和 geoIP 规则的配置
 class RoutingConfigService {
-  static final RoutingConfigService _instance = RoutingConfigService._internal();
+  static final RoutingConfigService _instance =
+      RoutingConfigService._internal();
   factory RoutingConfigService() => _instance;
   RoutingConfigService._internal();
 
@@ -200,7 +201,12 @@ class RoutingConfigService {
 
   /// 获取已配置的规则集
   List<String> getConfiguredRulesets() {
-    return _rules.map((rule) => rule.ruleset).toSet().toList();
+    // 仅返回启用的规则对应的规则集，避免在连接时加载未启用的规则集
+    return _rules
+        .where((rule) => rule.enabled)
+        .map((rule) => rule.ruleset)
+        .toSet()
+        .toList();
   }
 
   /// 获取可用的规则集（已下载的）
@@ -232,7 +238,11 @@ class RoutingConfigService {
         'rules': [
           {'ruleset': 'geosite-twitter', 'outbound': 'proxy', 'priority': 580},
           {'ruleset': 'geosite-facebook', 'outbound': 'proxy', 'priority': 570},
-          {'ruleset': 'geosite-instagram', 'outbound': 'proxy', 'priority': 560},
+          {
+            'ruleset': 'geosite-instagram',
+            'outbound': 'proxy',
+            'priority': 560,
+          },
           {'ruleset': 'geosite-telegram', 'outbound': 'proxy', 'priority': 550},
         ],
       },
@@ -256,7 +266,9 @@ class RoutingConfigService {
   void debugPrintRules() {
     print('[RoutingConfigService] 当前规则列表:');
     for (final rule in _rules) {
-      print('  - ${rule.name}: ${rule.ruleset} (${rule.enabled ? '启用' : '禁用'})');
+      print(
+        '  - ${rule.name}: ${rule.ruleset} (${rule.enabled ? '启用' : '禁用'})',
+      );
     }
   }
 }

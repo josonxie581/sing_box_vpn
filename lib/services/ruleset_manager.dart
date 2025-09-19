@@ -17,7 +17,20 @@ class RulesetManager {
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
 
       // 私有地址直连（硬编码，无需规则集文件）
-      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
+      {
+        "ip_cidr": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "224.0.0.0/4",
+          "::1/128",
+          "fc00::/7",
+          "fe80::/10",
+        ],
+        "outbound": "direct",
+      },
     ];
 
     // 插入自定义规则（优先级高于路由配置规则）
@@ -41,10 +54,22 @@ class RulesetManager {
       print('[ERROR] 加载路由配置规则失败: $e');
       // 降级到默认规则
       rules.addAll([
-        {"rule_set": ["geoip-private"], "outbound": "direct"},
-        {"rule_set": ["geosite-cn"], "outbound": "direct"},
-        {"rule_set": ["geoip-cn"], "outbound": "direct"},
-        {"rule_set": ["geosite-ads"], "outbound": "block"},
+        {
+          "rule_set": ["geoip-private"],
+          "outbound": "direct",
+        },
+        {
+          "rule_set": ["geosite-cn"],
+          "outbound": "direct",
+        },
+        {
+          "rule_set": ["geoip-cn"],
+          "outbound": "direct",
+        },
+        {
+          "rule_set": ["geosite-ads"],
+          "outbound": "block",
+        },
       ]);
     }
 
@@ -59,7 +84,20 @@ class RulesetManager {
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
 
       // 私有地址直连（硬编码，无需规则集文件）
-      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
+      {
+        "ip_cidr": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "224.0.0.0/4",
+          "::1/128",
+          "fc00::/7",
+          "fe80::/10",
+        ],
+        "outbound": "direct",
+      },
     ];
 
     // 在全局模式下，不应用自定义规则，所有流量都走代理
@@ -83,7 +121,20 @@ class RulesetManager {
       {"network": "tcp", "port": 53, "outbound": "dns-out"},
 
       // 私有地址直连（硬编码，无需规则集文件）
-      {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10"], "outbound": "direct"},
+      {
+        "ip_cidr": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "224.0.0.0/4",
+          "::1/128",
+          "fc00::/7",
+          "fe80::/10",
+        ],
+        "outbound": "direct",
+      },
     ];
 
     // 仅插入自定义规则（不包含默认地理规则）
@@ -141,9 +192,7 @@ class RulesetManager {
         };
       case ProxyMode.custom:
         // 自定义模式包含基础规则集 + 用户配置的规则集
-        final baseRulesets = [
-          "geosite-ads.srs",
-        ];
+        final baseRulesets = ["geosite-ads.srs"];
 
         // 获取用户配置的规则集
         final userRulesets = await _getUserConfiguredRulesets();
@@ -161,7 +210,9 @@ class RulesetManager {
   }
 
   /// 获取有效的规则集配置（仅包含存在的文件）
-  static Future<List<Map<String, dynamic>>> _getValidRulesets(List<String> filenames) async {
+  static Future<List<Map<String, dynamic>>> _getValidRulesets(
+    List<String> filenames,
+  ) async {
     final validRulesets = <Map<String, dynamic>>[];
 
     for (final filename in filenames) {
@@ -211,22 +262,20 @@ class RulesetManager {
   /// 获取规则集文件路径
   static Future<String> _getRulesetPath(String filename) async {
     try {
-      // 首先尝试从 GeositeManager 获取规则集路径
+      // 直接根据规则名计算目标路径，按需检查，避免全量扫描
       final geositeManager = GeositeManager();
       final rulesetName = filename.endsWith('.srs')
           ? filename.substring(0, filename.length - 4)
           : filename;
-
-      // 检查 GeositeManager 中是否有这个规则集
-      final downloadedRulesets = await geositeManager.getDownloadedRulesets();
-      if (downloadedRulesets.contains(rulesetName)) {
-        return await geositeManager.getRulesetPath(rulesetName);
+      final directPath = await geositeManager.getRulesetPath(rulesetName);
+      if (File(directPath).existsSync()) {
+        return directPath;
       }
     } catch (e) {
-      print('[RulesetManager] 从 GeositeManager 获取路径失败: $e');
+      print('[RulesetManager] 计算规则集路径失败: $e');
     }
 
-    // 降级到旧版本路径查找
+    // 回退到旧版本路径查找
     return _getFallbackPath(filename);
   }
 
@@ -238,9 +287,11 @@ class RulesetManager {
       String rulesetPath;
 
       if (filename.startsWith("geoip")) {
-        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
+        rulesetPath =
+            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geoip\\$filename";
       } else {
-        rulesetPath = "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
+        rulesetPath =
+            "$exeDir\\data\\flutter_assets\\assets\\rulesets\\geo\\geosite\\$filename";
       }
 
       // 如果生产环境路径不存在，尝试开发环境路径
@@ -364,19 +415,22 @@ class RulesetManager {
       "users": [],
     });
 
+    // 只调用一次 getRouteConfig，避免重复日志与重复扫描
+    final routeConfig = await getRouteConfig(mode);
+
     final config = <String, dynamic>{
       "log": {"level": "error", "timestamp": true},
       "dns": getDnsConfig(mode, useTun: useTun),
       "inbounds": inbounds,
       "outbounds": getOutbounds({"tag": "proxy", ...proxyConfig}),
       "route": {
-        ...await getRouteConfig(mode),
+        ...routeConfig,
         "rules": [
           {
             "inbound": ["latency-test-in"],
             "outbound": "direct",
           },
-          ...?(await getRouteConfig(mode))["rules"] as List?,
+          ...?(routeConfig)["rules"] as List?,
         ],
       },
     };
