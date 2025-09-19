@@ -207,8 +207,7 @@ class ConnectionManager {
           await _proxyManager.disableProxy();
         }
 
-        _currentConfig = null;
-        _connectionStartTime = null;
+        // 注意：_currentConfig 的清空现在在 _updateStatus 中统一处理
         _updateStatus(ConnectionStatus.disconnected, '未连接');
         return true;
       } else {
@@ -345,6 +344,14 @@ class ConnectionManager {
   void _updateStatus(ConnectionStatus status, String message) {
     _status = status;
     _statusMessage = message;
+
+    // 修复：当状态变为断开连接时，清空当前配置
+    // 这样可以确保自动断开时也能正确清理状态
+    if (status == ConnectionStatus.disconnected) {
+      _currentConfig = null;
+      _connectionStartTime = null;
+      print("[DEBUG] _updateStatus: 状态变为断开，清空currentConfig");
+    }
   }
 
   void _addLog(String log) {

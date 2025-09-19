@@ -93,8 +93,22 @@ class VPNProviderV2 extends ChangeNotifier {
   // 配置相关
   List<VPNConfig> get configs => _configManager.configs;
   // 当前配置：已连接时来自 ConnectionManager，未连接时回退到 ConfigManager
-  VPNConfig? get currentConfig =>
-      _connectionManager.currentConfig ?? _configManager.currentConfig;
+  VPNConfig? get currentConfig {
+    final connectionConfig = _connectionManager.currentConfig;
+    final configManagerConfig = _configManager.currentConfig;
+    final result = connectionConfig ?? configManagerConfig;
+
+    // 添加调试信息，帮助跟踪配置切换
+    // if (connectionConfig != null) {
+    //   print("[DEBUG] currentConfig: 使用ConnectionManager配置: ${connectionConfig.name}");
+    // } else if (configManagerConfig != null) {
+    //   print("[DEBUG] currentConfig: 回退到ConfigManager配置: ${configManagerConfig.name}");
+    // } else {
+    //   print("[DEBUG] currentConfig: 无配置可用");
+    // }
+
+    return result;
+  }
 
   // 连接状态
   bool get isConnected => _connectionManager.isConnected;
@@ -195,8 +209,10 @@ class VPNProviderV2 extends ChangeNotifier {
 
   // 设置当前配置（不连接）
   Future<void> setCurrentConfig(VPNConfig config) async {
+    print("[DEBUG] setCurrentConfig: 设置新配置 ${config.name}");
     _configManager.setCurrentConfig(config);
     await _savePreference('current_config_id', config.id);
+    print("[DEBUG] setCurrentConfig: 配置已保存到ConfigManager和持久化存储");
     notifyListeners();
 
     // 未连接状态下，切换配置时自动测试新配置的延时
@@ -221,7 +237,10 @@ class VPNProviderV2 extends ChangeNotifier {
   // ============== 连接管理 ==============
 
   Future<bool> connect(VPNConfig config) async {
-    print("[DEBUG] 尝试连接VPN: ${config.name}");
+    print("[DEBUG] VPNProviderV2.connect: 尝试连接VPN: ${config.name}");
+    print(
+      "[DEBUG] connect: 当前currentConfig = ${currentConfig?.name ?? 'null'}",
+    );
     final success = await _connectionManager.connect(config);
 
     if (success) {
