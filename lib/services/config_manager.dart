@@ -17,11 +17,15 @@ class ConfigManager {
   // 订阅管理
   final Map<String, SubscriptionInfo> _subscriptionInfos = {};
   final Map<String, DateTime> _subscriptionLastUpdated = {};
+  final Map<String, String> _subscriptionRawContent = {}; // 存储原始订阅内容
 
   List<VPNConfig> get configs => _configs;
   VPNConfig? get currentConfig => _currentConfig;
   Map<String, SubscriptionInfo> get subscriptionInfos => _subscriptionInfos;
   Map<String, DateTime> get subscriptionLastUpdated => _subscriptionLastUpdated;
+
+  /// 获取订阅的原始内容
+  String? getSubscriptionRawContent(String url) => _subscriptionRawContent[url];
 
   /// 加载配置
   Future<void> loadConfigs() async {
@@ -166,6 +170,12 @@ class ConfigManager {
       }
       _subscriptionLastUpdated[url] = DateTime.now();
 
+      // 保存原始订阅内容
+      if (result.rawContent != null) {
+        _subscriptionRawContent[url] = result.rawContent!;
+        print('[配置管理] 保存原始订阅内容，长度: ${result.rawContent!.length}');
+      }
+
       // 添加配置到列表
       int imported = 0;
       for (final config in result.configs) {
@@ -224,6 +234,11 @@ class ConfigManager {
         _subscriptionInfos[url] = result.subscriptionResult.subscriptionInfo!;
       }
       _subscriptionLastUpdated[url] = DateTime.now();
+
+      // 更新原始订阅内容
+      if (result.subscriptionResult.rawContent != null) {
+        _subscriptionRawContent[url] = result.subscriptionResult.rawContent!;
+      }
 
       // 移除旧配置
       for (final removedConfig in result.removedConfigs) {
@@ -288,6 +303,7 @@ class ConfigManager {
       // 删除订阅信息
       _subscriptionInfos.remove(url);
       _subscriptionLastUpdated.remove(url);
+      _subscriptionRawContent.remove(url);
 
       if (removedCount > 0) {
         await saveConfigs();
@@ -334,6 +350,9 @@ class ConfigManager {
       (url, time) => MapEntry(url, time.millisecondsSinceEpoch),
     );
     await prefs.setString('subscription_last_updated', json.encode(lastUpdatedJson));
+
+    // 保存原始内容
+    await prefs.setString('subscription_raw_content', json.encode(_subscriptionRawContent));
   }
 
   /// 加载订阅数据
@@ -365,6 +384,20 @@ class ConfigManager {
         });
       } catch (e) {
         print('[配置管理] 加载订阅更新时间失败: $e');
+      }
+    }
+
+    // 加载原始内容
+    final rawContentJson = prefs.getString('subscription_raw_content');
+    if (rawContentJson != null) {
+      try {
+        final Map<String, dynamic> decoded = json.decode(rawContentJson);
+        _subscriptionRawContent.clear();
+        decoded.forEach((url, content) {
+          _subscriptionRawContent[url] = content.toString();
+        });
+      } catch (e) {
+        print('[配置管理] 加载订阅原始内容失败: $e');
       }
     }
   }

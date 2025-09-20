@@ -92,6 +92,7 @@ class VPNProviderV2 extends ChangeNotifier {
 
   // 配置相关
   List<VPNConfig> get configs => _configManager.configs;
+  ConfigManager get configManager => _configManager;
   // 当前配置：已连接时来自 ConnectionManager，未连接时回退到 ConfigManager
   VPNConfig? get currentConfig {
     final connectionConfig = _connectionManager.currentConfig;

@@ -85,6 +85,7 @@ class RemoteSubscriptionService {
         configs: configs,
         subscriptionInfo: bodySubscriptionInfo,
         originalUrl: url,
+        rawContent: response.body,
       );
 
     } on TimeoutException {
@@ -771,11 +772,13 @@ class SubscriptionResult {
   final List<VPNConfig> configs;
   final SubscriptionInfo? subscriptionInfo;
   final String originalUrl;
+  final String? rawContent; // 添加原始内容字段
 
   SubscriptionResult({
     required this.configs,
     this.subscriptionInfo,
     required this.originalUrl,
+    this.rawContent,
   });
 }
 

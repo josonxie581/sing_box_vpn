@@ -27,6 +27,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   bool _isSortedByPing = false;
   bool _isAscending = true;
 
+  // 节点收缩状态 - 按订阅URL管理
+  final Map<String, bool> _subscriptionCollapsedStates = {};
+  bool _isManualNodesCollapsed = true; // 默认收缩
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -204,36 +208,225 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
               _buildAutoSelectSettings(provider),
               // 配置列表
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: provider.configs.length,
-                  itemBuilder: (context, index) {
-                    // 获取排序后的配置列表
-                    final sortedConfigs = _getSortedConfigs(provider);
-                    final config = sortedConfigs[index];
-                    // 找到原始索引
-                    final originalIndex = provider.configs.indexOf(config);
-                    final isConnected =
-                        provider.currentConfig == config &&
-                        provider.isConnected;
-                    final isCurrent = provider.currentConfig == config;
-
-                    return _buildConfigCard(
-                      context,
-                      config,
-                      originalIndex, // 使用原始索引进行编辑和删除
-                      isConnected,
-                      isCurrent,
-                      provider,
-                    );
-                  },
-                ),
+                child: _buildCategorizedConfigList(provider),
               ),
             ],
           );
         },
       ),
     );
+  }
+
+  /// 构建分类配置列表
+  Widget _buildCategorizedConfigList(VPNProviderV2 provider) {
+    // 按订阅URL分组机场订阅节点，分离手动添加节点
+    final subscriptionGroups = <String, List<VPNConfig>>{};
+    final manualConfigs = <VPNConfig>[];
+
+    for (final config in provider.configs) {
+      if (config.isFromSubscription && config.subscriptionUrl != null) {
+        final url = config.subscriptionUrl!;
+        if (!subscriptionGroups.containsKey(url)) {
+          subscriptionGroups[url] = [];
+        }
+        subscriptionGroups[url]!.add(config);
+      } else {
+        manualConfigs.add(config);
+      }
+    }
+
+    // 对手动添加节点进行排序
+    final sortedManualConfigs = _applySorting(manualConfigs, provider);
+
+    return CustomScrollView(
+      slivers: [
+        // 机场订阅节点分组（按订阅URL分组）
+        ...subscriptionGroups.entries.map((entry) {
+          final subscriptionUrl = entry.key;
+          final configs = entry.value;
+          final sortedConfigs = _applySorting(configs, provider);
+
+          // 获取机场名称
+          final subscriptionName = _getSubscriptionDisplayName(subscriptionUrl, provider);
+
+          // 获取收缩状态（默认为收缩）
+          final isCollapsed = _subscriptionCollapsedStates[subscriptionUrl] ?? true;
+
+          return [
+            SliverToBoxAdapter(
+              child: _buildCategoryHeader(
+                title: subscriptionName,
+                count: configs.length,
+                isCollapsed: isCollapsed,
+                onToggle: () {
+                  setState(() {
+                    _subscriptionCollapsedStates[subscriptionUrl] = !isCollapsed;
+                  });
+                },
+              ),
+            ),
+            if (!isCollapsed)
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final config = sortedConfigs[index];
+                      final originalIndex = provider.configs.indexOf(config);
+                      final isConnected = provider.currentConfig == config && provider.isConnected;
+                      final isCurrent = provider.currentConfig == config;
+
+                      return _buildConfigCard(
+                        context,
+                        config,
+                        originalIndex,
+                        isConnected,
+                        isCurrent,
+                        provider,
+                      );
+                    },
+                    childCount: sortedConfigs.length,
+                  ),
+                ),
+              ),
+          ];
+        }).expand((list) => list),
+
+        // 手动添加节点分组（如果有的话）
+        if (manualConfigs.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: _buildCategoryHeader(
+              title: '手动添加节点',
+              count: manualConfigs.length,
+              isCollapsed: _isManualNodesCollapsed,
+              onToggle: () {
+                setState(() {
+                  _isManualNodesCollapsed = !_isManualNodesCollapsed;
+                });
+              },
+            ),
+          ),
+          if (!_isManualNodesCollapsed)
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final config = sortedManualConfigs[index];
+                    final originalIndex = provider.configs.indexOf(config);
+                    final isConnected = provider.currentConfig == config && provider.isConnected;
+                    final isCurrent = provider.currentConfig == config;
+
+                    return _buildConfigCard(
+                      context,
+                      config,
+                      originalIndex,
+                      isConnected,
+                      isCurrent,
+                      provider,
+                    );
+                  },
+                  childCount: sortedManualConfigs.length,
+                ),
+              ),
+            ),
+        ],
+
+        // 底部间距
+        const SliverToBoxAdapter(
+          child: SizedBox(height: 20),
+        ),
+      ],
+    );
+  }
+
+  /// 构建分类标题头
+  Widget _buildCategoryHeader({
+    required String title,
+    required int count,
+    required bool isCollapsed,
+    VoidCallback? onToggle,
+  }) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onToggle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.bgCard,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppTheme.primaryNeon.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                // 图标
+                Icon(
+                  title.contains('订阅') ? Icons.rss_feed : Icons.edit,
+                  color: AppTheme.primaryNeon,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                // 标题和数量
+                Expanded(
+                  child: Text(
+                    '$title ($count)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                // 收缩图标（仅机场订阅节点有）
+                if (onToggle != null)
+                  Icon(
+                    isCollapsed ? Icons.expand_more : Icons.expand_less,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 对配置列表应用排序
+  List<VPNConfig> _applySorting(List<VPNConfig> configs, VPNProviderV2 provider) {
+    if (!_isSortedByPing) {
+      return configs;
+    }
+
+    // 复制列表以避免修改原始列表
+    final sortedList = List<VPNConfig>.from(configs);
+
+    // 按延时排序
+    sortedList.sort((a, b) {
+      final pingA = provider.getConfigPing(a.id);
+      final pingB = provider.getConfigPing(b.id);
+
+      // 超时的配置放在最后
+      if (pingA == -1 && pingB == -1) return 0;
+      if (pingA == -1) return 1;
+      if (pingB == -1) return -1;
+
+      // 根据升序或降序排序
+      if (_isAscending) {
+        return pingA.compareTo(pingB);
+      } else {
+        return pingB.compareTo(pingA);
+      }
+    });
+
+    return sortedList;
   }
 
   /// 获取排序后的配置列表
@@ -757,6 +950,24 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         builder: (context) => const SubscriptionManagementPage(),
       ),
     );
+  }
+
+  /// 获取订阅显示名称
+  String _getSubscriptionDisplayName(String subscriptionUrl, VPNProviderV2 provider) {
+    // 直接使用域名显示
+    return _getSimpleAirportName(subscriptionUrl);
+  }
+
+
+
+  /// 从URL获取简单机场名称（域名）
+  String _getSimpleAirportName(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.host;
+    } catch (e) {
+      return url;
+    }
   }
 
   /// 从 YAML 文件导入配置
