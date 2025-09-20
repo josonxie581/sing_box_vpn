@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
+import 'dart:io';
 import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/qr_decoder.dart';
+import '../services/simple_qr_functions.dart';
+import '../services/smart_screenshot_service.dart';
+import '../services/official_screen_capture.dart';
 
 class AddConfigPage extends StatefulWidget {
   final VPNConfig? config;
@@ -61,6 +66,8 @@ class _AddConfigPageState extends State<AddConfigPage>
   bool _skipCertVerify = false;
   String _ss2022Method = '2022-blake3-aes-128-gcm';
 
+  // 拖放状态
+
   // Tabs: 手动配置 / 导入配置 / 订阅
   late TabController _tabController;
   final _subscribeUrlController = TextEditingController();
@@ -69,6 +76,10 @@ class _AddConfigPageState extends State<AddConfigPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
+    // 初始化截图检测服务
+    ScreenshotDetectorService.initialize();
+
     if (widget.config != null) {
       _initializeEditMode(widget.config!);
     }
@@ -222,6 +233,7 @@ class _AddConfigPageState extends State<AddConfigPage>
         break;
     }
   }
+
 
   @override
   void dispose() {
@@ -1270,44 +1282,43 @@ class _AddConfigPageState extends State<AddConfigPage>
           icon: Icons.rss_feed,
         ),
         const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () async {
+            final link = _subscribeUrlController.text.trim();
+            if (link.isEmpty) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('请输入有效链接')));
+              return;
+            }
+            final provider = context.read<VPNProviderV2>();
+            // 支持直接单条分享链接导入
+            final ok = await provider.importFromLink(link);
+            if (!ok) {
+              // 或按订阅内容解析（多条）
+              final count = await provider.importFromSubscription(link);
+              if (count <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('导入失败，请检查链接内容')),
+                );
+                return;
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('成功导入 $count 个配置')),
+                );
+              }
+            } else {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('导入成功')));
+            }
+          },
+          child: const Text('从链接导入'),
+        ),
+        const SizedBox(height: 12),
+        // 第一行按钮
         Row(
           children: [
-            Expanded(
-              child: FilledButton(
-                onPressed: () async {
-                  final link = _subscribeUrlController.text.trim();
-                  if (link.isEmpty) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('请输入有效链接')));
-                    return;
-                  }
-                  final provider = context.read<VPNProviderV2>();
-                  // 支持直接单条分享链接导入
-                  final ok = await provider.importFromLink(link);
-                  if (!ok) {
-                    // 或按订阅内容解析（多条）
-                    final count = await provider.importFromSubscription(link);
-                    if (count <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('导入失败，请检查链接内容')),
-                      );
-                      return;
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('成功导入 $count 个配置')),
-                      );
-                    }
-                  } else {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('导入成功')));
-                  }
-                },
-                child: const Text('从链接导入'),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () async {
@@ -1347,8 +1358,112 @@ class _AddConfigPageState extends State<AddConfigPage>
                     ).showSnackBar(const SnackBar(content: Text('导入成功')));
                   }
                 },
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text('从图片识别二维码导入'),
+                icon: const Icon(Icons.image),
+                label: const Text('选择图片文件'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNeon,
+                  side: BorderSide(
+                    color: AppTheme.primaryNeon.withOpacity(0.5),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    // 从剪贴板获取文本链接
+                    final textLink = await SimpleQRFunctions.getClipboardText();
+                    if (textLink != null && textLink.trim().isNotEmpty) {
+                      final provider = context.read<VPNProviderV2>();
+                      final ok = await provider.importFromLink(textLink.trim());
+                      if (!ok) {
+                        final count = await provider.importFromSubscription(textLink.trim());
+                        if (count <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('剪贴板链接无法导入')),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('成功导入 $count 个配置')),
+                          );
+                        }
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('从剪贴板文本导入成功')),
+                        );
+                      }
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('剪贴板中没有可用的文本链接')),
+                      );
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('剪贴板导入失败: $e')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.content_paste),
+                label: const Text('剪贴板文本'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNeon,
+                  side: BorderSide(
+                    color: AppTheme.primaryNeon.withOpacity(0.5),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    // 检查截图权限
+                    final hasAccess = await OfficialScreenCapture.isAccessAllowed();
+                    if (!hasAccess) {
+                      await OfficialScreenCapture.requestAccess();
+                    }
+
+                    // 使用screen_capturer进行区域截图
+                    final qrText = await OfficialScreenCapture.captureRegionAndScanQR();
+
+                    if (qrText == null || qrText.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('未识别到二维码')),
+                      );
+                      return;
+                    }
+
+                    final provider = context.read<VPNProviderV2>();
+                    // 优先尝试单条链接
+                    final ok = await provider.importFromLink(qrText.trim());
+                    if (!ok) {
+                      final count = await provider.importFromSubscription(qrText);
+                      if (count <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('二维码内容无法导入')),
+                        );
+                        return;
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('成功导入 $count 个配置')),
+                        );
+                      }
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('区域截图识别导入成功')),
+                      );
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('截图检测失败: $e')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.screenshot_monitor),
+                label: const Text('智能截屏'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppTheme.primaryNeon,
                   side: BorderSide(

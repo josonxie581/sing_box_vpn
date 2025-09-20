@@ -73,6 +73,10 @@ dependencies:
   image: ^4.2.0
   zxing2: ^0.2.4
 
+
+  # 截图支持
+  screen_capturer: ^0.2.3
+
   # FFI 支持
   ffi: ^2.1.0
   # Windows API 与注册表

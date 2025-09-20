@@ -17,6 +17,8 @@ import 'utils/privilege_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+
   await acrylic.Window.initialize();
   // 设置窗口效果为禁用
   await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
@@ -81,6 +83,7 @@ void main() async {
     await windowManager.setMaximumSize(const Size(450, 12000));
     await windowManager.setPreventClose(true); // 防止直接关闭
 
+
     // 设置窗口图标
     try {
       await windowManager.setIcon('assets/app_icon.ico');
@@ -96,6 +99,7 @@ void main() async {
     ),
   );
 }
+
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});

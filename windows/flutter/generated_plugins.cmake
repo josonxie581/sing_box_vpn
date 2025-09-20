@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   flutter_acrylic
+  screen_capturer_windows
   screen_retriever_windows
   system_tray
   window_manager
