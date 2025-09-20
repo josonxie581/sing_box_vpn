@@ -10,7 +10,7 @@ class AppTheme {
 
   // 背景色 - 深色调
   static const Color bgDark = Color(0xFF0A0E1A); // 深背景
-  static const Color bgCard = Color(0xFF141824); // 卡片背景
+  static const Color bgCard = Color.fromARGB(255, 32, 38, 57); // 卡片背景
   static const Color bgSurface = Color(0xFF1C2333); // 表面背景
   static const Color bgElevated = Color(0xFF252B3D); // 提升背景
 

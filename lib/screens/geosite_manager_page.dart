@@ -274,7 +274,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.bgCard,
         title: const Text(
-          '一键更新全部',
+          '更新全部',
           style: TextStyle(color: AppTheme.textPrimary),
         ),
         content: Column(
@@ -710,8 +710,8 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                   children: [
                     ElevatedButton.icon(
                       onPressed: _isLoading ? null : _downloadBasicRulesets,
-                      icon: const Icon(Icons.download_for_offline, size: 16),
-                      label: const Text('基础规则'),
+                      // icon: const Icon(Icons.download_for_offline, size: 12),
+                      label: const Text('基础下载'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryNeon,
                         foregroundColor: Colors.white,
@@ -720,7 +720,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                     ),
                     ElevatedButton.icon(
                       onPressed: _isLoading ? null : _downloadAllCommonRulesets,
-                      icon: const Icon(Icons.cloud_download, size: 16),
+                      // icon: const Icon(Icons.cloud_download, size: 12),
                       label: const Text('一键下载'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.successGreen,
@@ -730,7 +730,7 @@ class _GeositeManagerPageState extends State<GeositeManagerPage> {
                     ),
                     ElevatedButton.icon(
                       onPressed: _isLoading ? null : _forceUpdateAllRulesets,
-                      icon: const Icon(Icons.refresh, size: 16),
+                      // icon: const Icon(Icons.refresh, size: 12),
                       label: const Text('一键更新'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.warningOrange,

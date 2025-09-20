@@ -466,7 +466,9 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   Future<void> setAutoRefreshEnabled(bool enabled) async {
-    print('[DEBUG] 设置自动刷新: $enabled，当前状态 - 自动选择: $_autoSelectBestServer，已连接: $isConnected');
+    print(
+      '[DEBUG] 设置自动刷新: $enabled，当前状态 - 自动选择: $_autoSelectBestServer，已连接: $isConnected',
+    );
     _autoRefreshEnabled = enabled;
     await _savePreference('auto_refresh_enabled', enabled);
 
@@ -482,7 +484,9 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   Future<void> setPingIntervalMinutes(int minutes) async {
-    print('[DEBUG] 设置ping间隔: ${minutes}分钟，当前状态 - 自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，已连接: $isConnected');
+    print(
+      '[DEBUG] 设置ping间隔: ${minutes}分钟，当前状态 - 自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，已连接: $isConnected',
+    );
     _pingIntervalMinutes = minutes;
     await _savePreference('ping_interval_minutes', minutes);
 
@@ -517,12 +521,16 @@ class VPNProviderV2 extends ChangeNotifier {
       return;
     }
 
-    print('[DEBUG] 启动延时测试定时器，间隔: ${_pingIntervalMinutes}分钟，自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，连接状态: $isConnected');
+    print(
+      '[DEBUG] 启动延时测试定时器，间隔: ${_pingIntervalMinutes}分钟，自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，连接状态: $isConnected',
+    );
     // 设置定期测试定时器，在连接和未连接状态下都可以运行
     _pingTimer = Timer.periodic(Duration(minutes: _pingIntervalMinutes), (
       timer,
     ) {
-      print('[DEBUG] 定时器触发：开始测试所有配置延时，间隔: ${_pingIntervalMinutes}分钟，连接状态: $isConnected');
+      print(
+        '[DEBUG] 定时器触发：开始测试所有配置延时，间隔: ${_pingIntervalMinutes}分钟，连接状态: $isConnected',
+      );
       _pingAllConfigs();
     });
   }
@@ -607,12 +615,18 @@ class VPNProviderV2 extends ChangeNotifier {
       if (_selectedGroup != null) {
         if (_selectedGroup == 'manual') {
           // 手动添加的节点
-          configsToPing = configs.where((config) => config.subscriptionUrl == null).toList();
+          configsToPing = configs
+              .where((config) => config.subscriptionUrl == null)
+              .toList();
         } else {
           // 订阅节点
-          configsToPing = configs.where((config) => config.subscriptionUrl == _selectedGroup).toList();
+          configsToPing = configs
+              .where((config) => config.subscriptionUrl == _selectedGroup)
+              .toList();
         }
-        print('[VPN Provider] 只ping选中组 $_selectedGroup 的 ${configsToPing.length} 个节点');
+        print(
+          '[VPN Provider] 只ping选中组 $_selectedGroup 的 ${configsToPing.length} 个节点',
+        );
       } else {
         print('[VPN Provider] ping所有 ${configsToPing.length} 个节点');
       }
@@ -670,12 +684,18 @@ class VPNProviderV2 extends ChangeNotifier {
     if (_selectedGroup != null) {
       if (_selectedGroup == 'manual') {
         // 手动添加的节点
-        candidateConfigs = configs.where((config) => config.subscriptionUrl == null).toList();
+        candidateConfigs = configs
+            .where((config) => config.subscriptionUrl == null)
+            .toList();
       } else {
         // 订阅节点
-        candidateConfigs = configs.where((config) => config.subscriptionUrl == _selectedGroup).toList();
+        candidateConfigs = configs
+            .where((config) => config.subscriptionUrl == _selectedGroup)
+            .toList();
       }
-      print('[DEBUG] 只从选中组 $_selectedGroup 的 ${candidateConfigs.length} 个节点中选择最佳服务器');
+      print(
+        '[DEBUG] 只从选中组 $_selectedGroup 的 ${candidateConfigs.length} 个节点中选择最佳服务器',
+      );
     } else {
       print('[DEBUG] 从所有 ${candidateConfigs.length} 个节点中选择最佳服务器');
     }
@@ -1062,6 +1082,23 @@ class VPNProviderV2 extends ChangeNotifier {
     _autoSelectBestServer = prefs.getBool('auto_select_best_server') ?? false;
     _autoRefreshEnabled = prefs.getBool('auto_refresh_enabled') ?? true;
     _pingIntervalMinutes = prefs.getInt('ping_interval_minutes') ?? 10;
+
+    // 首次运行：默认开启 TUN 模式
+    // 规则：当且仅当从未运行过（无 first_run_done 标记）时，设置 use_tun = true
+    // 说明：TUN 在 Windows 下需要管理员权限和 wintun.dll，若缺失，连接时会提示/回退；这里仅设置默认偏好
+    final bool isFirstRun =
+        !(prefs.containsKey('first_run_done') &&
+            (prefs.getBool('first_run_done') ?? false));
+    if (isFirstRun) {
+      _connectionManager.setUseTun(true);
+      await prefs.setBool('use_tun', true);
+      await prefs.setBool('first_run_done', true);
+      // 默认保持 auto_system_proxy 为 false（互斥于 TUN）
+      if (prefs.getBool('auto_system_proxy') == null) {
+        await prefs.setBool('auto_system_proxy', false);
+      }
+      print('[INIT] 首次运行：已默认开启 TUN 模式');
+    }
 
     // 加载选中的组
     final selectedGroupId = prefs.getString('selected_group');

@@ -14,10 +14,10 @@ import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
 import 'utils/privilege_manager.dart';
+import 'utils/simple_single_instance.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
 
   await acrylic.Window.initialize();
   // 设置窗口效果为禁用
@@ -31,7 +31,7 @@ void main() async {
     SingBoxFFI.preloadLibrary();
   }
 
-  // 在应用首次启动时弹出UAC权限请求
+  // 在应用首次启动时弹出UAC权限请求（提权可能会重启进程，需在单实例前处理）
   if (Platform.isWindows) {
     try {
       final bool isElevated = PrivilegeManager.instance.isElevated();
@@ -63,6 +63,28 @@ void main() async {
     }
   }
 
+  // 提权逻辑完成后再进行单实例检查，避免重启新进程与旧实例竞争
+  bool isUniqueInstance = true;
+  try {
+    print('开始单实例检查...');
+    isUniqueInstance = await SimpleSingleInstance.isUniqueInstance().timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {
+        print('单实例检查超时，允许启动');
+        return true;
+      },
+    );
+    print('单实例检查结果: $isUniqueInstance');
+  } catch (e) {
+    print('单实例检查异常，允许启动: $e');
+    isUniqueInstance = true;
+  }
+
+  if (!isUniqueInstance) {
+    print('应用已在运行，退出当前实例');
+    exit(0);
+  }
+
   const windowOptions = WindowOptions(
     size: Size(450, 710),
     minimumSize: Size(450, 710),
@@ -83,7 +105,6 @@ void main() async {
     await windowManager.setMaximumSize(const Size(450, 12000));
     await windowManager.setPreventClose(true); // 防止直接关闭
 
-
     // 设置窗口图标
     try {
       await windowManager.setIcon('assets/app_icon.ico');
@@ -99,7 +120,6 @@ void main() async {
     ),
   );
 }
-
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -120,6 +140,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
   bool _isRestoringWindow = false;
   String _lastTrayTip = '';
   String _lastTitle = '';
+  bool _isExiting = false;
 
   @override
   void initState() {
@@ -137,7 +158,21 @@ class _MyAppState extends State<MyApp> with WindowListener {
   void dispose() {
     _taskbarTimer?.cancel();
     windowManager.removeListener(this);
+    _cleanupAndExit();
     super.dispose();
+  }
+
+  /// 清理资源并退出
+  Future<void> _cleanupAndExit() async {
+    if (_isExiting) return;
+    _isExiting = true;
+
+    try {
+      // 释放单实例锁
+      await SimpleSingleInstance.releaseInstance();
+    } catch (e) {
+      print('清理单实例锁失败: $e');
+    }
   }
 
   String _resolveTrayIconPath() {
@@ -202,6 +237,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
       MenuItemLabel(
         label: 'Exit',
         onClicked: (item) async {
+          await _cleanupAndExit();
           await windowManager.destroy();
         },
       ),
@@ -425,6 +461,8 @@ class _MyAppState extends State<MyApp> with WindowListener {
     // 拦截关闭事件，改为隐藏到托盘
     windowManager.hide();
   }
+
+  // onWindowDestroy 在当前 window_manager 版本可能不存在，清理已在 dispose 中进行
 
   @override
   void onWindowResize() {

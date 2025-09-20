@@ -399,7 +399,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
     Color color,
   ) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: AppTheme.bgDark,
         borderRadius: BorderRadius.circular(8),
@@ -409,7 +409,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
         children: [
           Container(
             width: 4,
-            height: 40,
+            height: 30,
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(2),
@@ -484,7 +484,10 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
               if (_customRules.isNotEmpty) ...[
                 const SizedBox(width: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryNeon.withAlpha(30),
                     borderRadius: BorderRadius.circular(10),
@@ -502,7 +505,11 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
               ],
               if (_customRules.isNotEmpty)
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 18),
+                  icon: const Icon(
+                    Icons.more_vert,
+                    color: AppTheme.textSecondary,
+                    size: 18,
+                  ),
                   color: AppTheme.bgCard,
                   onSelected: (value) {
                     switch (value) {
@@ -522,9 +529,16 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                       value: 'export',
                       child: Row(
                         children: [
-                          Icon(Icons.file_download, size: 16, color: AppTheme.textSecondary),
+                          Icon(
+                            Icons.file_download,
+                            size: 16,
+                            color: AppTheme.textSecondary,
+                          ),
                           SizedBox(width: 8),
-                          Text('导出规则', style: TextStyle(color: AppTheme.textPrimary)),
+                          Text(
+                            '导出规则',
+                            style: TextStyle(color: AppTheme.textPrimary),
+                          ),
                         ],
                       ),
                     ),
@@ -532,9 +546,16 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                       value: 'import',
                       child: Row(
                         children: [
-                          Icon(Icons.file_upload, size: 16, color: AppTheme.textSecondary),
+                          Icon(
+                            Icons.file_upload,
+                            size: 16,
+                            color: AppTheme.textSecondary,
+                          ),
                           SizedBox(width: 8),
-                          Text('导入规则', style: TextStyle(color: AppTheme.textPrimary)),
+                          Text(
+                            '导入规则',
+                            style: TextStyle(color: AppTheme.textPrimary),
+                          ),
                         ],
                       ),
                     ),
@@ -542,9 +563,16 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                       value: 'clear',
                       child: Row(
                         children: [
-                          Icon(Icons.clear_all, size: 16, color: AppTheme.errorRed),
+                          Icon(
+                            Icons.clear_all,
+                            size: 16,
+                            color: AppTheme.errorRed,
+                          ),
                           SizedBox(width: 8),
-                          Text('清空所有', style: TextStyle(color: AppTheme.errorRed)),
+                          Text(
+                            '清空所有',
+                            style: TextStyle(color: AppTheme.errorRed),
+                          ),
                         ],
                       ),
                     ),
@@ -565,11 +593,9 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
           const SizedBox(height: 16),
 
           // 规则统计信息
-          if (_customRules.isNotEmpty)
-            _buildRulesStatsCard(),
+          if (_customRules.isNotEmpty) _buildRulesStatsCard(),
 
-          if (_customRules.isNotEmpty)
-            const SizedBox(height: 16),
+          if (_customRules.isNotEmpty) const SizedBox(height: 16),
 
           if (_isLoading)
             _buildLoadingWidget()
@@ -643,7 +669,10 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
 
   Widget _buildCustomRuleItem(CustomRule rule) {
     final outboundType = OutboundType.fromValue(rule.outbound);
-    final outboundColor = Color(int.parse(outboundType.colorValue.substring(1, 7), radix: 16) + 0xFF000000);
+    final outboundColor = Color(
+      int.parse(outboundType.colorValue.substring(1, 7), radix: 16) +
+          0xFF000000,
+    );
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -658,10 +687,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
           Row(
             children: [
               // 规则类型图标
-              Text(
-                rule.type.icon,
-                style: const TextStyle(fontSize: 16),
-              ),
+              Text(rule.type.icon, style: const TextStyle(fontSize: 16)),
               const SizedBox(width: 8),
 
               // 规则名称和状态
@@ -685,7 +711,10 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                         const SizedBox(width: 6),
                         if (!rule.enabled)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: AppTheme.textSecondary.withAlpha(30),
                               borderRadius: BorderRadius.circular(4),
@@ -738,7 +767,11 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
 
               // 操作菜单
               PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary, size: 16),
+                icon: const Icon(
+                  Icons.more_vert,
+                  color: AppTheme.textSecondary,
+                  size: 16,
+                ),
                 color: AppTheme.bgCard,
                 onSelected: (value) {
                   switch (value) {
@@ -758,9 +791,16 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                     value: 'edit',
                     child: Row(
                       children: [
-                        Icon(Icons.edit, size: 16, color: AppTheme.textSecondary),
+                        Icon(
+                          Icons.edit,
+                          size: 16,
+                          color: AppTheme.textSecondary,
+                        ),
                         SizedBox(width: 8),
-                        Text('编辑', style: TextStyle(color: AppTheme.textPrimary)),
+                        Text(
+                          '编辑',
+                          style: TextStyle(color: AppTheme.textPrimary),
+                        ),
                       ],
                     ),
                   ),
@@ -769,7 +809,9 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
                     child: Row(
                       children: [
                         Icon(
-                          rule.enabled ? Icons.visibility_off : Icons.visibility,
+                          rule.enabled
+                              ? Icons.visibility_off
+                              : Icons.visibility,
                           size: 16,
                           color: AppTheme.textSecondary,
                         ),
@@ -957,10 +999,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              '删除',
-              style: TextStyle(color: AppTheme.errorRed),
-            ),
+            child: const Text('删除', style: TextStyle(color: AppTheme.errorRed)),
           ),
         ],
       ),
@@ -1080,10 +1119,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              '清空',
-              style: TextStyle(color: AppTheme.errorRed),
-            ),
+            child: const Text('清空', style: TextStyle(color: AppTheme.errorRed)),
           ),
         ],
       ),
@@ -1143,7 +1179,11 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
         children: [
           Row(
             children: [
-              const Icon(Icons.analytics, color: AppTheme.primaryNeon, size: 16),
+              const Icon(
+                Icons.analytics,
+                color: AppTheme.primaryNeon,
+                size: 16,
+              ),
               const SizedBox(width: 8),
               const Text(
                 '规则统计',
@@ -1192,10 +1232,7 @@ class _RoutingRulesPageState extends State<RoutingRulesPage> {
         ),
         Text(
           label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: AppTheme.textSecondary,
-          ),
+          style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
         ),
       ],
     );
