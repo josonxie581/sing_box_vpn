@@ -32,6 +32,9 @@ class VPNProviderV2 extends ChangeNotifier {
   bool _autoSelectBestServer = false;
   bool _autoRefreshEnabled = true; // 自动刷新开关，默认开启
 
+  // 选中的组（用于自动刷新和切换最佳服务器）
+  String? _selectedGroup; // 可以是订阅URL或"manual"表示手动添加组
+
   // 连接时长定时器
   Timer? _durationUpdateTimer;
 
@@ -70,6 +73,12 @@ class VPNProviderV2 extends ChangeNotifier {
 
     // 应用启动时自动测试所有配置的延时（未连接状态）
     _testAllConfigsOnStartup();
+
+    // 如果启用了自动刷新，启动定时器
+    if (_autoRefreshEnabled) {
+      print('[DEBUG] 初始化时启动自动刷新定时器');
+      _startPingTimer();
+    }
   }
 
   /// 初始化基础代理用于延时测试
@@ -151,6 +160,9 @@ class VPNProviderV2 extends ChangeNotifier {
   bool get autoSelectBestServer => _autoSelectBestServer;
   bool get autoRefreshEnabled => _autoRefreshEnabled;
   int get pingIntervalMinutes => _pingIntervalMinutes;
+
+  // 选中组相关
+  String? get selectedGroup => _selectedGroup;
 
   // 其他属性
   int get activeConnections => _connectionInfos.length; // 返回实际的连接数
@@ -443,7 +455,8 @@ class VPNProviderV2 extends ChangeNotifier {
     _autoSelectBestServer = enabled;
     await _savePreference('auto_select_best_server', enabled);
 
-    if (enabled && isConnected && _autoRefreshEnabled) {
+    // 根据自动刷新设置来决定是否启动定时器（不受连接状态影响）
+    if (_autoRefreshEnabled) {
       _startPingTimer();
     } else {
       _stopPingTimer();
@@ -453,12 +466,15 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   Future<void> setAutoRefreshEnabled(bool enabled) async {
+    print('[DEBUG] 设置自动刷新: $enabled，当前状态 - 自动选择: $_autoSelectBestServer，已连接: $isConnected');
     _autoRefreshEnabled = enabled;
     await _savePreference('auto_refresh_enabled', enabled);
 
-    if (enabled && _autoSelectBestServer && isConnected) {
+    if (enabled) {
+      print('[DEBUG] 启动自动刷新定时器（不论连接状态）');
       _startPingTimer();
-    } else if (!enabled) {
+    } else {
+      print('[DEBUG] 停止自动刷新定时器');
       _stopPingTimer();
     }
 
@@ -466,15 +482,28 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   Future<void> setPingIntervalMinutes(int minutes) async {
+    print('[DEBUG] 设置ping间隔: ${minutes}分钟，当前状态 - 自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，已连接: $isConnected');
     _pingIntervalMinutes = minutes;
     await _savePreference('ping_interval_minutes', minutes);
 
-    if (_autoSelectBestServer && isConnected) {
+    // 如果启用自动刷新则重启定时器以应用新的间隔时间
+    if (_autoRefreshEnabled) {
+      print('[DEBUG] 重启定时器以应用新的间隔时间: ${minutes}分钟');
       _stopPingTimer();
       _startPingTimer();
+    } else {
+      print('[DEBUG] 不重启定时器 - 自动刷新未启用');
     }
 
     notifyListeners();
+  }
+
+  /// 设置选中的组（用于自动刷新和切换最佳服务器）
+  Future<void> setSelectedGroup(String? groupId) async {
+    _selectedGroup = groupId;
+    await _savePreference('selected_group', groupId ?? '');
+    notifyListeners();
+    print('[VPN Provider] 设置选中组: $groupId');
   }
 
   // ============== Ping管理 ==============
@@ -482,24 +511,18 @@ class VPNProviderV2 extends ChangeNotifier {
   void _startPingTimer() {
     _stopPingTimer();
 
-    // 只有在启用自动选择最佳服务器且启用自动刷新时才启动定时器
-    if (!_autoSelectBestServer) {
-      print('[DEBUG] 自动选择最佳服务器功能未启用，不启动延时测试定时器');
-      return;
-    }
-
+    // 只要启用自动刷新就启动定时器（不论是否连接VPN）
     if (!_autoRefreshEnabled) {
       print('[DEBUG] 自动刷新功能未启用，不启动延时测试定时器');
       return;
     }
 
-    print('[DEBUG] 启动延时测试定时器，间隔: ${_pingIntervalMinutes}分钟');
-    // 连接后不立即测试，使用现有的延时数据
-    // 仅设置定期测试定时器用于自动选择最佳服务器
+    print('[DEBUG] 启动延时测试定时器，间隔: ${_pingIntervalMinutes}分钟，自动选择: $_autoSelectBestServer，自动刷新: $_autoRefreshEnabled，连接状态: $isConnected');
+    // 设置定期测试定时器，在连接和未连接状态下都可以运行
     _pingTimer = Timer.periodic(Duration(minutes: _pingIntervalMinutes), (
       timer,
     ) {
-      print('[DEBUG] 定时器触发：开始测试所有配置延时');
+      print('[DEBUG] 定时器触发：开始测试所有配置延时，间隔: ${_pingIntervalMinutes}分钟，连接状态: $isConnected');
       _pingAllConfigs();
     });
   }
@@ -579,9 +602,24 @@ class VPNProviderV2 extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // 获取要ping的配置列表（如果有选中组，只ping选中组的节点）
+      List<VPNConfig> configsToPing = configs;
+      if (_selectedGroup != null) {
+        if (_selectedGroup == 'manual') {
+          // 手动添加的节点
+          configsToPing = configs.where((config) => config.subscriptionUrl == null).toList();
+        } else {
+          // 订阅节点
+          configsToPing = configs.where((config) => config.subscriptionUrl == _selectedGroup).toList();
+        }
+        print('[VPN Provider] 只ping选中组 $_selectedGroup 的 ${configsToPing.length} 个节点');
+      } else {
+        print('[VPN Provider] ping所有 ${configsToPing.length} 个节点');
+      }
+
       // 实时更新：每个节点完成即刻刷新对应延时
       await PingService.pingConfigsWithProgress(
-        configs,
+        configsToPing,
         concurrency: null,
         isConnected: isConnected,
         currentConfig: currentConfig,
@@ -627,11 +665,26 @@ class VPNProviderV2 extends ChangeNotifier {
       return;
     }
 
+    // 获取候选配置列表（如果有选中组，只从选中组中选择）
+    List<VPNConfig> candidateConfigs = configs;
+    if (_selectedGroup != null) {
+      if (_selectedGroup == 'manual') {
+        // 手动添加的节点
+        candidateConfigs = configs.where((config) => config.subscriptionUrl == null).toList();
+      } else {
+        // 订阅节点
+        candidateConfigs = configs.where((config) => config.subscriptionUrl == _selectedGroup).toList();
+      }
+      print('[DEBUG] 只从选中组 $_selectedGroup 的 ${candidateConfigs.length} 个节点中选择最佳服务器');
+    } else {
+      print('[DEBUG] 从所有 ${candidateConfigs.length} 个节点中选择最佳服务器');
+    }
+
     VPNConfig? bestConfig;
     int bestPing = 999999;
 
     print('[DEBUG] 开始自动选择最佳服务器...');
-    for (final config in configs) {
+    for (final config in candidateConfigs) {
       final ping = _configPings[config.id] ?? 999999;
       print('[DEBUG] 服务器 ${config.name}: ${ping}ms');
       if (ping > 0 && ping < bestPing) {
@@ -1009,6 +1062,13 @@ class VPNProviderV2 extends ChangeNotifier {
     _autoSelectBestServer = prefs.getBool('auto_select_best_server') ?? false;
     _autoRefreshEnabled = prefs.getBool('auto_refresh_enabled') ?? true;
     _pingIntervalMinutes = prefs.getInt('ping_interval_minutes') ?? 10;
+
+    // 加载选中的组
+    final selectedGroupId = prefs.getString('selected_group');
+    if (selectedGroupId != null && selectedGroupId.isNotEmpty) {
+      _selectedGroup = selectedGroupId;
+      print('[VPN Provider] 加载已保存的选中组: $selectedGroupId');
+    }
 
     // 加载已保存的当前配置
     final currentConfigId = prefs.getString('current_config_id');

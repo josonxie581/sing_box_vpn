@@ -31,6 +31,22 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   final Map<String, bool> _subscriptionCollapsedStates = {};
   bool _isManualNodesCollapsed = true; // 默认收缩
 
+  // 选中的组 - 用于自动刷新和切换最佳服务器
+  String? _selectedGroup; // 可以是订阅URL或"manual"表示手动添加组
+
+  @override
+  void initState() {
+    super.initState();
+    // 从Provider中获取已保存的选中组
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<VPNProviderV2>(context, listen: false);
+      setState(() {
+        _selectedGroup = provider.selectedGroup;
+      });
+      print('[配置管理页面] 初始化选中组: $_selectedGroup');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -258,6 +274,8 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 title: subscriptionName,
                 count: configs.length,
                 isCollapsed: isCollapsed,
+                groupId: subscriptionUrl, // 使用订阅URL作为组ID
+                provider: provider, // 传入provider
                 onToggle: () {
                   setState(() {
                     _subscriptionCollapsedStates[subscriptionUrl] = !isCollapsed;
@@ -299,6 +317,8 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
               title: '手动添加节点',
               count: manualConfigs.length,
               isCollapsed: _isManualNodesCollapsed,
+              groupId: 'manual', // 使用"manual"作为手动组的ID
+              provider: provider, // 传入provider
               onToggle: () {
                 setState(() {
                   _isManualNodesCollapsed = !_isManualNodesCollapsed;
@@ -345,56 +365,156 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     required String title,
     required int count,
     required bool isCollapsed,
+    required String groupId, // 添加组ID
+    required VPNProviderV2 provider, // 添加provider参数
     VoidCallback? onToggle,
   }) {
+    final isSelected = _selectedGroup == groupId; // 检查是否选中
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onToggle,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.bgCard,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppTheme.primaryNeon.withOpacity(0.3),
-                width: 1,
+      child: Stack(
+        children: [
+          // 左侧选中指示条
+          if (isSelected)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(
+                width: 6,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNeon,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryNeon.withOpacity(0.4),
+                      blurRadius: 8,
+                      offset: const Offset(2, 0),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Row(
-              children: [
-                // 图标
-                Icon(
-                  title.contains('订阅') ? Icons.rss_feed : Icons.edit,
-                  color: AppTheme.primaryNeon,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                // 标题和数量
-                Expanded(
-                  child: Text(
-                    '$title ($count)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                setState(() {
+                  // 如果点击的不是当前选中的组，则选择该组
+                  if (!isSelected) {
+                    _selectedGroup = groupId;
+                    // 同步到provider（异步）
+                    provider.setSelectedGroup(groupId);
+                  }
+                  // 切换收缩状态（不管是否已选中都可以切换）
+                  if (onToggle != null) {
+                    onToggle();
+                  }
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.primaryNeon.withOpacity(0.15)
+                      : AppTheme.bgCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isSelected
+                        ? AppTheme.primaryNeon
+                        : AppTheme.primaryNeon.withOpacity(0.3),
+                    width: isSelected ? 2 : 1,
+                  ),
+                  // 增强阴影效果和多层发光
+                  boxShadow: isSelected ? [
+                    BoxShadow(
+                      color: AppTheme.primaryNeon.withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
-                  ),
+                    BoxShadow(
+                      color: AppTheme.primaryNeon.withOpacity(0.1),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ] : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                // 收缩图标（仅机场订阅节点有）
-                if (onToggle != null)
-                  Icon(
-                    isCollapsed ? Icons.expand_more : Icons.expand_less,
-                    color: AppTheme.textSecondary,
-                    size: 20,
-                  ),
-              ],
+                child: Row(
+                  children: [
+                    // 选中指示器
+                    if (isSelected)
+                      Container(
+                        width: 4,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNeon,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    if (isSelected) const SizedBox(width: 8),
+                    // 图标
+                    Icon(
+                      title.contains('订阅') ? Icons.rss_feed : Icons.edit,
+                      color: isSelected ? AppTheme.primaryNeon : AppTheme.primaryNeon.withOpacity(0.7),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    // 标题和数量
+                    Expanded(
+                      child: Text(
+                        '$title ($count)',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? AppTheme.primaryNeon : AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    // 选中状态指示
+                    if (isSelected)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNeon.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppTheme.primaryNeon.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          '已选中',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.primaryNeon,
+                          ),
+                        ),
+                      ),
+                    if (isSelected) const SizedBox(width: 8),
+                    // 收缩图标（仅机场订阅节点有）
+                    if (onToggle != null)
+                      Icon(
+                        isCollapsed ? Icons.expand_more : Icons.expand_less,
+                        color: isSelected ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                        size: 20,
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
