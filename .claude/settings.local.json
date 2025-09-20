@@ -23,7 +23,8 @@
       "Bash(touch:*)",
       "Bash(mkdir:*)",
       "Bash(copy assets/gsou_icon.ico assets/app_icon.ico)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Read(//d/TEMP/VPN/clash-verge-rev/**)"
     ],
     "deny": [],
     "ask": []

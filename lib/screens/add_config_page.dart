@@ -1292,28 +1292,72 @@ class _AddConfigPageState extends State<AddConfigPage>
               return;
             }
             final provider = context.read<VPNProviderV2>();
-            // 支持直接单条分享链接导入
-            final ok = await provider.importFromLink(link);
-            if (!ok) {
-              // 或按订阅内容解析（多条）
-              final count = await provider.importFromSubscription(link);
-              if (count <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('导入失败，请检查链接内容')),
-                );
-                return;
+
+            // 显示加载提示
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => const AlertDialog(
+                content: Row(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(width: 16),
+                    Text('正在下载订阅内容...'),
+                  ],
+                ),
+              ),
+            );
+
+            try {
+              // 首先尝试作为远程订阅URL下载
+              if (link.startsWith('http://') || link.startsWith('https://')) {
+                final success = await provider.importFromRemoteSubscription(link);
+                Navigator.pop(context); // 关闭加载对话框
+
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('远程订阅导入成功')),
+                  );
+                  Navigator.pop(context); // 关闭当前页面
+                  return;
+                } else {
+                  // 远程订阅失败，尝试本地解析
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('远程订阅下载失败，尝试作为分享链接导入')),
+                  );
+                }
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('成功导入 $count 个配置')),
-                );
+                Navigator.pop(context); // 关闭加载对话框
               }
-            } else {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('导入成功')));
+
+              // 支持直接单条分享链接导入
+              final ok = await provider.importFromLink(link);
+              if (!ok) {
+                // 或按订阅内容解析（多条）
+                final count = await provider.importFromSubscription(link);
+                if (count <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('导入失败，请检查链接内容')),
+                  );
+                  return;
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('成功导入 $count 个配置')),
+                  );
+                }
+              } else {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('导入成功')));
+              }
+            } catch (e) {
+              Navigator.pop(context); // 确保关闭加载对话框
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('导入失败: $e')),
+              );
             }
           },
-          child: const Text('从链接导入'),
+          child: const Text('导入/订阅'),
         ),
         const SizedBox(height: 12),
         // 第一行按钮

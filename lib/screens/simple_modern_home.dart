@@ -326,7 +326,7 @@ class SimpleModernHome extends StatelessWidget {
                                       provider.connectionDuration,
                                     ),
                                     style: const TextStyle(
-                                      fontSize: 20,
+                                      fontSize: 32,
                                       fontWeight: FontWeight.bold,
                                       color: AppTheme.textPrimary,
                                     ),
@@ -380,7 +380,7 @@ class SimpleModernHome extends StatelessWidget {
                         ),
                         const SizedBox(height: 18),
 
-                        // 节点配置 & DNS
+                        // 订阅/节点配置 & DNS
                         Row(
                           children: [
                             Expanded(
@@ -389,7 +389,7 @@ class SimpleModernHome extends StatelessWidget {
                                   onTap: () =>
                                       _showConfigManagementPage(context),
                                   child: _buildFeatureButton(
-                                    '节点配置',
+                                    '订阅',
                                     Icons.list_alt,
                                   ),
                                 ),
@@ -741,7 +741,7 @@ class SimpleModernHome extends StatelessWidget {
                 ),
                 const SizedBox(height: 1),
                 Text(
-                  title == '节点配置' ? '服务器管理' : '功能设置',
+                  title == '节点配置' ? '服务器管理' : '选择节点/订阅管理',
                   style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
               ],

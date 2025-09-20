@@ -13,6 +13,10 @@ class VPNConfig {
   final Map<String, dynamic> settings;
   final bool enabled;
 
+  // 订阅相关字段
+  String? subscriptionUrl; // 所属订阅的URL
+  DateTime? lastUpdated; // 最后更新时间
+
   // 便利访问器
   String get password => settings['password'] ?? '';
   String get uuid => settings['uuid'] ?? '';
@@ -36,6 +40,8 @@ class VPNConfig {
     required this.port,
     required this.settings,
     this.enabled = true,
+    this.subscriptionUrl,
+    this.lastUpdated,
   }) : id = id ?? _generateId();
 
   static String _generateId() {
@@ -54,6 +60,10 @@ class VPNConfig {
       port: json['port'] ?? 0,
       settings: json['settings'] ?? {},
       enabled: json['enabled'] ?? true,
+      subscriptionUrl: json['subscriptionUrl'],
+      lastUpdated: json['lastUpdated'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['lastUpdated'])
+          : null,
     );
   }
 
@@ -67,6 +77,8 @@ class VPNConfig {
       'port': port,
       'settings': settings,
       'enabled': enabled,
+      'subscriptionUrl': subscriptionUrl,
+      'lastUpdated': lastUpdated?.millisecondsSinceEpoch,
     };
   }
 
@@ -1060,5 +1072,37 @@ class VPNConfig {
     } catch (e) {
       return null;
     }
+  }
+
+  /// 创建占位符配置（用于比较等操作）
+  factory VPNConfig.placeholder() {
+    return VPNConfig(
+      name: 'placeholder',
+      type: 'placeholder',
+      server: 'placeholder',
+      port: 0,
+      settings: {},
+    );
+  }
+
+  /// 是否来自订阅
+  bool get isFromSubscription => subscriptionUrl != null;
+
+  /// 复制配置并更新订阅信息
+  VPNConfig copyWithSubscription({
+    String? subscriptionUrl,
+    DateTime? lastUpdated,
+  }) {
+    return VPNConfig(
+      id: id,
+      name: name,
+      type: type,
+      server: server,
+      port: port,
+      settings: Map<String, dynamic>.from(settings),
+      enabled: enabled,
+      subscriptionUrl: subscriptionUrl ?? this.subscriptionUrl,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+    );
   }
 }

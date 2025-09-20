@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
 import '../services/yaml_parser_service.dart';
 import 'add_config_page.dart';
+import 'subscription_management_page.dart';
 
 /// 配置管理页面
 class ConfigManagementPage extends StatefulWidget {
@@ -38,7 +39,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           onPressed: () => safePop(context),
         ),
         title: const Text(
-          '我的配置',
+          '选择节点',
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: 18,
@@ -76,23 +77,71 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                   : '按延时排序',
             ),
           ),
+          // 订阅管理按钮
+          Tooltip(
+            message: '机场订阅管理',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () {
+                  Future.delayed(Duration.zero, () {
+                    if (context.mounted) {
+                      _showSubscriptionManagementPage(context);
+                    }
+                  });
+                },
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    Icons.rss_feed,
+                    color: AppTheme.accentNeon,
+                    size: 24,
+                  ),
+                ),
+              ),
+            ),
+          ),
           // 刷新延时按钮
           Consumer<VPNProviderV2>(
-            builder: (context, provider, _) => IconButton(
-              icon: provider.isPingingAll
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppTheme.primaryNeon,
-                      ),
-                    )
-                  : const Icon(Icons.refresh, color: AppTheme.primaryNeon),
-              onPressed: provider.isPingingAll
-                  ? null
-                  : () => provider.refreshAllPings(),
-              tooltip: '刷新延时',
+            builder: (context, provider, _) => Tooltip(
+              message: provider.isPingingAll ? '正在刷新延时...' : '刷新延时',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: provider.isPingingAll
+                      ? null
+                      : () {
+                          Future.delayed(Duration.zero, () {
+                            if (context.mounted) {
+                              provider.refreshAllPings();
+                            }
+                          });
+                        },
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    alignment: Alignment.center,
+                    child: provider.isPingingAll
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.primaryNeon,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.refresh,
+                            color: AppTheme.primaryNeon,
+                            size: 24,
+                          ),
+                  ),
+                ),
+              ),
             ),
           ),
           IconButton(
@@ -105,17 +154,41 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           ),
           // 删除所有配置按钮
           Consumer<VPNProviderV2>(
-            builder: (context, provider, _) => IconButton(
-              icon: const Icon(Icons.delete_sweep, color: AppTheme.errorRed),
-              onPressed: provider.configs.isEmpty
-                  ? null
-                  : () => _showDeleteAllConfirmDialog(context, provider),
-              tooltip: '删除所有配置',
+            builder: (context, provider, _) => Tooltip(
+              message: provider.configs.isEmpty ? '无配置可删除' : '删除所有配置',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: provider.configs.isEmpty
+                      ? null
+                      : () {
+                          Future.delayed(Duration.zero, () {
+                            if (context.mounted) {
+                              _showDeleteAllConfirmDialog(context, provider);
+                            }
+                          });
+                        },
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.delete_sweep,
+                      color: provider.configs.isEmpty
+                          ? AppTheme.errorRed.withOpacity(0.4)
+                          : AppTheme.errorRed,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.add, color: AppTheme.primaryNeon),
             onPressed: () => _showAddConfigPage(context),
+            tooltip: '手动添加配置',
           ),
         ],
       ),
@@ -129,8 +202,6 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             children: [
               // 自动选择设置
               _buildAutoSelectSettings(provider),
-              // 自动刷新设置
-              _buildAutoRefreshSettings(provider),
               // 配置列表
               Expanded(
                 child: ListView.builder(
@@ -249,7 +320,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     VPNProviderV2 provider,
   ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(12),
@@ -265,330 +336,270 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           borderRadius: BorderRadius.circular(12),
           onTap: () => _selectOrSwitch(provider, config),
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    // 状态指示器
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: isConnected
-                            ? AppTheme.successGreen
-                            : isCurrent
-                            ? AppTheme.warningOrange
-                            : AppTheme.textSecondary,
-                        shape: BoxShape.circle,
-                      ),
+                // 状态指示器
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: isConnected
+                        ? AppTheme.successGreen
+                        : isCurrent
+                        ? AppTheme.warningOrange
+                        : AppTheme.textSecondary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 配置名称
+                Expanded(
+                  child: Text(
+                    config.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
                     ),
-                    const SizedBox(width: 12),
+                  ),
+                ),
 
-                    // 配置名称
-                    Expanded(
-                      child: Text(
-                        config.name,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
+                // 延时显示
+                _buildPingIndicator(provider, config),
+                const SizedBox(width: 8),
+
+                // 状态文本
+                Builder(
+                  builder: (context) {
+                    final pingLevel = provider.getConfigPingLevel(config.id);
+                    final isTimeout = pingLevel == PingLevel.timeout;
+
+                    String statusText;
+                    Color statusColor;
+
+                    if (isConnected) {
+                      statusText = '已连接';
+                      statusColor = AppTheme.successGreen;
+                    } else if (isCurrent) {
+                      statusText = '当前';
+                      statusColor = AppTheme.warningOrange;
+                    } else if (isTimeout) {
+                      statusText = '超时';
+                      statusColor = AppTheme.errorRed;
+                    } else {
+                      statusText = '';
+                      statusColor = AppTheme.textSecondary;
+                    }
+
+                    return Text(
+                      statusText,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: statusColor,
+                        fontWeight: FontWeight.w500,
                       ),
-                    ),
+                    );
+                  },
+                ),
 
-                    // 延时显示
-                    _buildPingIndicator(provider, config),
-                    const SizedBox(width: 8),
-
-                    // 状态文本
-                    Builder(
-                      builder: (context) {
-                        final pingLevel = provider.getConfigPingLevel(
-                          config.id,
-                        );
-                        final isTimeout = pingLevel == PingLevel.timeout;
-
-                        String statusText;
-                        Color statusColor;
-
-                        if (isConnected) {
-                          statusText = '已连接';
-                          statusColor = AppTheme.successGreen;
-                        } else if (isCurrent) {
-                          statusText = '当前';
-                          statusColor = AppTheme.warningOrange;
-                        } else if (isTimeout) {
-                          statusText = '超时';
-                          statusColor = AppTheme.errorRed;
-                        } else {
-                          statusText = '';
-                          statusColor = AppTheme.textSecondary;
-                        }
-
-                        return Text(
-                          statusText,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: statusColor,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        );
-                      },
-                    ),
-
-                    // 更多选项按钮
-                    PopupMenuButton<String>(
-                      icon: const Icon(
-                        Icons.more_vert,
-                        color: AppTheme.textSecondary,
-                        size: 20,
-                      ),
-                      color: AppTheme.bgCard,
-                      onSelected: (value) {
-                        switch (value) {
-                          case 'edit':
-                            _editConfig(context, config, index);
-                            break;
-                          case 'delete':
-                            _deleteConfig(
-                              context,
-                              provider,
-                              index,
-                              config.name,
-                            );
-                            break;
-                          case 'connect':
-                            _connectConfig(provider, config);
-                            break;
-                          case 'switch':
-                            provider.toggleConnection(config);
-                            break;
-                          case 'disconnect':
-                            provider.disconnect();
-                            break;
-                          case 'ping':
-                            provider.refreshConfigPing(config);
-                            break;
-                          case 'copy':
-                            _copyConfigToClipboard(context, config);
-                            break;
-                          case 'qrcode':
-                            _showQRCodeDialog(context, config);
-                            break;
-                        }
-                      },
-                      itemBuilder: (context) {
-                        final items = <PopupMenuEntry<String>>[];
-                        // 连接状态下：当前卡片若已连接 -> 提供断开；未连接 -> 提供切换
-                        if (provider.isConnected) {
-                          if (isConnected) {
-                            items.add(
-                              const PopupMenuItem(
-                                value: 'disconnect',
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.stop,
-                                      color: AppTheme.errorRed,
-                                      size: 18,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      '断开连接',
-                                      style: TextStyle(
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          } else {
-                            items.add(
-                              const PopupMenuItem(
-                                value: 'switch',
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.swap_horiz,
-                                      color: AppTheme.primaryNeon,
-                                      size: 18,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      '切换到此配置',
-                                      style: TextStyle(
-                                        color: AppTheme.textPrimary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-                        } else {
-                          // 未连接：提供连接
-                          items.add(
-                            const PopupMenuItem(
-                              value: 'connect',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.play_arrow,
-                                    color: AppTheme.successGreen,
-                                    size: 18,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    '连接',
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-
-                        // 通用项：延时测试、拷贝、编辑、删除
-                        items.addAll([
+                // 更多选项按钮
+                PopupMenuButton<String>(
+                  icon: const Icon(
+                    Icons.more_vert,
+                    color: AppTheme.textSecondary,
+                    size: 20,
+                  ),
+                  color: AppTheme.bgCard,
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        _editConfig(context, config, index);
+                        break;
+                      case 'delete':
+                        _deleteConfig(context, provider, index, config.name);
+                        break;
+                      case 'connect':
+                        _connectConfig(provider, config);
+                        break;
+                      case 'switch':
+                        provider.toggleConnection(config);
+                        break;
+                      case 'disconnect':
+                        provider.disconnect();
+                        break;
+                      case 'ping':
+                        provider.refreshConfigPing(config);
+                        break;
+                      case 'copy':
+                        _copyConfigToClipboard(context, config);
+                        break;
+                      case 'qrcode':
+                        _showQRCodeDialog(context, config);
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) {
+                    final items = <PopupMenuEntry<String>>[];
+                    // 连接状态下：当前卡片若已连接 -> 提供断开；未连接 -> 提供切换
+                    if (provider.isConnected) {
+                      if (isConnected) {
+                        items.add(
                           const PopupMenuItem(
-                            value: 'ping',
+                            value: 'disconnect',
                             child: Row(
                               children: [
                                 Icon(
-                                  Icons.speed,
-                                  color: AppTheme.primaryNeon,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  '测试延时',
-                                  style: TextStyle(color: AppTheme.textPrimary),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: 'qrcode',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.qr_code,
-                                  color: AppTheme.accentNeon,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  '生成二维码',
-                                  style: TextStyle(color: AppTheme.textPrimary),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: 'copy',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.copy,
-                                  color: AppTheme.accentNeon,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  '拷贝JSON',
-                                  style: TextStyle(color: AppTheme.textPrimary),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.edit,
-                                  color: AppTheme.primaryNeon,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  '编辑',
-                                  style: TextStyle(color: AppTheme.textPrimary),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.delete,
+                                  Icons.stop,
                                   color: AppTheme.errorRed,
                                   size: 18,
                                 ),
                                 SizedBox(width: 8),
                                 Text(
-                                  '删除',
+                                  '断开连接',
                                   style: TextStyle(color: AppTheme.textPrimary),
                                 ),
                               ],
                             ),
                           ),
-                        ]);
-
-                        return items;
-                      },
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // 配置详情
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    _buildDetailChip('类型', _getConfigTypeDisplay(config)),
-                    _buildDetailChip('地址', '${config.server}:${config.port}'),
-                    _buildPingDetailChip(provider, config),
-                    GestureDetector(
-                      onTap: () async {
-                        await Clipboard.setData(ClipboardData(text: config.id));
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).clearSnackBars();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('ID 已复制: ${config.id}'),
-                              duration: const Duration(seconds: 1),
-                              behavior: SnackBarBehavior.floating,
+                        );
+                      } else {
+                        items.add(
+                          const PopupMenuItem(
+                            value: 'switch',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.swap_horiz,
+                                  color: AppTheme.primaryNeon,
+                                  size: 18,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '切换到此配置',
+                                  style: TextStyle(color: AppTheme.textPrimary),
+                                ),
+                              ],
                             ),
-                          );
-                        }
-                      },
-                      child: _buildIdChip(config.id),
-                    ),
-                  ],
-                ),
+                          ),
+                        );
+                      }
+                    } else {
+                      // 未连接：提供连接
+                      items.add(
+                        const PopupMenuItem(
+                          value: 'connect',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.play_arrow,
+                                color: AppTheme.successGreen,
+                                size: 18,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '连接',
+                                style: TextStyle(color: AppTheme.textPrimary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
 
-                if (config.remarks.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    config.remarks,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                    // 通用项：延时测试、拷贝、编辑、删除
+                    items.addAll([
+                      const PopupMenuItem(
+                        value: 'ping',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.speed,
+                              color: AppTheme.primaryNeon,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '测试延时',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'qrcode',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.qr_code,
+                              color: AppTheme.accentNeon,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '生成二维码',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'copy',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.copy,
+                              color: AppTheme.accentNeon,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '拷贝JSON',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.edit,
+                              color: AppTheme.primaryNeon,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '编辑',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete,
+                              color: AppTheme.errorRed,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '删除',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ]);
+
+                    return items;
+                  },
+                ),
               ],
             ),
           ),
@@ -737,6 +748,15 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (context) => const AddConfigPage()));
+  }
+
+  /// 显示订阅管理页面
+  void _showSubscriptionManagementPage(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const SubscriptionManagementPage(),
+      ),
+    );
   }
 
   /// 从 YAML 文件导入配置
@@ -1003,118 +1023,6 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: provider.autoSelectBestServer
-              ? AppTheme.accentNeon.withOpacity(0.3)
-              : AppTheme.borderColor.withOpacity(0.2),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          // 左侧图标和文字
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: provider.autoSelectBestServer
-                  ? AppTheme.accentNeon.withOpacity(0.2)
-                  : AppTheme.textSecondary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.auto_awesome,
-              size: 20,
-              color: provider.autoSelectBestServer
-                  ? AppTheme.accentNeon
-                  : AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      '自动选择最佳服务器',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (provider.autoSelectBestServer)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accentNeon.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'AUTO',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: AppTheme.accentNeon,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  provider.autoSelectBestServer
-                      ? '开启后将在每次延时检测完成时自动选择延时最佳的服务器'
-                      : '手动选择服务器，不自动切换',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.textSecondary,
-                    height: 1.3,
-                  ),
-                ),
-                if (provider.autoSelectBestServer) ...[
-                  const SizedBox(height: 8),
-                  _buildIntervalSelector(provider),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          // 开关
-          Switch(
-            value: provider.autoSelectBestServer,
-            onChanged: (v) async {
-              await provider.setAutoSelectBestServer(v);
-            },
-            thumbColor: WidgetStateProperty.resolveWith<Color?>(
-              (states) => states.contains(WidgetState.selected)
-                  ? AppTheme.accentNeon
-                  : null,
-            ),
-            trackColor: WidgetStateProperty.resolveWith<Color?>(
-              (states) => states.contains(WidgetState.selected)
-                  ? AppTheme.accentNeon.withOpacity(0.3)
-                  : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 构建自动刷新设置
-  Widget _buildAutoRefreshSettings(VPNProviderV2 provider) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
           color: provider.autoRefreshEnabled
               ? AppTheme.accentNeon.withOpacity(0.3)
               : AppTheme.borderColor.withOpacity(0.2),
@@ -1148,7 +1056,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 Row(
                   children: [
                     Text(
-                      '自动刷新',
+                      '自动刷新延时',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -1180,7 +1088,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 const SizedBox(height: 4),
                 Text(
                   provider.autoRefreshEnabled
-                      ? '开启后将定期刷新所有节点延时（需要开启自动选择最佳服务器才能切换节点）'
+                      ? '开启后将定期刷新所有节点延时'
                       : '手动刷新延时，不自动更新',
                   style: TextStyle(
                     fontSize: 13,
@@ -1191,6 +1099,50 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 if (provider.autoRefreshEnabled) ...[
                   const SizedBox(height: 8),
                   _buildRefreshIntervalSelector(provider),
+                  const SizedBox(height: 12),
+                  // 自动选择开关
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.auto_awesome,
+                        size: 16,
+                        color: provider.autoSelectBestServer
+                            ? AppTheme.accentNeon
+                            : AppTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '自动选择最佳服务器',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: provider.autoSelectBestServer,
+                        onChanged: (v) async {
+                          await provider.setAutoSelectBestServer(v);
+                        },
+                        thumbColor: WidgetStateProperty.resolveWith<Color?>(
+                          (states) => states.contains(WidgetState.selected)
+                              ? AppTheme.accentNeon
+                              : null,
+                        ),
+                        trackColor: WidgetStateProperty.resolveWith<Color?>(
+                          (states) => states.contains(WidgetState.selected)
+                              ? AppTheme.accentNeon.withOpacity(0.3)
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (provider.autoSelectBestServer) ...[
+                    const SizedBox(height: 8),
+                    _buildIntervalSelector(provider),
+                  ],
                 ],
               ],
             ),
@@ -1685,7 +1637,8 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         final port = config.port;
         final params = <String, String>{};
 
-        if (config.settings['network'] != null && config.settings['network'] != 'tcp') {
+        if (config.settings['network'] != null &&
+            config.settings['network'] != 'tcp') {
           params['type'] = config.settings['network'];
         }
 
@@ -1717,7 +1670,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         final name = Uri.encodeComponent(config.name);
         final baseUrl = 'vless://$uuid@$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'trojan':
         final password = config.settings['password'] ?? '';
@@ -1739,7 +1694,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         final name = Uri.encodeComponent(config.name);
         final baseUrl = 'trojan://$password@$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'hysteria2':
         final password = config.settings['password'] ?? '';
@@ -1765,7 +1722,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         final name = Uri.encodeComponent(config.name);
         final baseUrl = 'hysteria2://$password@$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'hysteria':
         // Hysteria v1
@@ -1817,7 +1776,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         final name = Uri.encodeComponent(config.name);
         final userInfo = password.isNotEmpty ? '$password@' : '';
         final baseUrl = 'hysteria://$userInfo$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'tuic':
         final uuid = config.settings['uuid'] ?? '';
@@ -1856,9 +1817,15 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             .join('&');
 
         final name = Uri.encodeComponent(config.name);
-        final userInfo = uuid.isNotEmpty && password.isNotEmpty ? '$uuid:$password@' : password.isNotEmpty ? '$password@' : '';
+        final userInfo = uuid.isNotEmpty && password.isNotEmpty
+            ? '$uuid:$password@'
+            : password.isNotEmpty
+            ? '$password@'
+            : '';
         final baseUrl = 'tuic://$userInfo$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'anytls':
         final password = config.settings['password'] ?? '';
@@ -1876,13 +1843,16 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           params['alpn'] = (config.settings['alpn'] as List).join(',');
         }
         if (config.settings['idle_session_check_interval'] != null) {
-          params['idle_session_check_interval'] = config.settings['idle_session_check_interval'];
+          params['idle_session_check_interval'] =
+              config.settings['idle_session_check_interval'];
         }
         if (config.settings['idle_session_timeout'] != null) {
-          params['idle_session_timeout'] = config.settings['idle_session_timeout'];
+          params['idle_session_timeout'] =
+              config.settings['idle_session_timeout'];
         }
         if (config.settings['min_idle_session'] != null) {
-          params['min_idle_session'] = config.settings['min_idle_session'].toString();
+          params['min_idle_session'] = config.settings['min_idle_session']
+              .toString();
         }
 
         final queryString = params.entries
@@ -1891,7 +1861,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         final name = Uri.encodeComponent(config.name);
         final baseUrl = 'anytls://$password@$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'shadowtls':
         final password = config.settings['password'] ?? '';
@@ -1918,7 +1890,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
 
         final name = Uri.encodeComponent(config.name);
         final baseUrl = 'shadowtls://$password@$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'socks':
         final username = config.settings['username'] ?? '';
@@ -1943,7 +1917,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             ? '${Uri.encodeComponent(username)}:${Uri.encodeComponent(password)}@'
             : '';
         final baseUrl = 'socks://$userInfo$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'http':
         final username = config.settings['username'] ?? '';
@@ -1968,7 +1944,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             ? '${Uri.encodeComponent(username)}:${Uri.encodeComponent(password)}@'
             : '';
         final baseUrl = 'http://$userInfo$host:$port';
-        return queryString.isEmpty ? '$baseUrl#$name' : '$baseUrl?$queryString#$name';
+        return queryString.isEmpty
+            ? '$baseUrl#$name'
+            : '$baseUrl?$queryString#$name';
 
       case 'wireguard':
         // WireGuard 协议没有标准的订阅链接格式，返回JSON
@@ -2053,10 +2031,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                       );
                     }
 
-                    return Image.memory(
-                      snapshot.data!,
-                      fit: BoxFit.contain,
-                    );
+                    return Image.memory(snapshot.data!, fit: BoxFit.contain);
                   },
                 ),
               ),
@@ -2169,9 +2144,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
           final sourceY = y ~/ scale;
 
           // 获取颜色（黑色或白色）
-          final isBlack = sourceX < matrix.width &&
-                          sourceY < matrix.height &&
-                          matrix.get(sourceX, sourceY) == 1;
+          final isBlack =
+              sourceX < matrix.width &&
+              sourceY < matrix.height &&
+              matrix.get(sourceX, sourceY) == 1;
           final color = isBlack ? 0xFF000000 : 0xFFFFFFFF;
 
           bytes[offset] = (color >> 16) & 0xFF; // R
@@ -2191,7 +2167,11 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 创建PNG图像
-  Future<Uint8List> _createPngImage(Uint8List pixels, int width, int height) async {
+  Future<Uint8List> _createPngImage(
+    Uint8List pixels,
+    int width,
+    int height,
+  ) async {
     // 简单的PNG编码实现
     final png = BytesBuilder();
 
@@ -2300,10 +2280,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         children: [
           Text(
             '$label: ',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppTheme.textSecondary,
-            ),
+            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
           ),
           Expanded(
             child: Text(

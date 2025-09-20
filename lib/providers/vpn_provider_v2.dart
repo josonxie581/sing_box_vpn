@@ -207,6 +207,70 @@ class VPNProviderV2 extends ChangeNotifier {
     return count;
   }
 
+  /// 从远程URL导入订阅
+  Future<bool> importFromRemoteSubscription(String url) async {
+    try {
+      final result = await _configManager.importFromRemoteSubscription(url);
+      if (result.success) {
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('[VPN Provider] 远程订阅导入失败: $e');
+      return false;
+    }
+  }
+
+  /// 更新订阅
+  Future<bool> updateSubscription(String url) async {
+    try {
+      final result = await _configManager.updateSubscription(url);
+      if (result.success) {
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('[VPN Provider] 订阅更新失败: $e');
+      return false;
+    }
+  }
+
+  /// 删除订阅
+  Future<bool> deleteSubscription(String url) async {
+    try {
+      final success = await _configManager.deleteSubscription(url);
+      if (success) {
+        notifyListeners();
+      }
+      return success;
+    } catch (e) {
+      print('[VPN Provider] 删除订阅失败: $e');
+      return false;
+    }
+  }
+
+  /// 获取所有订阅URL
+  List<String> getAllSubscriptionUrls() {
+    return _configManager.getAllSubscriptionUrls();
+  }
+
+  /// 获取订阅信息
+  Map<String, dynamic> getSubscriptionInfos() {
+    return _configManager.subscriptionInfos;
+  }
+
+  /// 获取订阅的配置数量
+  int getSubscriptionConfigCount(String url) {
+    return _configManager.getSubscriptionConfigCount(url);
+  }
+
+  /// 获取订阅的最后更新时间
+  DateTime? getSubscriptionLastUpdated(String url) {
+    return _configManager.subscriptionLastUpdated[url];
+  }
+
   // 设置当前配置（不连接）
   Future<void> setCurrentConfig(VPNConfig config) async {
     print("[DEBUG] setCurrentConfig: 设置新配置 ${config.name}");
