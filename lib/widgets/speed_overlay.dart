@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io' show Platform;
+import 'dart:io' as io show exit;
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'dart:ffi' as ffi;
 import 'package:win32/win32.dart' as win32;
 import 'package:ffi/ffi.dart' as pkg_ffi;
@@ -20,12 +22,42 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
   bool _isHovered = false;
   bool _showMenu = false;
   Offset _menuPosition = Offset.zero;
-  bool _isTopCache = false;
   double _menuWidth = 160;
 
   void _hideMenu() {
     if (_showMenu) {
       setState(() => _showMenu = false);
+    }
+  }
+
+  Future<void> _exitApp() async {
+    // 统一的退出逻辑：优先优雅关闭窗口，失败则兜底强退
+    try {
+      _hideMenu();
+      // 先断开 VPN（若已连接/正在连接），避免残留系统代理/TUN 等副作用
+      try {
+        final vpn = context.read<VPNProviderV2>();
+        if (vpn.isConnected || vpn.isConnecting) {
+          await vpn.disconnect().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => false,
+          );
+          // 给系统清理代理/网络栈一个极短的缓冲
+          await Future.delayed(const Duration(milliseconds: 150));
+        }
+      } catch (_) {
+        // 忽略断开异常，继续执行退出
+      }
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        // 对桌面平台使用 window_manager 关闭/销毁窗口
+        await windowManager.destroy();
+      } else {
+        // 移动端或其他平台
+        await SystemNavigator.pop();
+      }
+    } catch (_) {
+      // 兜底，确保进程退出
+      io.exit(0);
     }
   }
 
@@ -35,7 +67,6 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
     // 同步置顶状态用于菜单文案
     final isTop = await windowManager.isAlwaysOnTop();
     if (!mounted) return;
-    _isTopCache = isTop;
 
     // 获取当前鼠标屏幕坐标
     final pt = pkg_ffi.calloc<win32.POINT>();
@@ -45,12 +76,12 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
       // 创建弹出菜单
       final hMenu = win32.CreatePopupMenu();
       // 准备菜单字符串（UTF-16）
-      final restoreText = win32.TEXT('恢复窗口');
-      final topText = win32.TEXT(isTop ? '取消置顶' : '置顶');
+      final restoreText = win32.TEXT('退出');
+      // final topText = win32.TEXT(isTop ? '取消置顶' : '置顶');
 
       // 添加菜单项，使用返回命令模式
       win32.AppendMenu(hMenu, win32.MF_STRING, 1, restoreText);
-      win32.AppendMenu(hMenu, win32.MF_STRING, 2, topText);
+      // win32.AppendMenu(hMenu, win32.MF_STRING, 2, topText);
 
       final hwndOwner = win32.GetForegroundWindow();
       final flags =
@@ -71,16 +102,15 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
 
       // 处理结果
       if (cmd == 1) {
-        widget.onRestore();
+        await _exitApp();
       } else if (cmd == 2) {
         await windowManager.setAlwaysOnTop(!isTop);
-        if (mounted) setState(() => _isTopCache = !isTop);
       }
 
       // 释放资源
       win32.DestroyMenu(hMenu);
       pkg_ffi.calloc.free(restoreText);
-      pkg_ffi.calloc.free(topText);
+      // pkg_ffi.calloc.free(topText);
     } finally {
       pkg_ffi.calloc.free(pt);
     }
@@ -92,8 +122,6 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
     if (box == null) return;
     final local = box.globalToLocal(globalPosition);
 
-    final isTop = await windowManager.isAlwaysOnTop();
-    if (!mounted) return;
     // 动态计算菜单尺寸与位置，确保在小窗口内也可见
     final size = box.size;
     final desiredMin = 100.0;
@@ -115,7 +143,6 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
     if (y > maxTop) y = maxTop.clamp(padding, size.height - padding);
 
     setState(() {
-      _isTopCache = isTop;
       _menuWidth = widthFit;
       _menuPosition = Offset(x, y);
       _showMenu = true;
@@ -148,21 +175,20 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _MenuItem(
-                  label: '恢复窗口',
+                  label: '退出',
                   onTap: () {
-                    _hideMenu();
-                    widget.onRestore();
+                    _exitApp();
                   },
                 ),
-                _MenuItem(
-                  label: _isTopCache ? '取消置顶' : '置顶',
-                  onTap: () async {
-                    await windowManager.setAlwaysOnTop(!_isTopCache);
-                    if (!mounted) return;
-                    setState(() => _isTopCache = !_isTopCache);
-                    _hideMenu();
-                  },
-                ),
+                // _MenuItem(
+                //   label: _isTopCache ? '取消置顶' : '置顶',
+                //   onTap: () async {
+                //     await windowManager.setAlwaysOnTop(!_isTopCache);
+                //     if (!mounted) return;
+                //     setState(() => _isTopCache = !_isTopCache);
+                //     _hideMenu();
+                //   },
+                // ),
               ],
             ),
           ),
