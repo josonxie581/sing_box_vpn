@@ -19,7 +19,7 @@ class AddRoutingRulePage extends StatefulWidget {
 class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _priorityController = TextEditingController(text: '500');
+  final _priorityController = TextEditingController(text: '650');
 
   String? _selectedRuleset;
   RuleType _selectedType = RuleType.geosite;
@@ -52,7 +52,7 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
 
   void _save() {
     if (!_canSave) return;
-    final priority = int.tryParse(_priorityController.text) ?? 500;
+    final priority = int.tryParse(_priorityController.text) ?? 650;
     final rule = RoutingRuleConfig(
       id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
       name: _nameController.text.trim(),

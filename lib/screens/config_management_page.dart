@@ -11,6 +11,7 @@ import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
 import '../services/yaml_parser_service.dart';
+import '../services/outbound_binding_service.dart';
 import 'add_config_page.dart';
 import 'subscription_management_page.dart';
 
@@ -44,6 +45,12 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
         _selectedGroup = provider.selectedGroup;
       });
       print('[配置管理页面] 初始化选中组: $_selectedGroup');
+    });
+
+    // 初始化多出站绑定服务（用于在节点列表中高亮 A/B 绑定的节点）
+    // 完成后触发一次重建，以便立刻显示“代理A/代理B”点亮效果。
+    OutboundBindingService.instance.initialize().then((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -577,6 +584,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 获取排序后的配置列表
+  // ignore: unused_element
   List<VPNConfig> _getSortedConfigs(VPNProviderV2 provider) {
     if (!_isSortedByPing) {
       return provider.configs;
@@ -659,15 +667,26 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     bool isCurrent,
     VPNProviderV2 provider,
   ) {
+    // 读取代理A/代理B绑定关系
+    final obs = OutboundBindingService.instance;
+    final bool isProxyA = obs.outboundAConfigId == config.id;
+    final bool isProxyB = obs.outboundBConfigId == config.id;
+    final bool isProxyBound = isProxyA || isProxyB;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isCurrent
-              ? AppTheme.primaryNeon.withAlpha(100)
+          color: isConnected
+              ? AppTheme.successGreen.withAlpha(160)
+              : isCurrent
+              ? AppTheme.primaryNeon.withAlpha(140)
+              : isProxyBound
+              ? AppTheme.accentNeon.withOpacity(0.8) // A/B 绑定时点亮边框
               : AppTheme.borderColor.withAlpha(100),
+          width: (isConnected || isCurrent || isProxyBound) ? 2 : 1,
         ),
       ),
       child: Material(
@@ -688,7 +707,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                         ? AppTheme.successGreen
                         : isCurrent
                         ? AppTheme.warningOrange
-                        : AppTheme.textSecondary,
+                        : (isProxyBound
+                              ? AppTheme
+                                    .accentNeon // 绑定为代理A/代理B时点亮
+                              : AppTheme.textSecondary),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -725,6 +747,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                     } else if (isCurrent) {
                       statusText = '当前';
                       statusColor = AppTheme.warningOrange;
+                    } else if (isProxyBound) {
+                      // 为 A/B 绑定的节点显示“在用”提示（代表已作为分流出站绑定）
+                      statusText = isProxyA ? '代理A' : '代理B';
+                      statusColor = AppTheme.accentNeon;
                     } else if (isTimeout) {
                       statusText = '超时';
                       statusColor = AppTheme.errorRed;
@@ -949,6 +975,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建详情标签
+  // ignore: unused_element
   Widget _buildDetailChip(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1289,6 +1316,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建 ID 标签（淡色，可复制）
+  // ignore: unused_element
   Widget _buildIdChip(String id) {
     // 仅显示截断前 8 位，完整通过复制获得
     final short = id.length > 8 ? id.substring(0, 8) : id;
@@ -1323,6 +1351,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 构建延时详情标签
+  // ignore: unused_element
   Widget _buildPingDetailChip(VPNProviderV2 provider, VPNConfig config) {
     final ping = provider.getConfigPing(config.id);
     final pingLevel = provider.getConfigPingLevel(config.id);

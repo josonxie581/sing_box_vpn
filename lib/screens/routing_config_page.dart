@@ -739,7 +739,7 @@ class _AddRuleDialog extends StatefulWidget {
 class _AddRuleDialogState extends State<_AddRuleDialog> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _priorityController = TextEditingController(text: '500');
+  final _priorityController = TextEditingController(text: '650');
 
   String? _selectedRuleset;
   RuleType _selectedType = RuleType.geosite;
@@ -924,7 +924,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
               return;
             }
 
-            final priority = int.tryParse(_priorityController.text) ?? 500;
+            final priority = int.tryParse(_priorityController.text) ?? 650;
             final rule = RoutingRuleConfig(
               id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
               name: _nameController.text.trim(),
@@ -967,7 +967,7 @@ class _AddRuleSheet extends StatefulWidget {
 class _AddRuleSheetState extends State<_AddRuleSheet> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _priorityController = TextEditingController(text: '500');
+  final _priorityController = TextEditingController(text: '650');
 
   String? _selectedRuleset;
   RuleType _selectedType = RuleType.geosite;
@@ -1174,7 +1174,7 @@ class _AddRuleSheetState extends State<_AddRuleSheet> {
                     }
 
                     final priority =
-                        int.tryParse(_priorityController.text) ?? 500;
+                        int.tryParse(_priorityController.text) ?? 650;
                     final rule = RoutingRuleConfig(
                       id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                       name: _nameController.text.trim(),
