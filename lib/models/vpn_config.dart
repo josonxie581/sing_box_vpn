@@ -111,6 +111,281 @@ class VPNConfig {
     );
   }
 
+  /// 生成指定 tag 的出站配置（用于多出站绑定，如 proxy-a / proxy-b）
+  Map<String, dynamic> toSingBoxOutbound({required String tag}) {
+    switch (type.toLowerCase()) {
+      case 'hysteria':
+        return {
+          "type": "hysteria",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          // Hysteria v1 认证：优先使用明文 auth_str（来自 settings.password）
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "auth_str": settings['password'],
+          // 也允许直接传入 base64 的 auth（来自 settings['auth']）
+          if ((settings['auth'] ?? '').toString().isNotEmpty)
+            "auth": settings['auth'],
+          // 带宽：优先 up_mbps/down_mbps（数值），否则 up/down（字符串）
+          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
+          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
+          if ((settings['up'] ?? '').toString().isNotEmpty)
+            "up": settings['up'],
+          if ((settings['down'] ?? '').toString().isNotEmpty)
+            "down": settings['down'],
+          if ((settings['obfs'] ?? '').toString().isNotEmpty)
+            "obfs": settings['obfs'],
+          if (settings['recv_window_conn'] != null)
+            "recv_window_conn": settings['recv_window_conn'],
+          if (settings['recv_window'] != null)
+            "recv_window": settings['recv_window'],
+          if (settings['disable_mtu_discovery'] != null)
+            "disable_mtu_discovery": settings['disable_mtu_discovery'],
+          // TLS 配置
+          "tls": {
+            "enabled": true,
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+      case 'shadowtls':
+        return {
+          "type": "shadowtls",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          if (settings['version'] is int)
+            "version": settings['version']
+          else if ((settings['version'] ?? '').toString().isNotEmpty)
+            "version": int.tryParse(settings['version'].toString()) ?? 1,
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "password": settings['password'],
+          "tls": {
+            "enabled": true,
+            // 若未提供 sni，兜底使用服务器域名
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
+      case 'anytls':
+        return {
+          "type": "anytls",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "password": settings['password'] ?? "",
+          // 连接保活/空闲会话可选项
+          if ((settings['idle_session_check_interval'] ?? '')
+              .toString()
+              .isNotEmpty)
+            "idle_session_check_interval":
+                settings['idle_session_check_interval'],
+          if ((settings['idle_session_timeout'] ?? '').toString().isNotEmpty)
+            "idle_session_timeout": settings['idle_session_timeout'],
+          if (settings['min_idle_session'] != null)
+            "min_idle_session": settings['min_idle_session'],
+          // AnyTLS 要求 TLS 出站配置
+          "tls": {
+            "enabled": true,
+            // 若未提供 sni，兜底使用服务器域名
+            "server_name": (settings['sni'] ?? server),
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
+      case 'shadowsocks':
+        return {
+          "type": "shadowsocks",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "method": settings['method'] ?? "aes-256-gcm",
+          "password": settings['password'] ?? "",
+        };
+
+      case 'shadowsocks-2022':
+        return {
+          "type": "shadowsocks",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "method": settings['method'] ?? "2022-blake3-aes-128-gcm",
+          "password": settings['password'] ?? "",
+        };
+
+      case 'vmess':
+        final useTls = (settings['tls']?.toString().toLowerCase() == 'tls');
+        final outbound = <String, dynamic>{
+          "type": "vmess",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "uuid": settings['uuid'] ?? "",
+          "security": settings['security'] ?? "auto",
+          "alter_id": settings['alterId'] ?? 0,
+        };
+        final transport = _generateTransport();
+        if (transport != null) outbound["transport"] = transport;
+        if (useTls) {
+          outbound["tls"] = {
+            "enabled": true,
+            if ((settings['host'] ?? '').toString().isNotEmpty)
+              "server_name": settings['host'],
+          };
+        }
+        return outbound;
+
+      case 'vless':
+        return {
+          "type": "vless",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "uuid": settings['uuid'] ?? "",
+          // 注意：sing-box 的 vless 出站不需要也不支持 "encryption" 字段
+          if ((settings['flow'] ?? '').toString().isNotEmpty)
+            "flow": settings['flow'],
+          if (_generateTransport() != null) "transport": _generateTransport(),
+          if (settings['tlsEnabled'] == true)
+            "tls": {
+              "enabled": true,
+              // 若未提供 sni，兜底使用服务器域名
+              "server_name": (settings['sni'] ?? server),
+              if (settings['alpn'] is List) "alpn": settings['alpn'],
+              // 若提供了指纹则开启 uTLS 并设置 fingerprint（需要 with_utls 构建）
+              if ((settings['fingerprint'] ?? '').toString().isNotEmpty)
+                "utls": {
+                  "enabled": true,
+                  "fingerprint": settings['fingerprint'],
+                },
+              if (settings['realityEnabled'] == true)
+                "reality": {
+                  "enabled": true,
+                  if ((settings['realityPublicKey'] ?? '')
+                      .toString()
+                      .isNotEmpty)
+                    "public_key": settings['realityPublicKey'],
+                  if ((settings['realityShortId'] ?? '').toString().isNotEmpty)
+                    "short_id": settings['realityShortId'],
+                },
+            },
+        };
+
+      case 'trojan':
+        return {
+          "type": "trojan",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "password": settings['password'] ?? "",
+          "tls": {
+            "enabled": true,
+            "server_name": settings['sni'] ?? server,
+            "insecure": settings['skipCertVerify'] ?? false,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
+      case 'hysteria2':
+        return {
+          "type": "hysteria2",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "password": settings['password'] ?? "",
+          "tls": {
+            "enabled": true,
+            "server_name": settings['sni'] ?? server,
+            "insecure": settings['skipCertVerify'] ?? false,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
+      case 'tuic':
+        return {
+          "type": "tuic",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          if ((settings['uuid'] ?? '').toString().isNotEmpty)
+            "uuid": settings['uuid'],
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "password": settings['password'],
+          if ((settings['udpRelayMode'] ?? '').toString().isNotEmpty)
+            "udp_relay_mode": settings['udpRelayMode'],
+          if ((settings['congestion'] ?? '').toString().isNotEmpty)
+            "congestion_control": settings['congestion'],
+          "tls": {
+            "enabled": true,
+            // 若未提供 sni，兜底使用服务器域名
+            "server_name": (settings['sni'] ?? server),
+            // 是否跳过证书校验
+            if (settings['skipCertVerify'] == true) "insecure": true,
+            if (settings['alpn'] is List) "alpn": settings['alpn'],
+          },
+        };
+
+      case 'socks':
+        return {
+          "type": "socks",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          if ((settings['username'] ?? '').toString().isNotEmpty)
+            "username": settings['username'],
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "password": settings['password'],
+          if (settings['tlsEnabled'] == true)
+            "tls": {
+              "enabled": true,
+              if ((settings['sni'] ?? '').toString().isNotEmpty)
+                "server_name": settings['sni'],
+            },
+        };
+
+      case 'http':
+        return {
+          "type": "http",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          if ((settings['username'] ?? '').toString().isNotEmpty)
+            "username": settings['username'],
+          if ((settings['password'] ?? '').toString().isNotEmpty)
+            "password": settings['password'],
+          if (settings['tlsEnabled'] == true)
+            "tls": {
+              "enabled": true,
+              if ((settings['sni'] ?? '').toString().isNotEmpty)
+                "server_name": settings['sni'],
+            },
+        };
+
+      case 'wireguard':
+        return {
+          "type": "wireguard",
+          "tag": tag,
+          "server": server,
+          "server_port": port,
+          "private_key": settings['privateKey'] ?? "",
+          "peer_public_key": settings['peerPublicKey'] ?? "",
+          if (settings['localAddress'] is List)
+            "local_address": settings['localAddress'],
+          if (settings['dns'] is List) "dns": settings['dns'],
+          if ((settings['reserved'] ?? '').toString().isNotEmpty)
+            "reserved": settings['reserved'],
+          if (settings['mtu'] != null) "mtu": settings['mtu'],
+        };
+
+      default:
+        return {"type": "direct", "tag": tag};
+    }
+  }
+
   /// 生成出站配置
   Map<String, dynamic> _generateOutbound() {
     switch (type.toLowerCase()) {

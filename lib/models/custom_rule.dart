@@ -285,7 +285,9 @@ enum RuleType {
 /// 出站类型枚举
 enum OutboundType {
   direct('direct', '直连', '流量直接连接目标服务器'),
-  proxy('proxy', '代理', '流量通过代理服务器'),
+  proxy('proxy', '代理', '流量通过默认代理'),
+  proxyA('proxy-a', '代理A', '流量通过代理A出站'),
+  proxyB('proxy-b', '代理B', '流量通过代理B出站'),
   block('block', '阻断', '阻止访问目标地址'),
   reject('reject', '拒绝', '拒绝连接请求');
 
@@ -302,6 +304,10 @@ enum OutboundType {
         return '#4CAF50'; // 绿色
       case OutboundType.proxy:
         return '#2196F3'; // 蓝色
+      case OutboundType.proxyA:
+        return '#9C27B0'; // 紫色
+      case OutboundType.proxyB:
+        return '#00BCD4'; // 青色
       case OutboundType.block:
         return '#F44336'; // 红色
       case OutboundType.reject:

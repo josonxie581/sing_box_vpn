@@ -7,6 +7,7 @@
 -    支持二维码的扫描导入节点
 -    代理协议：Shadowsocks/ShadowTLS/VLESS/AnyTLS/Hysteria2/TUIC/VMess/Trojan
 -    支持路由规则设置
+-    支持使用两个节点分流，比如：节点A 代理youtube 视频流量， 节点B：上网流量）
 
 ### 最小化窗口后显示悬浮上传下载速度
 
@@ -19,7 +20,6 @@
 一个基于 Flutter 开发的 sing-box  客户端，仅支持 Windows 平台。
 
 ## 项目简介
-开发初衷：一个晚上为了能用上AI，配置代理的协议竟然用了两个小时，所以造了一个配置简单点客户端。
 Gsou 是一个简单的客户端应用，基于 sing-box 核心构建。
 
 ### 主要特性

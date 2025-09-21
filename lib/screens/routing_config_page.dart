@@ -5,17 +5,26 @@ import '../models/routing_rule_config.dart';
 import '../services/routing_config_service.dart';
 import 'geosite_manager_page.dart';
 import 'add_routing_rule_page.dart';
+import '../services/outbound_binding_service.dart';
+import '../services/config_manager.dart';
+import '../models/vpn_config.dart';
 
 /// 分流规则配置页面
 class RoutingConfigPage extends StatefulWidget {
-  const RoutingConfigPage({super.key});
+  final int initialTabIndex;
+  const RoutingConfigPage({super.key, this.initialTabIndex = 0});
 
   @override
   State<RoutingConfigPage> createState() => _RoutingConfigPageState();
 }
 
-class _RoutingConfigPageState extends State<RoutingConfigPage> {
+class _RoutingConfigPageState extends State<RoutingConfigPage>
+    with SingleTickerProviderStateMixin {
   final RoutingConfigService _configService = RoutingConfigService.instance;
+  final OutboundBindingService _binding = OutboundBindingService.instance;
+  final ConfigManager _cfgMgr = ConfigManager();
+
+  late TabController _tabController;
 
   // State
   List<RoutingRuleConfig> _rules = [];
@@ -23,10 +32,27 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
   bool _isLoading = false;
   String _statusMessage = '';
 
+  // Outbound binding state
+  List<VPNConfig> _configs = const [];
+  String? _aId;
+  String? _bId;
+  String _finalTag = 'proxy';
+
   @override
   void initState() {
     super.initState();
+    final idx = widget.initialTabIndex < 0
+        ? 0
+        : (widget.initialTabIndex > 1 ? 1 : widget.initialTabIndex);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: idx);
     _loadData();
+    _initBinding();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -49,6 +75,40 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _initBinding() async {
+    try {
+      if (_cfgMgr.configs.isEmpty) {
+        await _cfgMgr.loadConfigs();
+      }
+      if (!_binding.isInitialized) {
+        await _binding.initialize();
+      }
+      if (!mounted) return;
+      setState(() {
+        _configs = List<VPNConfig>.from(_cfgMgr.configs);
+        _aId = _binding.outboundAConfigId;
+        _bId = _binding.outboundBConfigId;
+        _finalTag = _binding.finalOutboundTag;
+      });
+    } catch (e) {
+      // 忽略展示错误，UI 保持可用
+    }
+  }
+
+  Future<void> _saveBinding() async {
+    setState(() => _isLoading = true);
+    try {
+      await _binding.setOutboundBindingA(_aId);
+      await _binding.setOutboundBindingB(_bId);
+      await _binding.setFinalOutboundTag(_finalTag);
+      _showMessage('已保存出站绑定（重新连接后生效）');
+    } catch (e) {
+      _showMessage('保存失败: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -154,6 +214,10 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
         return AppTheme.successGreen;
       case OutboundAction.proxy:
         return AppTheme.primaryNeon;
+      case OutboundAction.proxyA:
+        return AppTheme.accentNeon; // 与默认代理区分的强调色
+      case OutboundAction.proxyB:
+        return AppTheme.primaryNeon; // 复用主色，必要时可换为其他主题色
       case OutboundAction.block:
         return AppTheme.errorRed;
     }
@@ -214,7 +278,11 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
                 Switch(
                   value: rule.enabled,
                   onChanged: (value) => _toggleRule(rule.id, value),
-                  activeColor: AppTheme.primaryNeon,
+                  thumbColor: WidgetStateProperty.resolveWith<Color?>(
+                    (states) => states.contains(WidgetState.selected)
+                        ? AppTheme.primaryNeon
+                        : null,
+                  ),
                 ),
               ],
             ),
@@ -327,12 +395,22 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
           onPressed: () => safePop(context),
         ),
         title: const Text(
-          '分流规则配置',
+          '分流配置',
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: 18,
             fontWeight: FontWeight.w600,
           ),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppTheme.primaryNeon,
+          unselectedLabelColor: AppTheme.textSecondary,
+          indicatorColor: AppTheme.primaryNeon,
+          tabs: const [
+            Tab(text: '规则管理'),
+            Tab(text: '出站绑定'),
+          ],
         ),
         actions: [
           TextButton.icon(
@@ -348,83 +426,300 @@ class _RoutingConfigPageState extends State<RoutingConfigPage> {
             ),
           ),
           const SizedBox(width: 4),
-          TextButton.icon(
-            onPressed: _isLoading ? null : _showAddRuleDialog,
-            icon: const Icon(Icons.add, size: 18, color: AppTheme.primaryNeon),
-            label: const Text(
-              '添加规则',
-              style: TextStyle(color: AppTheme.primaryNeon),
+        ],
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // 规则管理 Tab
+          _buildRulesTabBody(),
+          // 出站绑定 Tab
+          _buildBindingTabBody(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRulesTabBody() {
+    if (_isLoading && _statusMessage.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryNeon),
+        ),
+      );
+    }
+    if (_statusMessage.isNotEmpty) {
+      return Center(
+        child: Text(
+          _statusMessage,
+          style: const TextStyle(color: AppTheme.textSecondary),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // 顶部操作条（仅在规则页显示）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Row(
+            children: [
+              TextButton.icon(
+                onPressed: _isLoading ? null : _showAddRuleDialog,
+                icon: const Icon(
+                  Icons.add,
+                  size: 18,
+                  color: AppTheme.primaryNeon,
+                ),
+                label: const Text(
+                  '添加规则',
+                  style: TextStyle(color: AppTheme.primaryNeon),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppTheme.bgCard,
+                            title: const Text(
+                              '重置配置',
+                              style: TextStyle(color: AppTheme.textPrimary),
+                            ),
+                            content: const Text(
+                              '确定要重置为默认配置吗？所有自定义规则将被删除。',
+                              style: TextStyle(color: AppTheme.textSecondary),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(false),
+                                child: const Text('取消'),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(true),
+                                child: const Text(
+                                  '重置',
+                                  style: TextStyle(color: AppTheme.errorRed),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (confirmed == true) {
+                          try {
+                            await _configService.resetToDefault();
+                            await _loadData();
+                            _showMessage('配置已重置为默认值');
+                          } catch (e) {
+                            _showMessage('重置配置失败: $e', isError: true);
+                          }
+                        }
+                      },
+                child: const Text(
+                  '重置为默认',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: _rules.map(_buildRuleCard).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBindingTabBody() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildBindingCard(
+            title: '代理A (proxy-a)',
+            value: _aId,
+            onChanged: (v) => setState(() => _aId = v),
+          ),
+          const SizedBox(height: 12),
+          _buildBindingCard(
+            title: '代理B (proxy-b)',
+            value: _bId,
+            onChanged: (v) => setState(() => _bId = v),
+          ),
+          const SizedBox(height: 16),
+          _buildFinalSelector(),
+          const Spacer(),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _initBinding(),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppTheme.borderColor),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text(
+                    '重置',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _saveBinding,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNeon,
+                    foregroundColor: AppTheme.bgDark,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('保存并生效'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBindingCard({
+    required String title,
+    required String? value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(width: 4),
-          TextButton(
-            onPressed: _isLoading
-                ? null
-                : () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        backgroundColor: AppTheme.bgCard,
-                        title: const Text(
-                          '重置配置',
-                          style: TextStyle(color: AppTheme.textPrimary),
-                        ),
-                        content: const Text(
-                          '确定要重置为默认配置吗？所有自定义规则将被删除。',
-                          style: TextStyle(color: AppTheme.textSecondary),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(false),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(true),
-                            child: const Text(
-                              '重置',
-                              style: TextStyle(color: AppTheme.errorRed),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String?>(
+            value: value,
+            isExpanded: true,
+            dropdownColor: AppTheme.bgCard,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppTheme.bgDark,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: AppTheme.borderColor.withAlpha(100),
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: AppTheme.borderColor.withAlpha(100),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppTheme.primaryNeon),
+              ),
+            ),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text(
+                  '未绑定',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+              ..._configs.map(
+                (c) => DropdownMenuItem<String?>(
+                  value: c.id,
+                  child: Text(
+                    c.name.isNotEmpty
+                        ? c.name
+                        : '${c.type.toUpperCase()} ${c.server}:${c.port}',
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
 
-                    if (confirmed == true) {
-                      try {
-                        await _configService.resetToDefault();
-                        await _loadData();
-                        _showMessage('配置已重置为默认值');
-                      } catch (e) {
-                        _showMessage('重置配置失败: $e', isError: true);
-                      }
-                    }
-                  },
-            child: const Text(
-              '重置为默认',
-              style: TextStyle(color: AppTheme.textSecondary),
+  Widget _buildFinalSelector() {
+    final options = const [
+      _FinalOption('proxy', '默认代理 (proxy)'),
+      _FinalOption('proxy-a', '代理A (proxy-a)'),
+      _FinalOption('proxy-b', '代理B (proxy-b)'),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '默认出站 (route.final)',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...options.map(
+            (o) => RadioListTile<String>(
+              value: o.tag,
+              groupValue: _finalTag,
+              onChanged: (v) => setState(() => _finalTag = v ?? 'proxy'),
+              dense: true,
+              fillColor: WidgetStateProperty.resolveWith<Color?>(
+                (states) => states.contains(WidgetState.selected)
+                    ? AppTheme.primaryNeon
+                    : null,
+              ),
+              title: Text(
+                o.label,
+                style: const TextStyle(color: AppTheme.textPrimary),
+              ),
             ),
           ),
         ],
       ),
-      body: _isLoading && _statusMessage.isEmpty
-          ? const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryNeon),
-              ),
-            )
-          : _statusMessage.isNotEmpty
-          ? Center(
-              child: Text(
-                _statusMessage,
-                style: const TextStyle(color: AppTheme.textSecondary),
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: _rules.map(_buildRuleCard).toList(),
-            ),
     );
   }
+}
+
+class _FinalOption {
+  final String tag;
+  final String label;
+  const _FinalOption(this.tag, this.label);
 }
 
 // 添加规则对话框

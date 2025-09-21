@@ -5,6 +5,8 @@ import 'dns_manager.dart';
 import 'custom_rules_service.dart';
 import 'routing_config_service.dart';
 import 'geosite_manager.dart';
+import 'outbound_binding_service.dart';
+import 'config_manager.dart';
 
 /// 规则与配置组装（兼容 sing-box v1.8.0 及以上）
 /// 符合官方迁移指南：https://sing-box.sagernet.org/zh/migration/#geoip
@@ -362,6 +364,26 @@ class RulesetManager {
     } catch (e) {
       print('[ERROR] 自定义规则服务初始化失败: $e');
     }
+
+    // 确保配置已加载（供多出站绑定解析）
+    try {
+      final cfgMgr = ConfigManager();
+      if (cfgMgr.configs.isEmpty) {
+        await cfgMgr.loadConfigs();
+      }
+    } catch (e) {
+      print('[WARN] 加载配置失败，可能影响多出站绑定: $e');
+    }
+
+    // 初始化多出站绑定服务
+    final outboundBinding = OutboundBindingService.instance;
+    try {
+      if (!outboundBinding.isInitialized) {
+        await outboundBinding.initialize();
+      }
+    } catch (e) {
+      print('[WARN] 初始化多出站绑定服务失败: $e');
+    }
     final inbounds = <Map<String, dynamic>>[];
 
     if (useTun) {
@@ -418,20 +440,76 @@ class RulesetManager {
     // 只调用一次 getRouteConfig，避免重复日志与重复扫描
     final routeConfig = await getRouteConfig(mode);
 
+    // 先组装基础 outbounds
+    final baseOutbounds = getOutbounds({"tag": "proxy", ...proxyConfig});
+
+    // 注入额外出站（proxy-a/proxy-b）
+    try {
+      final extra = outboundBinding.buildAdditionalOutbounds();
+      if (extra.isNotEmpty) {
+        baseOutbounds.addAll(extra);
+      }
+    } catch (e) {
+      print('[WARN] 生成额外出站失败: $e');
+    }
+
+    // 计算最终出站标签（场景），若目标不存在则回退 proxy
+    var finalTag = 'proxy';
+    try {
+      finalTag = outboundBinding.finalOutboundTag;
+      final available = baseOutbounds
+          .map((e) => (e['tag'] ?? '').toString())
+          .where((t) => t.isNotEmpty)
+          .toSet();
+      if (!available.contains(finalTag)) {
+        finalTag = 'proxy';
+      }
+    } catch (_) {}
+
+    // 可用出站标签集合，用于校验规则引用
+    final availableTags = baseOutbounds
+        .map((e) => (e['tag'] ?? '').toString())
+        .where((t) => t.isNotEmpty)
+        .toSet();
+
+    // 取出已有路由规则，并做一次健壮性回退：若规则引用了不存在的出站，则回退到 proxy
+    List<Map<String, dynamic>> _sanitizeRules(
+      List<Map<String, dynamic>> rules,
+    ) {
+      return rules.map((r) {
+        final outbound = r['outbound'];
+        if (outbound is String && outbound.isNotEmpty) {
+          if (!availableTags.contains(outbound)) {
+            // 打印并回退
+            print('[WARN] 规则引用的出站不存在: "$outbound"，已回退为 "proxy"');
+            return {...r, 'outbound': 'proxy'};
+          }
+        }
+        return r;
+      }).toList();
+    }
+
+    final inboundBypassRule = {
+      "inbound": ["latency-test-in"],
+      "outbound": "direct",
+    };
+
+    final mergedRules = <Map<String, dynamic>>[
+      inboundBypassRule,
+      ...?(routeConfig)["rules"] as List?,
+    ];
+    final sanitizedRules = _sanitizeRules(mergedRules);
+
     final config = <String, dynamic>{
       "log": {"level": "error", "timestamp": true},
       "dns": getDnsConfig(mode, useTun: useTun),
       "inbounds": inbounds,
-      "outbounds": getOutbounds({"tag": "proxy", ...proxyConfig}),
+      "outbounds": baseOutbounds,
       "route": {
         ...routeConfig,
-        "rules": [
-          {
-            "inbound": ["latency-test-in"],
-            "outbound": "direct",
-          },
-          ...?(routeConfig)["rules"] as List?,
-        ],
+        // 覆盖最终出站标签
+        "final": finalTag,
+        "rules": sanitizedRules,
       },
     };
 

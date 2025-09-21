@@ -98,7 +98,9 @@ enum RuleType {
 /// 出站动作
 enum OutboundAction {
   direct('direct', '直连', '流量直接连接目标服务器'),
-  proxy('proxy', '代理', '流量通过代理服务器转发'),
+  proxy('proxy', '代理(默认)', '流量通过默认代理服务器转发'),
+  proxyA('proxy-a', '代理A', '流量通过代理A出站'),
+  proxyB('proxy-b', '代理B', '流量通过代理B出站'),
   block('block', '阻断', '阻止流量访问');
 
   const OutboundAction(this.value, this.displayName, this.description);

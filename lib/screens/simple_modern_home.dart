@@ -404,6 +404,21 @@ class SimpleModernHome extends StatelessWidget {
                                 ),
                               ),
                             ),
+                            // const SizedBox(width: 16),
+                            // Expanded(
+                            //   child: HoverScale(
+                            //     child: GestureDetector(
+                            //       onTap: () => _showRoutingRulesPage(
+                            //         context,
+                            //         tabIndex: 1,
+                            //       ),
+                            //       child: _buildFeatureButton(
+                            //         '出站绑定',
+                            //         Icons.swap_horiz,
+                            //       ),
+                            //     ),
+                            //   ),
+                            // ),
                           ],
                         ),
 
@@ -524,156 +539,6 @@ class SimpleModernHome extends StatelessWidget {
     final type = config.type.toUpperCase();
     // 简化展示：直接返回协议名，必要时可拼接子信息
     return type;
-  }
-
-  // 简洁统计卡片（仅主值）
-  Widget _buildMiniStatCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    String? rightValue,
-    String? rightLabel,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-            spreadRadius: 0,
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (rightValue != null && rightLabel != null) ...[
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  rightValue,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.primaryNeon,
-                  ),
-                ),
-                Text(
-                  rightLabel,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.textHint,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // 简洁流量卡片（主值 + 次值：累计字节）
-  Widget _buildMiniTrafficCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required String sub,
-    double? height,
-  }) {
-    return Container(
-      height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderColor.withAlpha(80)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-            spreadRadius: 0,
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Color.fromARGB(255, 199, 230, 22),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      sub,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color.fromARGB(255, 54, 98, 231),
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   // 构建模式按钮
@@ -1089,11 +954,11 @@ class SimpleModernHome extends StatelessWidget {
   }
 
   // 显示分流规则页面
-  void _showRoutingRulesPage(BuildContext context) {
+  void _showRoutingRulesPage(BuildContext context, {int tabIndex = 0}) {
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            const RoutingConfigPage(),
+            RoutingConfigPage(initialTabIndex: tabIndex),
         transitionDuration: const Duration(milliseconds: 300),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);
@@ -1191,6 +1056,8 @@ class SimpleModernHome extends StatelessWidget {
       ),
     );
   }
+
+  // 显示多出站绑定页面
 
   /// 构建当前配置的延时显示
   Widget _buildCurrentConfigPing(VPNProviderV2 provider) {
