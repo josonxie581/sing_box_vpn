@@ -281,7 +281,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
       // 设置透明效果
       await acrylic.Window.setEffect(
         effect: acrylic.WindowEffect.transparent,
-        // color: const Color.fromARGB(0, 47, 46, 46),
+        color: const Color.fromARGB(0, 47, 46, 46),
       );
 
       // 移除标题栏
