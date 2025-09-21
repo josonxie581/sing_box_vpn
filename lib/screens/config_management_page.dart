@@ -223,9 +223,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
               // 自动选择设置
               _buildAutoSelectSettings(provider),
               // 配置列表
-              Expanded(
-                child: _buildCategorizedConfigList(provider),
-              ),
+              Expanded(child: _buildCategorizedConfigList(provider)),
             ],
           );
         },
@@ -257,58 +255,64 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
     return CustomScrollView(
       slivers: [
         // 机场订阅节点分组（按订阅URL分组）
-        ...subscriptionGroups.entries.map((entry) {
-          final subscriptionUrl = entry.key;
-          final configs = entry.value;
-          final sortedConfigs = _applySorting(configs, provider);
+        ...subscriptionGroups.entries
+            .map((entry) {
+              final subscriptionUrl = entry.key;
+              final configs = entry.value;
+              final sortedConfigs = _applySorting(configs, provider);
 
-          // 获取机场名称
-          final subscriptionName = _getSubscriptionDisplayName(subscriptionUrl, provider);
+              // 获取机场名称
+              final subscriptionName = _getSubscriptionDisplayName(
+                subscriptionUrl,
+                provider,
+              );
 
-          // 获取收缩状态（默认为收缩）
-          final isCollapsed = _subscriptionCollapsedStates[subscriptionUrl] ?? true;
+              // 获取收缩状态（默认为收缩）
+              final isCollapsed =
+                  _subscriptionCollapsedStates[subscriptionUrl] ?? true;
 
-          return [
-            SliverToBoxAdapter(
-              child: _buildCategoryHeader(
-                title: subscriptionName,
-                count: configs.length,
-                isCollapsed: isCollapsed,
-                groupId: subscriptionUrl, // 使用订阅URL作为组ID
-                provider: provider, // 传入provider
-                onToggle: () {
-                  setState(() {
-                    _subscriptionCollapsedStates[subscriptionUrl] = !isCollapsed;
-                  });
-                },
-              ),
-            ),
-            if (!isCollapsed)
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final config = sortedConfigs[index];
-                      final originalIndex = provider.configs.indexOf(config);
-                      final isConnected = provider.currentConfig == config && provider.isConnected;
-                      final isCurrent = provider.currentConfig == config;
-
-                      return _buildConfigCard(
-                        context,
-                        config,
-                        originalIndex,
-                        isConnected,
-                        isCurrent,
-                        provider,
-                      );
+              return [
+                SliverToBoxAdapter(
+                  child: _buildCategoryHeader(
+                    title: subscriptionName,
+                    count: configs.length,
+                    isCollapsed: isCollapsed,
+                    groupId: subscriptionUrl, // 使用订阅URL作为组ID
+                    provider: provider, // 传入provider
+                    onToggle: () {
+                      setState(() {
+                        _subscriptionCollapsedStates[subscriptionUrl] =
+                            !isCollapsed;
+                      });
                     },
-                    childCount: sortedConfigs.length,
                   ),
                 ),
-              ),
-          ];
-        }).expand((list) => list),
+                if (!isCollapsed)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final config = sortedConfigs[index];
+                        final originalIndex = provider.configs.indexOf(config);
+                        final isConnected =
+                            provider.currentConfig == config &&
+                            provider.isConnected;
+                        final isCurrent = provider.currentConfig == config;
+
+                        return _buildConfigCard(
+                          context,
+                          config,
+                          originalIndex,
+                          isConnected,
+                          isCurrent,
+                          provider,
+                        );
+                      }, childCount: sortedConfigs.length),
+                    ),
+                  ),
+              ];
+            })
+            .expand((list) => list),
 
         // 手动添加节点分组（如果有的话）
         if (manualConfigs.isNotEmpty) ...[
@@ -330,32 +334,28 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final config = sortedManualConfigs[index];
-                    final originalIndex = provider.configs.indexOf(config);
-                    final isConnected = provider.currentConfig == config && provider.isConnected;
-                    final isCurrent = provider.currentConfig == config;
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final config = sortedManualConfigs[index];
+                  final originalIndex = provider.configs.indexOf(config);
+                  final isConnected =
+                      provider.currentConfig == config && provider.isConnected;
+                  final isCurrent = provider.currentConfig == config;
 
-                    return _buildConfigCard(
-                      context,
-                      config,
-                      originalIndex,
-                      isConnected,
-                      isCurrent,
-                      provider,
-                    );
-                  },
-                  childCount: sortedManualConfigs.length,
-                ),
+                  return _buildConfigCard(
+                    context,
+                    config,
+                    originalIndex,
+                    isConnected,
+                    isCurrent,
+                    provider,
+                  );
+                }, childCount: sortedManualConfigs.length),
               ),
             ),
         ],
 
         // 底部间距
-        const SliverToBoxAdapter(
-          child: SizedBox(height: 20),
-        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 20)),
       ],
     );
   }
@@ -417,7 +417,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 });
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? AppTheme.primaryNeon.withOpacity(0.15)
@@ -425,29 +428,41 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: isSelected
-                        ? AppTheme.primaryNeon
-                        : AppTheme.primaryNeon.withOpacity(0.3),
+                        ? AppTheme.accentNeon
+                        : AppTheme.accentNeon.withOpacity(0.3),
                     width: isSelected ? 2 : 1,
                   ),
                   // 增强阴影效果和多层发光
-                  boxShadow: isSelected ? [
-                    BoxShadow(
-                      color: AppTheme.primaryNeon.withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                    BoxShadow(
-                      color: AppTheme.primaryNeon.withOpacity(0.1),
-                      blurRadius: 24,
-                      offset: const Offset(0, 8),
-                    ),
-                  ] : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: const Color.fromARGB(
+                              255,
+                              175,
+                              158,
+                              180,
+                            ).withOpacity(0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                          BoxShadow(
+                            color: const Color.fromARGB(
+                              255,
+                              146,
+                              96,
+                              238,
+                            ).withOpacity(0.1),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ]
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                 ),
                 child: Row(
                   children: [
@@ -465,7 +480,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                     // 图标
                     Icon(
                       title.contains('订阅') ? Icons.rss_feed : Icons.edit,
-                      color: isSelected ? AppTheme.primaryNeon : AppTheme.primaryNeon.withOpacity(0.7),
+                      color: isSelected
+                          ? AppTheme.primaryNeon
+                          : AppTheme.primaryNeon.withOpacity(0.7),
                       size: 20,
                     ),
                     const SizedBox(width: 12),
@@ -476,14 +493,19 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: isSelected ? AppTheme.primaryNeon : AppTheme.textPrimary,
+                          color: isSelected
+                              ? AppTheme.primaryNeon
+                              : AppTheme.textPrimary,
                         ),
                       ),
                     ),
                     // 选中状态指示
                     if (isSelected)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.primaryNeon.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(12),
@@ -506,7 +528,9 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                     if (onToggle != null)
                       Icon(
                         isCollapsed ? Icons.expand_more : Icons.expand_less,
-                        color: isSelected ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                        color: isSelected
+                            ? AppTheme.primaryNeon
+                            : AppTheme.textSecondary,
                         size: 20,
                       ),
                   ],
@@ -520,7 +544,10 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 对配置列表应用排序
-  List<VPNConfig> _applySorting(List<VPNConfig> configs, VPNProviderV2 provider) {
+  List<VPNConfig> _applySorting(
+    List<VPNConfig> configs,
+    VPNProviderV2 provider,
+  ) {
     if (!_isSortedByPing) {
       return configs;
     }
@@ -1073,12 +1100,13 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
   }
 
   /// 获取订阅显示名称
-  String _getSubscriptionDisplayName(String subscriptionUrl, VPNProviderV2 provider) {
+  String _getSubscriptionDisplayName(
+    String subscriptionUrl,
+    VPNProviderV2 provider,
+  ) {
     // 直接使用域名显示
     return _getSimpleAirportName(subscriptionUrl);
   }
-
-
 
   /// 从URL获取简单机场名称（域名）
   String _getSimpleAirportName(String url) {

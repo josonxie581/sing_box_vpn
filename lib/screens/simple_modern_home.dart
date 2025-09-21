@@ -8,12 +8,12 @@ import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
 // import 'add_config_page.dart';
 import 'enhanced_connection_status_page.dart';
-import 'routing_rules_page.dart';
+// import 'routing_rules_page.dart';
 import 'routing_config_page.dart';
 import 'dns_settings_page.dart';
 import 'config_management_page.dart';
 import 'logs_page.dart';
-import 'geosite_manager_page.dart';
+// import 'geosite_manager_page.dart';
 import '../widgets/animated_connection_button.dart';
 import '../widgets/hover_scale.dart';
 import 'package:gsou/utils/privilege_manager.dart';
@@ -44,7 +44,7 @@ class SimpleModernHome extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         // 第一行：上传（左）+ 连接按钮（中间）+ 下载（右） - 全部在一个卡片内
                         Container(
                           height: 100,
@@ -112,7 +112,7 @@ class SimpleModernHome extends StatelessWidget {
                                         provider.uploadBytes,
                                       ),
                                       style: const TextStyle(
-                                        fontSize: 10,
+                                        fontSize: 16,
                                         color: Color.fromARGB(255, 54, 98, 231),
                                       ),
                                     ),
@@ -203,7 +203,7 @@ class SimpleModernHome extends StatelessWidget {
                                         provider.downloadBytes,
                                       ),
                                       style: const TextStyle(
-                                        fontSize: 10,
+                                        fontSize: 16,
                                         color: Color.fromARGB(255, 54, 98, 231),
                                       ),
                                     ),
@@ -213,7 +213,7 @@ class SimpleModernHome extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 6),
                         // 第二行：当前节点配置信息 + 延时
                         HoverScale(
                           enabled: true,
@@ -290,7 +290,7 @@ class SimpleModernHome extends StatelessWidget {
                           ),
                         ),
 
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 6),
                         // 连接时长统计
                         HoverScale(
                           scale: 1.02,
@@ -350,7 +350,7 @@ class SimpleModernHome extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 6),
 
                         // 代理模式按钮（两个卡片）
                         Row(
@@ -378,7 +378,7 @@ class SimpleModernHome extends StatelessWidget {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 6),
 
                         // 订阅/节点配置 & DNS
                         Row(
@@ -407,7 +407,7 @@ class SimpleModernHome extends StatelessWidget {
                           ],
                         ),
 
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 6),
 
                         // 日志 & 分流规则
                         Row(
@@ -496,17 +496,17 @@ class SimpleModernHome extends StatelessWidget {
                           ],
                         ),
 
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 6),
 
                         // TUN / 守护进程 卡片（这里用 TUN 模式卡片）
                         _buildDaemonCard(context, provider),
 
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 6),
 
                         // 系统代理开关
                         _buildSystemProxyToggle(provider),
 
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 10),
                       ],
                     ),
                   );
@@ -682,12 +682,12 @@ class SimpleModernHome extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
         color: isSelected
-            ? const Color.fromARGB(255, 75, 140, 57).withAlpha(30)
+            ? const Color.fromARGB(255, 117, 52, 202).withAlpha(30)
             : AppTheme.bgCard,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isSelected
-              ? const Color.fromARGB(255, 101, 165, 55)
+              ? const Color.fromARGB(255, 141, 53, 230)
               : AppTheme.borderColor.withAlpha(100),
         ),
       ),

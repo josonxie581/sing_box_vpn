@@ -86,8 +86,8 @@ void main() async {
   }
 
   const windowOptions = WindowOptions(
-    size: Size(450, 710),
-    minimumSize: Size(450, 710),
+    size: Size(450, 680),
+    minimumSize: Size(450, 680),
     maximumSize: Size(450, 12000),
     center: true,
     backgroundColor: Colors.transparent,
@@ -101,7 +101,7 @@ void main() async {
     await windowManager.focus();
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(false);
-    await windowManager.setMinimumSize(const Size(450, 710));
+    await windowManager.setMinimumSize(const Size(450, 680));
     await windowManager.setMaximumSize(const Size(450, 12000));
     await windowManager.setPreventClose(true); // 防止直接关闭
 
@@ -281,7 +281,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
       // 设置透明效果
       await acrylic.Window.setEffect(
         effect: acrylic.WindowEffect.transparent,
-        color: Colors.transparent,
+        // color: const Color.fromARGB(0, 47, 46, 46),
       );
 
       // 移除标题栏
@@ -300,7 +300,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
       await windowManager.setClosable(false);
 
       // 设置悬浮窗大小
-      const overlaySize = Size(220, 30);
+      const overlaySize = Size(230, 30);
       await windowManager.setMinimumSize(overlaySize);
       await windowManager.setMaximumSize(overlaySize);
       await windowManager.setSize(overlaySize);
@@ -372,9 +372,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
       }
 
       // 恢复窗口大小
-      await windowManager.setMinimumSize(const Size(450, 710));
+      await windowManager.setMinimumSize(const Size(450, 680));
       await windowManager.setMaximumSize(const Size(450, 12000));
-      await windowManager.setSize(const Size(450, 710));
+      await windowManager.setSize(const Size(450, 680));
 
       // 更新状态并重建界面
       setState(() => _isMinimized = false);

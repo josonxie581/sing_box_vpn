@@ -38,10 +38,10 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
                   duration: const Duration(milliseconds: 200),
                   // padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: _isHovered
-                        ? const Color.fromARGB(0, 86, 85, 85) // 更深的黑色背景
-                        : const Color.fromARGB(135, 70, 69, 69), // 半透明黑色背景
-                    borderRadius: BorderRadius.circular(12),
+                    // color: _isHovered
+                    //     ? const Color.fromARGB(0, 86, 85, 85) // 更深的黑色背景
+                    //     : const Color.fromARGB(135, 70, 69, 69), // 半透明黑色背景
+                    borderRadius: BorderRadius.circular(10),
                     boxShadow: _isHovered
                         ? [
                             BoxShadow(
@@ -69,7 +69,7 @@ class _SpeedOverlayState extends State<SpeedOverlay> {
                       Text(
                         up,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 16,
                           color: const Color(
                             0xFF00D4FF,
                           ).withOpacity(_isHovered ? 1.0 : 0.9),

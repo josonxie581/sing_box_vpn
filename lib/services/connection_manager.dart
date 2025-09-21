@@ -42,7 +42,7 @@ class ConnectionManager {
   ProxyMode _proxyMode = ProxyMode.rule;
   bool _useTun = false;
   bool _tunStrictRoute = false;
-  int _localPort = 7890;
+  int _localPort = 0; // 将在 init() 中从 DnsManager 获取实际配置值
   bool _autoSystemProxy = false;
   bool _enableClashApi = true;
   int _clashApiPort = 9090;

@@ -9,8 +9,8 @@ class AppTheme {
   static const Color errorRed = Color(0xFFFF0055); // 错误红
 
   // 背景色 - 深色调
-  static const Color bgDark = Color(0xFF0A0E1A); // 深背景
-  static const Color bgCard = Color.fromARGB(255, 32, 38, 57); // 卡片背景
+  static const Color bgDark = Color.fromARGB(255, 16, 18, 26); // 深背景
+  static const Color bgCard = Color.fromARGB(255, 20, 24, 32); // 卡片背景
   static const Color bgSurface = Color(0xFF1C2333); // 表面背景
   static const Color bgElevated = Color(0xFF252B3D); // 提升背景
 
@@ -33,7 +33,7 @@ class AppTheme {
       colorScheme: const ColorScheme.dark(
         primary: primaryNeon,
         secondary: accentNeon,
-        surface: bgCard,
+        surface: Color.fromARGB(213, 9, 12, 18),
         error: errorRed,
         onPrimary: bgDark,
         onSecondary: bgDark,
@@ -46,11 +46,14 @@ class AppTheme {
 
       // 卡片主题
       cardTheme: CardThemeData(
-        color: bgCard,
+        color: const Color.fromARGB(255, 28, 29, 32),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: borderColor.withOpacity(0.3), width: 1),
+          side: BorderSide(
+            color: const Color.fromARGB(255, 30, 32, 36).withOpacity(0.3),
+            width: 1,
+          ),
         ),
         shadowColor: primaryNeon.withOpacity(0.2),
       ),

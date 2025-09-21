@@ -461,6 +461,27 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
   /// 构建TTL卡片
   Widget _buildTtlCard() {
+    // TTL值到中文标签的映射
+    final ttlLabels = {
+      '30s': '30秒',
+      '1m': '1分钟',
+      '5m': '5分钟',
+      '10m': '10分钟',
+      '30m': '30分钟',
+      '1h': '1小时',
+      '2h': '2小时',
+      '6h': '6小时',
+      '12h': '12小时',
+      '24h': '24小时',
+      '48h': '48小时',
+      '72h': '72小时',
+      '1 h': '1小时',  // 兼容旧格式
+      '12 h': '12小时', // 兼容旧格式
+    };
+
+    final currentTtl = _dnsManager.ttl;
+    final displayLabel = ttlLabels[currentTtl] ?? currentTtl;
+
     return GestureDetector(
       onTap: () => _showTtlDialog(),
       child: Container(
@@ -497,7 +518,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
               ),
             ),
             Text(
-              _dnsManager.ttl,
+              displayLabel,
               style: const TextStyle(
                 fontSize: 14,
                 color: AppTheme.textSecondary,
@@ -949,28 +970,91 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
     );
   }
 
+  String _getProxyResolverLabel(String value) {
+    switch (value) {
+      case 'Auto':
+        return '自动';
+      case 'FakeIP':
+        return '虚拟IP';
+      case 'Remote':
+        return '远程解析';
+      default:
+        return value;
+    }
+  }
+
   Widget _buildProxyResolverCard() {
     final provider = context.read<VPNProviderV2>();
+
+    // 选项与描述映射
+    final optionsMap = {
+      'Auto': '自动选择最佳策略',
+      'FakeIP': '使用虚拟IP（推荐）',
+      'Remote': '使用远程解析',
+    };
+
     return GestureDetector(
       onTap: () async {
-        final options = ['FakeIP', 'Remote'];
         final selected = await showDialog<String>(
           context: context,
           builder: (context) => SimpleDialog(
-            title: const Text('代理流量解析通道'),
-            children: options
+            backgroundColor: AppTheme.bgDark,
+            title: const Text(
+              '代理流量解析通道',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            children: optionsMap.entries
                 .map(
-                  (e) => SimpleDialogOption(
-                    onPressed: () => Navigator.pop(context, e),
-                    child: Row(
-                      children: [
-                        if (_dnsManager.proxyResolver == e)
-                          const Icon(Icons.check, size: 16)
-                        else
-                          const SizedBox(width: 16),
-                        const SizedBox(width: 8),
-                        Text(e),
-                      ],
+                  (entry) => SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, entry.key),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          if (_dnsManager.proxyResolver == entry.key)
+                            const Icon(
+                              Icons.check_circle,
+                              size: 20,
+                              color: AppTheme.primaryNeon,
+                            )
+                          else
+                            Icon(
+                              Icons.radio_button_unchecked,
+                              size: 20,
+                              color: AppTheme.textSecondary.withAlpha(100),
+                            ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  entry.key,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w500,
+                                    color: _dnsManager.proxyResolver == entry.key
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  entry.value,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 )
@@ -1016,7 +1100,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
               ),
             ),
             Text(
-              _dnsManager.proxyResolver,
+              _getProxyResolverLabel(_dnsManager.proxyResolver),
               style: const TextStyle(
                 fontSize: 14,
                 color: AppTheme.textSecondary,
@@ -1096,13 +1180,158 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
   Future<void> _showTtlDialog() async {
     final provider = context.read<VPNProviderV2>();
-    await _editText(
-      title: 'TTL',
-      initial: _dnsManager.ttl,
-      hint: '如 1h, 30m',
-      onSave: (v) {
-        setState(() => _dnsManager.ttl = v.trim());
-        provider.onDnsSettingsChanged();
+
+    // 预定义的TTL选项
+    final ttlOptions = [
+      {'value': '30s', 'label': '30秒'},
+      {'value': '1m', 'label': '1分钟'},
+      {'value': '5m', 'label': '5分钟'},
+      {'value': '10m', 'label': '10分钟'},
+      {'value': '30m', 'label': '30分钟'},
+      {'value': '1h', 'label': '1小时'},
+      {'value': '2h', 'label': '2小时'},
+      {'value': '6h', 'label': '6小时'},
+      {'value': '12h', 'label': '12小时'},
+      {'value': '24h', 'label': '24小时'},
+      {'value': '48h', 'label': '48小时'},
+      {'value': '72h', 'label': '72小时'},
+    ];
+
+    String? selectedTtl = _dnsManager.ttl;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.bgDark,
+          title: const Text(
+            'TTL设置',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          content: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              return Container(
+                width: double.maxFinite,
+                constraints: const BoxConstraints(maxHeight: 400),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'DNS缓存存活时间，控制DNS记录的缓存时长',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: ttlOptions.map((option) {
+                            final isSelected = selectedTtl == option['value'];
+                            return InkWell(
+                              onTap: () {
+                                setState(() {
+                                  selectedTtl = option['value'] as String;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? AppTheme.primaryNeon.withAlpha(30)
+                                      : AppTheme.bgCard,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.borderColor.withAlpha(100),
+                                    width: isSelected ? 2 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            option['label'] as String,
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
+                                              color: isSelected
+                                                  ? AppTheme.primaryNeon
+                                                  : AppTheme.textPrimary,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            option['value'] as String,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isSelected
+                                                  ? AppTheme.primaryNeon.withAlpha(180)
+                                                  : AppTheme.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (isSelected)
+                                      Icon(
+                                        Icons.check_circle,
+                                        size: 20,
+                                        color: AppTheme.primaryNeon,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                '取消',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                if (selectedTtl != null && selectedTtl != _dnsManager.ttl) {
+                  this.setState(() => _dnsManager.ttl = selectedTtl!);
+                  provider.onDnsSettingsChanged();
+                }
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                '确定',
+                style: TextStyle(color: AppTheme.primaryNeon),
+              ),
+            ),
+          ],
+        );
       },
     );
   }

@@ -70,6 +70,8 @@ class NodeDelayTester {
   static const int defaultTimeout = 10000; // 默认超时 10 秒
   static const int defaultMaxConcurrency = 5; // 默认最大并发数
   static const String defaultTestUrl = 'https://cloudflare.com/cdn-cgi/trace';
+  static const int defaultTestPort = 10808; // 默认测试端口
+  static const int defaultPortBase = 20808; // 默认并发测试端口起始值
 
   final int timeout;
   final int maxConcurrency;
@@ -121,9 +123,9 @@ class NodeDelayTester {
 
   /// 初始化端口池
   void _initPortPool() {
-    // 生成一组可用端口（从20808开始）
+    // 生成一组可用端口（从 defaultPortBase 开始）
     for (int i = 0; i < maxConcurrency; i++) {
-      _availablePorts.add(20808 + i);
+      _availablePorts.add(defaultPortBase + i);
     }
   }
 
@@ -283,7 +285,7 @@ class NodeDelayTester {
               localProxyPort ??
               (_availablePorts.isNotEmpty
                   ? _availablePorts[completedNodes % _availablePorts.length]
-                  : 10808);
+                  : defaultTestPort);
 
           final result = await testSingleNode(node, proxyPort: port);
 

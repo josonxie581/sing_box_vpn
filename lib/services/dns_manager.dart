@@ -8,18 +8,21 @@ class DnsManager {
   factory DnsManager() => _instance;
   DnsManager._internal();
 
+  // 默认端口配置
+  static const int defaultLocalPort = 7890;
+
   // 规则集定义如需变更：Route 中的 rule_set 提供，这里不再单独维护本地路径常量
   // DNS 配置项
   bool _tunHijackDns = true; // 是否在 TUN 下劫持本地系统 DNS 请求
   bool _resolveInboundDomains = false; // 是否反向解析入站连接的远程地址（reverse_mapping）
   String _testDomain = 'gstatic.com'; // 用于测试连通性的默认测试域名
-  String _ttl = '1 h'; // 缓存 TTL 字符串表达
+  String _ttl = '1h'; // 缓存 TTL 字符串表达（sing-box格式：无空格）
   bool _enableDnsRouting = false; // 是否启用基于 DNS 的路由细分
   bool _enableEcs = true; // 是否启用 EDNS Client Subnet（当前未显式使用，可预留）
-  String _proxyResolver = 'FakeIP'; // 代理侧解析策略 (FakeIP / Remote 等)
+  String _proxyResolver = 'Auto'; // 代理侧解析策略 (Auto / FakeIP / Remote)
   bool _strictRoute = false; // DNS严格路由，确保DNS查询严格按照路由规则进行
   bool _enableIpv6 = false; // 是否启用IPv6支持（影响TUN接口配置）
-  int _localPort = 7890; // 本地混合代理端口
+  int _localPort = defaultLocalPort; // 本地混合代理端口
 
   // 运行时探测结果：实际链路是否可用IPv6（优先与用户开关共同决定最终行为）
   bool _ipv6RuntimeAvailable = false;
@@ -165,7 +168,8 @@ class DnsManager {
   }
 
   set ttl(String value) {
-    _ttl = value;
+    // 自动格式化TTL值，移除空格以符合sing-box格式
+    _ttl = value.replaceAll(' ', '');
     _saveSettings();
   }
 
@@ -350,13 +354,15 @@ class DnsManager {
       _tunHijackDns = prefs.getBool('dns_tun_hijack') ?? true;
       _resolveInboundDomains = prefs.getBool('dns_resolve_inbound') ?? false;
       _testDomain = prefs.getString('dns_test_domain') ?? 'gstatic.com';
-      _ttl = prefs.getString('dns_ttl') ?? '12 h';
+      // 读取TTL并格式化（兼容旧格式带空格的值）
+      final storedTtl = prefs.getString('dns_ttl') ?? '12h';
+      _ttl = storedTtl.replaceAll(' ', '');
       _enableDnsRouting = prefs.getBool('dns_enable_routing') ?? false;
       _enableEcs = prefs.getBool('dns_enable_ecs') ?? true;
-      _proxyResolver = prefs.getString('dns_proxy_resolver') ?? 'FakeIP';
+      _proxyResolver = prefs.getString('dns_proxy_resolver') ?? 'Auto';
       _strictRoute = prefs.getBool('dns_strict_route') ?? false;
       _enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
-      _localPort = prefs.getInt('dns_local_port') ?? 7890;
+      _localPort = prefs.getInt('dns_local_port') ?? defaultLocalPort;
 
       // Tailscale settings
       _tailscaleEnabled = prefs.getBool('ts_enabled') ?? false;
@@ -723,6 +729,26 @@ class DnsManager {
       });
     }
 
+    // 解析TTL值，根据TTL长短决定缓存策略
+    final ttlValue = _parseTtlToSeconds(_ttl);
+    bool disableCache = false;
+    bool disableExpire = false;
+
+    // 根据TTL值调整缓存策略
+    if (ttlValue <= 60) {
+      // TTL <= 1分钟：禁用缓存，适用于高动态环境
+      disableCache = true;
+      disableExpire = true;
+    } else if (ttlValue <= 300) {
+      // TTL <= 5分钟：启用缓存但快速过期
+      disableCache = false;
+      disableExpire = false;
+    } else {
+      // TTL > 5分钟：正常缓存
+      disableCache = false;
+      disableExpire = false;
+    }
+
     final result = {
       'servers': servers,
       'rules': rules,
@@ -731,8 +757,8 @@ class DnsManager {
       'strategy': (useTun
           ? 'prefer_ipv4'
           : _getResolverStrategy()), // 改为prefer_ipv4提高稳定性
-      'disable_cache': false,
-      'disable_expire': false,
+      'disable_cache': disableCache,
+      'disable_expire': disableExpire,
       'reverse_mapping': _resolveInboundDomains,
       // 保持兼容的配置
       'client_subnet': '0.0.0.0/0',
@@ -744,8 +770,18 @@ class DnsManager {
       result['disable_cache'] = true; // 严格模式下禁用缓存以确保每次查询都按规则路由
     }
 
-    // FakeIP 配置：在 FakeIP 模式或者使用 TUN 时启用，减少 DNS 污染并提升兼容性
-    if (_proxyResolver == 'FakeIP' || useTun) {
+    // FakeIP 配置：在 FakeIP 模式、Auto 模式（使用 TUN 时）或者使用 TUN 时启用，减少 DNS 污染并提升兼容性
+    // Auto 模式下，TUN 模式使用 FakeIP，非 TUN 模式使用 Remote
+    bool enableFakeIp = false;
+    if (_proxyResolver == 'FakeIP') {
+      enableFakeIp = true;
+    } else if (_proxyResolver == 'Auto') {
+      enableFakeIp = useTun; // Auto 模式下，TUN 使用 FakeIP，否则使用 Remote
+    } else if (useTun) {
+      enableFakeIp = true; // TUN 模式总是启用 FakeIP 以提升兼容性
+    }
+
+    if (enableFakeIp) {
       result['fakeip'] = {
         'enabled': true,
         'inet4_range': '198.18.0.0/15',
@@ -777,12 +813,44 @@ class DnsManager {
   /// 获取解析策略
   String _getResolverStrategy() {
     switch (_proxyResolver.toLowerCase()) {
+      case 'auto':
+        return 'prefer_ipv4'; // Auto 模式使用标准策略
       case 'fakeip':
         return 'prefer_ipv4';
       case 'remote':
         return 'prefer_ipv4';
       default:
         return 'prefer_ipv4';
+    }
+  }
+
+  /// 解析TTL字符串为秒数
+  int _parseTtlToSeconds(String ttl) {
+    // 移除空格
+    ttl = ttl.replaceAll(' ', '').toLowerCase();
+
+    // 正则匹配数字和单位
+    final regex = RegExp(r'^(\d+)([smhd]?)$');
+    final match = regex.firstMatch(ttl);
+
+    if (match == null) {
+      return 3600; // 默认1小时
+    }
+
+    final value = int.tryParse(match.group(1) ?? '') ?? 1;
+    final unit = match.group(2) ?? 'h';
+
+    switch (unit) {
+      case 's':
+        return value; // 秒
+      case 'm':
+        return value * 60; // 分钟
+      case 'h':
+        return value * 3600; // 小时
+      case 'd':
+        return value * 86400; // 天
+      default:
+        return value * 3600; // 默认小时
     }
   }
 
