@@ -101,28 +101,44 @@ class OfficialScreenCapture {
   /// 截取区域并识别二维码
   static Future<String?> captureRegionAndScanQR() async {
     try {
+      print('正在启动区域截图...');
       final screenshotPath = await captureRegion();
       if (screenshotPath == null) {
+        print('区域截图被取消或失败');
         return null;
       }
 
-      print('开始识别区域二维码...');
+      print('截图成功，开始识别二维码...');
+      print('图片路径: $screenshotPath');
+
+      // 检查文件大小
+      final file = File(screenshotPath);
+      final fileSize = await file.length();
+      print('图片大小: ${(fileSize / 1024).toStringAsFixed(2)} KB');
+
       final qrText = await QrDecoderService.decodeFromFile(screenshotPath);
 
       // 清理临时文件
       try {
         await File(screenshotPath).delete();
+        print('临时文件已清理');
       } catch (e) {
         print('清理临时文件失败: $e');
       }
 
       if (qrText != null) {
-        print('区域二维码识别成功: $qrText');
+        print('✅ 二维码识别成功');
+        print('识别内容长度: ${qrText.length} 字符');
+        return qrText;
       } else {
-        print('区域中未识别到二维码');
+        print('❌ 未能识别到二维码，可能原因：');
+        print('1. 图片中不包含二维码');
+        print('2. 二维码质量较差或模糊');
+        print('3. 二维码被部分遮挡');
+        print('4. 二维码格式不支持');
       }
 
-      return qrText;
+      return null;
     } catch (e) {
       print('区域截图识别失败: $e');
       return null;

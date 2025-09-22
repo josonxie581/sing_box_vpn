@@ -31,20 +31,37 @@ class SimpleQRFunctions {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final imagePath = '${tempDir.path}\\clipboard_$timestamp.png';
 
-      // PowerShell 脚本
+      // 改进的PowerShell 脚本，增强兼容性
       final script = '''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 try {
+    # 确保剪贴板包含图片
     if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
         \$image = [System.Windows.Forms.Clipboard]::GetImage()
         if (\$image -ne \$null) {
+            # 确保保存为PNG格式以保持质量
             \$image.Save('$imagePath', [System.Drawing.Imaging.ImageFormat]::Png)
             \$image.Dispose()
             Write-Output "SUCCESS"
         } else {
             Write-Output "NO_IMAGE_OBJECT"
+        }
+    } elseif ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
+        # 如果剪贴板包含文件，检查是否为图片文件
+        \$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+        foreach (\$file in \$files) {
+            if (\$file -match '\\.(png|jpg|jpeg|bmp|gif)\$') {
+                \$image = [System.Drawing.Image]::FromFile(\$file)
+                \$image.Save('$imagePath', [System.Drawing.Imaging.ImageFormat]::Png)
+                \$image.Dispose()
+                Write-Output "SUCCESS"
+                break
+            }
+        }
+        if (-not (Test-Path '$imagePath')) {
+            Write-Output "NO_IMAGE_FILE"
         }
     } else {
         Write-Output "NO_IMAGE_IN_CLIPBOARD"

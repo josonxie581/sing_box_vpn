@@ -1464,6 +1464,14 @@ class _AddConfigPageState extends State<AddConfigPage>
               child: OutlinedButton.icon(
                 onPressed: () async {
                   try {
+                    // 显示操作提示
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('请框选包含二维码的区域...'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+
                     // 检查截图权限
                     final hasAccess = await OfficialScreenCapture.isAccessAllowed();
                     if (!hasAccess) {
@@ -1475,7 +1483,10 @@ class _AddConfigPageState extends State<AddConfigPage>
 
                     if (qrText == null || qrText.trim().isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('未识别到二维码')),
+                        const SnackBar(
+                          content: Text('未识别到二维码，请确保：\n1. 二维码清晰完整\n2. 选择区域包含整个二维码'),
+                          duration: Duration(seconds: 4),
+                        ),
                       );
                       return;
                     }
@@ -1484,25 +1495,40 @@ class _AddConfigPageState extends State<AddConfigPage>
                     // 优先尝试单条链接
                     final ok = await provider.importFromLink(qrText.trim());
                     if (!ok) {
+                      // 尝试作为订阅链接导入
                       final count = await provider.importFromSubscription(qrText);
                       if (count <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('二维码内容无法导入')),
+                          const SnackBar(
+                            content: Text('二维码内容无法识别为有效的配置链接'),
+                            duration: Duration(seconds: 3),
+                          ),
                         );
                         return;
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('成功导入 $count 个配置')),
+                          SnackBar(
+                            content: Text('✅ 成功从订阅导入 $count 个配置'),
+                            backgroundColor: Colors.green,
+                          ),
                         );
+                        Navigator.pop(context);
                       }
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('区域截图识别导入成功')),
+                        const SnackBar(
+                          content: Text('✅ 成功导入配置'),
+                          backgroundColor: Colors.green,
+                        ),
                       );
+                      Navigator.pop(context);
                     }
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('截图检测失败: $e')),
+                      SnackBar(
+                        content: Text('截图识别失败: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                      ),
                     );
                   }
                 },
