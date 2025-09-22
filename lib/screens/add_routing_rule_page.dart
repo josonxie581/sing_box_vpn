@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/routing_rule_config.dart';
+import '../services/outbound_binding_service.dart';
 
 class AddRoutingRulePage extends StatefulWidget {
   final List<String> availableRulesets;
@@ -24,11 +25,38 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
   String? _selectedRuleset;
   RuleType _selectedType = RuleType.geosite;
   OutboundAction _selectedOutbound = OutboundAction.proxy;
+  List<OutboundAction> _availableOutbounds = OutboundAction.predefinedActions;
 
   @override
   void initState() {
     super.initState();
     _updateAvailableRulesets();
+    _loadDynamicOutbounds();
+  }
+
+  Future<void> _loadDynamicOutbounds() async {
+    try {
+      final bindingService = OutboundBindingService.instance;
+      if (!bindingService.isInitialized) {
+        await bindingService.initialize();
+      }
+
+      final dynamicTags = bindingService.getAvailableOutboundTags();
+      final dynamicDisplayNames = <String, String>{};
+
+      for (final outbound in bindingService.dynamicOutbounds) {
+        dynamicDisplayNames[outbound.tag] = outbound.displayName;
+      }
+
+      setState(() {
+        _availableOutbounds = OutboundAction.getAllActions(
+          dynamicTags: dynamicTags,
+          dynamicDisplayNames: dynamicDisplayNames,
+        );
+      });
+    } catch (e) {
+      print('[AddRoutingRule] 加载动态出站失败: $e');
+    }
   }
 
   void _updateAvailableRulesets() {
@@ -182,7 +210,7 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
                 labelText: '出站动作',
                 labelStyle: TextStyle(color: AppTheme.textSecondary),
               ),
-              items: OutboundAction.values.map((action) {
+              items: _availableOutbounds.map((action) {
                 return DropdownMenuItem(
                   value: action,
                   child: Text(action.displayName),

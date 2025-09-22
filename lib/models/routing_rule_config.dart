@@ -95,24 +95,82 @@ enum RuleType {
   }
 }
 
-/// 出站动作
-enum OutboundAction {
-  direct('direct', '直连', '流量直接连接目标服务器'),
-  proxy('proxy', '代理(默认)', '流量通过默认代理服务器转发'),
-  proxyA('proxy-a', '代理A', '流量通过代理A出站'),
-  proxyB('proxy-b', '代理B', '流量通过代理B出站'),
-  block('block', '阻断', '阻止流量访问');
-
-  const OutboundAction(this.value, this.displayName, this.description);
-
+/// 出站动作 - 支持动态出站
+class OutboundAction {
   final String value;
   final String displayName;
   final String description;
+  final bool isDynamic;
 
-  static OutboundAction fromString(String value) {
-    return OutboundAction.values.firstWhere(
-      (action) => action.value == value,
-      orElse: () => OutboundAction.direct,
+  const OutboundAction._(this.value, this.displayName, this.description, {this.isDynamic = false});
+
+  // 系统保留的出站动作
+  static const direct = OutboundAction._('direct', '直连', '流量直接连接目标服务器');
+  static const proxy = OutboundAction._('proxy', '代理(默认)', '流量通过默认代理服务器转发');
+  static const block = OutboundAction._('block', '阻断', '阻止流量访问');
+
+  // 系统预定义的出站动作（不包含动态出站）
+  static const List<OutboundAction> predefinedActions = [
+    direct,
+    proxy,
+    block,
+  ];
+
+  /// 创建动态出站动作
+  static OutboundAction dynamic(String tag, String displayName, {String? description}) {
+    return OutboundAction._(
+      tag,
+      displayName,
+      description ?? '流量通过 $displayName 出站',
+      isDynamic: true,
     );
   }
+
+  /// 从字符串值创建出站动作
+  static OutboundAction fromString(String value, {String? displayName}) {
+    // 首先检查预定义的动作
+    for (final action in predefinedActions) {
+      if (action.value == value) {
+        return action;
+      }
+    }
+
+    // 如果不是预定义的，创建动态出站
+    return OutboundAction.dynamic(
+      value,
+      displayName ?? value.toUpperCase(),
+    );
+  }
+
+  /// 获取所有可用的出站动作（包括动态的）
+  static List<OutboundAction> getAllActions({
+    List<String>? dynamicTags,
+    Map<String, String>? dynamicDisplayNames,
+  }) {
+    final actions = List<OutboundAction>.from(predefinedActions);
+
+    if (dynamicTags != null) {
+      for (final tag in dynamicTags) {
+        // 跳过预定义的标签
+        if (predefinedActions.any((a) => a.value == tag)) continue;
+
+        final displayName = dynamicDisplayNames?[tag] ?? tag.toUpperCase();
+        actions.add(OutboundAction.dynamic(tag, displayName));
+      }
+    }
+
+    return actions;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is OutboundAction && other.value == value;
+  }
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => value;
 }
