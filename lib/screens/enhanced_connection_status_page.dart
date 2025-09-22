@@ -10,27 +10,32 @@ class EnhancedConnectionStatusPage extends StatefulWidget {
   const EnhancedConnectionStatusPage({super.key});
 
   @override
-  State<EnhancedConnectionStatusPage> createState() => _EnhancedConnectionStatusPageState();
+  State<EnhancedConnectionStatusPage> createState() =>
+      _EnhancedConnectionStatusPageState();
 }
 
-class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusPage> {
+class _EnhancedConnectionStatusPageState
+    extends State<EnhancedConnectionStatusPage> {
   bool isPaused = false;
   String sortBy = 'time'; // time, upload, download, total, proxy
   String filterProtocol = 'all'; // all, tcp, udp
   final Set<String> _expandedItems = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  List<Map<String, dynamic>> _pausedConnections = []; // 暂停时保存的连接状态
 
   void _sortConnections(List<Map<String, dynamic>> connections) {
     switch (sortBy) {
       case 'upload':
         connections.sort(
-          (a, b) => (b['uploadBytes'] as int).compareTo(a['uploadBytes'] as int),
+          (a, b) =>
+              (b['uploadBytes'] as int).compareTo(a['uploadBytes'] as int),
         );
         break;
       case 'download':
         connections.sort(
-          (a, b) => (b['downloadBytes'] as int).compareTo(a['downloadBytes'] as int),
+          (a, b) =>
+              (b['downloadBytes'] as int).compareTo(a['downloadBytes'] as int),
         );
         break;
       case 'total':
@@ -63,14 +68,20 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
     }
   }
 
-  List<Map<String, dynamic>> _filterConnections(List<Map<String, dynamic>> connections) {
+  List<Map<String, dynamic>> _filterConnections(
+    List<Map<String, dynamic>> connections,
+  ) {
     var filtered = connections.toList();
 
     // 协议过滤
     if (filterProtocol != 'all') {
-      filtered = filtered.where((conn) =>
-        conn['protocol'].toString().toLowerCase() == filterProtocol.toLowerCase()
-      ).toList();
+      filtered = filtered
+          .where(
+            (conn) =>
+                conn['protocol'].toString().toLowerCase() ==
+                filterProtocol.toLowerCase(),
+          )
+          .toList();
     }
 
     // 搜索过滤
@@ -78,9 +89,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
       final query = _searchQuery.toLowerCase();
       filtered = filtered.where((conn) {
         return conn['host'].toString().toLowerCase().contains(query) ||
-               conn['process'].toString().toLowerCase().contains(query) ||
-               conn['rule'].toString().toLowerCase().contains(query) ||
-               conn['target'].toString().toLowerCase().contains(query);
+            conn['process'].toString().toLowerCase().contains(query) ||
+            conn['rule'].toString().toLowerCase().contains(query) ||
+            conn['target'].toString().toLowerCase().contains(query);
       }).toList();
     }
 
@@ -99,19 +110,24 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
       info += '本地地址: ${conn['localAddr']}:${conn['localPortOnly']}\n';
       info += '进程: ${conn['process']} (PID: ${conn['pid']})\n';
       info += '协议: ${conn['protocol']} ${conn['state']}\n';
-      info += '上传: ${ImprovedTrafficStatsService.formatBytes(conn['uploadBytes'])}';
+      info +=
+          '上传: ${ImprovedTrafficStatsService.formatBytes(conn['uploadBytes'])}';
       if (conn['uploadSpeed'] > 0) {
-        info += ' (${ImprovedTrafficStatsService.formatSpeed(conn['uploadSpeed'])})';
+        info +=
+            ' (${ImprovedTrafficStatsService.formatSpeed(conn['uploadSpeed'])})';
       }
       info += '\n';
-      info += '下载: ${ImprovedTrafficStatsService.formatBytes(conn['downloadBytes'])}';
+      info +=
+          '下载: ${ImprovedTrafficStatsService.formatBytes(conn['downloadBytes'])}';
       if (conn['downloadSpeed'] > 0) {
-        info += ' (${ImprovedTrafficStatsService.formatSpeed(conn['downloadSpeed'])})';
+        info +=
+            ' (${ImprovedTrafficStatsService.formatSpeed(conn['downloadSpeed'])})';
       }
       info += '\n';
       info += '规则: ${conn['rule']}\n';
       info += '目标: ${conn['target']}\n';
-      info += '时长: ${ImprovedTrafficStatsService.formatDuration(conn['duration'])}\n';
+      info +=
+          '时长: ${ImprovedTrafficStatsService.formatDuration(conn['duration'])}\n';
       info += '开始时间: ${conn['startTime']}\n\n';
     }
 
@@ -119,6 +135,50 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('连接状态详情已复制到剪贴板'),
+        backgroundColor: AppTheme.successGreen,
+      ),
+    );
+  }
+
+  void _copySingleConnectionInfo(Map<String, dynamic> connection) {
+    String info = '连接详情\n';
+    info += '时间: ${DateTime.now().toString()}\n\n';
+
+    info += '目标地址: ${connection['hostAddr']}:${connection['hostPort']}\n';
+    if (connection['domain'] != null && connection['domain'].isNotEmpty) {
+      info += '域名: ${connection['domain']}\n';
+    }
+    info += '本地地址: ${connection['localAddr']}:${connection['localPortOnly']}\n';
+    info += '进程: ${connection['process']} (PID: ${connection['pid']})\n';
+    info += '协议: ${connection['protocol']} ${connection['state']}\n';
+    info +=
+        '上传: ${ImprovedTrafficStatsService.formatBytes(connection['uploadBytes'])}';
+    if (connection['uploadSpeed'] > 0) {
+      info +=
+          ' (${ImprovedTrafficStatsService.formatSpeed(connection['uploadSpeed'])})';
+    }
+    info += '\n';
+    info +=
+        '下载: ${ImprovedTrafficStatsService.formatBytes(connection['downloadBytes'])}';
+    if (connection['downloadSpeed'] > 0) {
+      info +=
+          ' (${ImprovedTrafficStatsService.formatSpeed(connection['downloadSpeed'])})';
+    }
+    info += '\n';
+    info += '规则: ${connection['rule']}\n';
+    info += '目标: ${connection['target']}\n';
+    if (connection['chains'] != null &&
+        (connection['chains'] as List).isNotEmpty) {
+      info += '代理链: ${(connection['chains'] as List).join(' → ')}\n';
+    }
+    info +=
+        '时长: ${ImprovedTrafficStatsService.formatDuration(connection['duration'])}\n';
+    info += '开始时间: ${connection['startTime']}\n';
+
+    Clipboard.setData(ClipboardData(text: info));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('连接详情已复制到剪贴板'),
         backgroundColor: AppTheme.successGreen,
       ),
     );
@@ -142,9 +202,7 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
             decoration: BoxDecoration(
               color: AppTheme.bgCard,
               border: Border(
-                bottom: BorderSide(
-                  color: AppTheme.borderColor.withAlpha(50),
-                ),
+                bottom: BorderSide(color: AppTheme.borderColor.withAlpha(50)),
               ),
             ),
             child: Column(
@@ -189,11 +247,11 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
 
                               final sourceText = provider.connectionSource;
                               final sourceColor = sourceText == 'Clash API'
-                                ? AppTheme.successGreen
-                                : AppTheme.warningOrange;
+                                  ? AppTheme.successGreen
+                                  : AppTheme.warningOrange;
                               final sourceIcon = sourceText == 'Clash API'
-                                ? Icons.api
-                                : Icons.computer;
+                                  ? Icons.api
+                                  : Icons.computer;
 
                               return Container(
                                 padding: const EdgeInsets.symmetric(
@@ -211,7 +269,11 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(sourceIcon, size: 12, color: sourceColor),
+                                    Icon(
+                                      sourceIcon,
+                                      size: 12,
+                                      color: sourceColor,
+                                    ),
                                     const SizedBox(width: 4),
                                     Text(
                                       sourceText,
@@ -271,11 +333,20 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                             switch (value) {
                               case 'pause':
                                 setState(() {
+                                  if (!isPaused) {
+                                    // 暂停时，保存当前连接状态
+                                    _pausedConnections =
+                                        List<Map<String, dynamic>>.from(
+                                          provider.connections,
+                                        );
+                                  }
                                   isPaused = !isPaused;
                                 });
                                 break;
                               case 'copy':
-                                final filtered = _filterConnections(provider.connections);
+                                final filtered = _filterConnections(
+                                  provider.connections,
+                                );
                                 _copyConnectionInfo(filtered);
                                 break;
                               case 'sort_time':
@@ -383,7 +454,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   Icon(
                                     Icons.access_time,
                                     size: 18,
-                                    color: sortBy == 'time' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                    color: sortBy == 'time'
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textSecondary,
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按时长排序'),
@@ -397,7 +470,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   Icon(
                                     Icons.upload,
                                     size: 18,
-                                    color: sortBy == 'upload' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                    color: sortBy == 'upload'
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textSecondary,
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按上传排序'),
@@ -411,7 +486,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   Icon(
                                     Icons.download,
                                     size: 18,
-                                    color: sortBy == 'download' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                    color: sortBy == 'download'
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textSecondary,
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按下载排序'),
@@ -425,7 +502,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   Icon(
                                     Icons.data_usage,
                                     size: 18,
-                                    color: sortBy == 'total' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                    color: sortBy == 'total'
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textSecondary,
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按总流量排序'),
@@ -439,7 +518,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                                   Icon(
                                     Icons.route,
                                     size: 18,
-                                    color: sortBy == 'proxy' ? AppTheme.primaryNeon : AppTheme.textSecondary,
+                                    color: sortBy == 'proxy'
+                                        ? AppTheme.primaryNeon
+                                        : AppTheme.textSecondary,
                                   ),
                                   const SizedBox(width: 8),
                                   Text('按代理链排序'),
@@ -577,34 +658,9 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                   );
                 }
 
-                // 暂停时显示暂停状态
-                if (isPaused) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.pause_circle_outline,
-                          size: 60,
-                          color: AppTheme.warningOrange.withAlpha(150),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          '监控已暂停',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: AppTheme.warningOrange,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
                 // 过滤和排序连接列表
                 var connections = List<Map<String, dynamic>>.from(
-                  provider.connections,
+                  isPaused ? _pausedConnections : provider.connections,
                 );
                 connections = _filterConnections(connections);
                 _sortConnections(connections);
@@ -632,368 +688,523 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
                   );
                 }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: connections.length,
-                  itemBuilder: (context, index) {
-                    final connection = connections[index];
-                    final isExpanded = _expandedItems.contains(connection['id']);
-
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bgCard,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isExpanded
-                            ? AppTheme.primaryNeon.withAlpha(100)
-                            : AppTheme.borderColor.withAlpha(100),
+                return Column(
+                  children: [
+                    // 暂停状态提示
+                    if (isPaused)
+                      Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warningOrange.withAlpha(200),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: AppTheme.warningOrange,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.pause_circle_outline,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              '监控已暂停，显示暂停时的连接状态',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: InkWell(
-                        onTap: () {
-                          setState(() {
-                            if (isExpanded) {
-                              _expandedItems.remove(connection['id']);
-                            } else {
-                              _expandedItems.add(connection['id']);
-                            }
-                          });
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 主要信息行
-                              Row(
-                                children: [
-                                  // 序号
-                                  Container(
-                                    width: 28,
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primaryNeon.withAlpha(30),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        '${index + 1}',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppTheme.primaryNeon,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  // 主机信息
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                    // 连接列表
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(20),
+                        itemCount: connections.length,
+                        itemBuilder: (context, index) {
+                          final connection = connections[index];
+                          final isExpanded = _expandedItems.contains(
+                            connection['id'],
+                          );
+
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.bgCard,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isExpanded
+                                    ? AppTheme.primaryNeon.withAlpha(100)
+                                    : AppTheme.borderColor.withAlpha(100),
+                              ),
+                            ),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  if (isExpanded) {
+                                    _expandedItems.remove(connection['id']);
+                                  } else {
+                                    _expandedItems.add(connection['id']);
+                                  }
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 主要信息行
+                                    Row(
                                       children: [
-                                        Row(
-                                          children: [
-                                            // 显示域名或IP
-                                            Expanded(
-                                              child: connection['domain'] != null
-                                                ? Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text(
-                                                        connection['domain'],
-                                                        style: const TextStyle(
-                                                          fontSize: 13,
-                                                          fontWeight: FontWeight.w600,
-                                                          color: AppTheme.textPrimary,
-                                                        ),
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                      Text(
-                                                        connection['hostAddr'],
-                                                        style: const TextStyle(
-                                                          fontSize: 11,
-                                                          color: AppTheme.textSecondary,
-                                                        ),
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                    ],
-                                                  )
-                                                : Text(
-                                                    connection['hostAddr'],
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight: FontWeight.w600,
-                                                      color: AppTheme.textPrimary,
-                                                    ),
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            // 端口
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 2,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primaryNeon.withAlpha(20),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                ':${connection['hostPort']}',
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: AppTheme.primaryNeon,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
+                                        // 序号
+                                        Container(
+                                          width: 28,
+                                          height: 28,
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryNeon
+                                                .withAlpha(30),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              '${index + 1}',
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: AppTheme.primaryNeon,
                                               ),
                                             ),
-                                            // 代理协议标签（如果有）
-                                            if (connection['proxyProtocol'] != null) ...[
-                                              const SizedBox(width: 4),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(
-                                                  horizontal: 5,
-                                                  vertical: 2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: _getProtocolColor(connection['proxyProtocol']).withAlpha(30),
-                                                  borderRadius: BorderRadius.circular(4),
-                                                  border: Border.all(
-                                                    color: _getProtocolColor(connection['proxyProtocol']).withAlpha(100),
-                                                    width: 0.5,
-                                                  ),
-                                                ),
-                                                child: Text(
-                                                  connection['proxyProtocol'],
-                                                  style: TextStyle(
-                                                    fontSize: 10,
-                                                    color: _getProtocolColor(connection['proxyProtocol']),
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ],
+                                          ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            // 协议
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 4,
-                                                vertical: 1,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.textHint.withAlpha(30),
-                                                borderRadius: BorderRadius.circular(3),
-                                              ),
-                                              child: Text(
-                                                connection['protocol'],
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  color: AppTheme.textHint,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            // 进程 + PID + 代理链
-                                            Expanded(
-                                              child: RichText(
-                                                overflow: TextOverflow.ellipsis,
-                                                text: TextSpan(
-                                                  children: [
-                                                    // 进程名
-                                                    TextSpan(
-                                                      text: connection['process'],
+                                        const SizedBox(width: 12),
+                                        // 主机信息
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  // 显示域名或IP
+                                                  Expanded(
+                                                    child:
+                                                        connection['domain'] !=
+                                                            null
+                                                        ? Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Text(
+                                                                connection['domain'],
+                                                                style: const TextStyle(
+                                                                  fontSize: 13,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w600,
+                                                                  color: AppTheme
+                                                                      .textPrimary,
+                                                                ),
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                              Text(
+                                                                connection['hostAddr'],
+                                                                style: const TextStyle(
+                                                                  fontSize: 11,
+                                                                  color: AppTheme
+                                                                      .textSecondary,
+                                                                ),
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                            ],
+                                                          )
+                                                        : Text(
+                                                            connection['hostAddr'],
+                                                            style: const TextStyle(
+                                                              fontSize: 14,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: AppTheme
+                                                                  .textPrimary,
+                                                            ),
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  // 端口
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 2,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: AppTheme
+                                                          .primaryNeon
+                                                          .withAlpha(20),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            4,
+                                                          ),
+                                                    ),
+                                                    child: Text(
+                                                      ':${connection['hostPort']}',
                                                       style: const TextStyle(
                                                         fontSize: 11,
-                                                        color: AppTheme.textSecondary,
+                                                        color: AppTheme
+                                                            .primaryNeon,
+                                                        fontWeight:
+                                                            FontWeight.w500,
                                                       ),
                                                     ),
-                                                    // PID
-                                                    TextSpan(
-                                                      text: ' (PID: ${connection['pid']})',
-                                                      style: const TextStyle(
-                                                        fontSize: 10,
-                                                        color: AppTheme.textHint,
+                                                  ),
+                                                  // 代理协议标签（如果有）
+                                                  if (connection['proxyProtocol'] !=
+                                                      null) ...[
+                                                    const SizedBox(width: 4),
+                                                    Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 5,
+                                                            vertical: 2,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: _getProtocolColor(
+                                                          connection['proxyProtocol'],
+                                                        ).withAlpha(30),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              4,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: _getProtocolColor(
+                                                            connection['proxyProtocol'],
+                                                          ).withAlpha(100),
+                                                          width: 0.5,
+                                                        ),
                                                       ),
-                                                    ),
-                                                    // 代理链
-                                                    if (connection['chains'] != null && (connection['chains'] as List).isNotEmpty) ...[
-                                                      const TextSpan(
-                                                        text: ' → ',
+                                                      child: Text(
+                                                        connection['proxyProtocol'],
                                                         style: TextStyle(
                                                           fontSize: 10,
-                                                          color: AppTheme.primaryNeon,
+                                                          color: _getProtocolColor(
+                                                            connection['proxyProtocol'],
+                                                          ),
+                                                          fontWeight:
+                                                              FontWeight.w600,
                                                         ),
                                                       ),
-                                                      TextSpan(
-                                                        text: (connection['chains'] as List).join(' → '),
-                                                        style: const TextStyle(
-                                                          fontSize: 10,
-                                                          color: AppTheme.primaryNeon,
-                                                          fontWeight: FontWeight.w500,
-                                                        ),
-                                                      ),
-                                                    ],
+                                                    ),
                                                   ],
-                                                ),
+                                                ],
                                               ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  // 协议
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 1,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: AppTheme.textHint
+                                                          .withAlpha(30),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            3,
+                                                          ),
+                                                    ),
+                                                    child: Text(
+                                                      connection['protocol'],
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        color:
+                                                            AppTheme.textHint,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  // 进程 + PID + 代理链
+                                                  Expanded(
+                                                    child: RichText(
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      text: TextSpan(
+                                                        children: [
+                                                          // 进程名
+                                                          TextSpan(
+                                                            text:
+                                                                connection['process'],
+                                                            style: const TextStyle(
+                                                              fontSize: 11,
+                                                              color: AppTheme
+                                                                  .textSecondary,
+                                                            ),
+                                                          ),
+                                                          // PID
+                                                          TextSpan(
+                                                            text:
+                                                                ' (PID: ${connection['pid']})',
+                                                            style:
+                                                                const TextStyle(
+                                                                  fontSize: 10,
+                                                                  color: AppTheme
+                                                                      .textHint,
+                                                                ),
+                                                          ),
+                                                          // 代理链
+                                                          if (connection['chains'] !=
+                                                                  null &&
+                                                              (connection['chains']
+                                                                      as List)
+                                                                  .isNotEmpty) ...[
+                                                            const TextSpan(
+                                                              text: ' → ',
+                                                              style: TextStyle(
+                                                                fontSize: 10,
+                                                                color: AppTheme
+                                                                    .primaryNeon,
+                                                              ),
+                                                            ),
+                                                            TextSpan(
+                                                              text:
+                                                                  (connection['chains']
+                                                                          as List)
+                                                                      .join(
+                                                                        ' → ',
+                                                                      ),
+                                                              style: const TextStyle(
+                                                                fontSize: 10,
+                                                                color: AppTheme
+                                                                    .primaryNeon,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // 流量和时长
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              ImprovedTrafficStatsService.formatDuration(
+                                                connection['duration'],
+                                              ),
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: AppTheme.textSecondary,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  '${ImprovedTrafficStatsService.formatBytes(connection['uploadBytes'])}',
+                                                  style: const TextStyle(
+                                                    fontSize: 10,
+                                                    color:
+                                                        AppTheme.successGreen,
+                                                  ),
+                                                ),
+                                                const Text(
+                                                  ' / ',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: AppTheme.textHint,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '${ImprovedTrafficStatsService.formatBytes(connection['downloadBytes'])}',
+                                                  style: const TextStyle(
+                                                    fontSize: 10,
+                                                    color: AppTheme.primaryNeon,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  // 流量和时长
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        ImprovedTrafficStatsService.formatDuration(
-                                          connection['duration'],
-                                        ),
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.textSecondary,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            '${ImprovedTrafficStatsService.formatBytes(connection['uploadBytes'])}',
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              color: AppTheme.successGreen,
+                                        const SizedBox(width: 8),
+                                        // 复制图标
+                                        GestureDetector(
+                                          onTap: () =>
+                                              _copySingleConnectionInfo(
+                                                connection,
+                                              ),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(4),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.primaryNeon
+                                                  .withAlpha(20),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
                                             ),
-                                          ),
-                                          const Text(
-                                            ' / ',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: AppTheme.textHint,
-                                            ),
-                                          ),
-                                          Text(
-                                            '${ImprovedTrafficStatsService.formatBytes(connection['downloadBytes'])}',
-                                            style: const TextStyle(
-                                              fontSize: 10,
+                                            child: const Icon(
+                                              Icons.copy,
+                                              size: 16,
                                               color: AppTheme.primaryNeon,
                                             ),
                                           ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // 展开图标
-                                  AnimatedRotation(
-                                    turns: isExpanded ? 0.25 : 0,
-                                    duration: const Duration(milliseconds: 200),
-                                    child: const Icon(
-                                      Icons.chevron_right,
-                                      size: 20,
-                                      color: AppTheme.textHint,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // 展开图标
+                                        AnimatedRotation(
+                                          turns: isExpanded ? 0.25 : 0,
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
+                                          child: const Icon(
+                                            Icons.chevron_right,
+                                            size: 20,
+                                            color: AppTheme.textHint,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ],
-                              ),
 
-                              // 展开的详细信息
-                              if (isExpanded) ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.bgDark,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // 本地地址
-                                      _buildDetailRow(
-                                        '本地地址',
-                                        '${connection['localAddr']}:${connection['localPortOnly']}',
-                                        Icons.computer,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 进程信息
-                                      _buildDetailRow(
-                                        '进程',
-                                        '${connection['process']} (PID: ${connection['pid']})',
-                                        Icons.apps,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 代理链（放在PID后面，方便查看）
-                                      _buildDetailRow(
-                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
-                                          ? '代理链'
-                                          : '目标',
-                                        connection['chains'] != null && (connection['chains'] as List).isNotEmpty
-                                          ? (connection['chains'] as List).join(' → ')
-                                          : connection['target'],
-                                        Icons.route,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 连接状态
-                                      if (connection['state'].toString().isNotEmpty) ...[
-                                        _buildDetailRow(
-                                          '状态',
-                                          connection['state'],
-                                          Icons.info_outline,
+                                    // 展开的详细信息
+                                    if (isExpanded) ...[
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.bgDark,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                      // 规则
-                                      _buildDetailRow(
-                                        '匹配规则',
-                                        connection['rule'],
-                                        Icons.rule,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 实时速度
-                                      if (connection['uploadSpeed'] > 0 || connection['downloadSpeed'] > 0) ...[
-                                        _buildDetailRow(
-                                          '实时速度',
-                                          '↑ ${ImprovedTrafficStatsService.formatSpeed(connection['uploadSpeed'])}  ↓ ${ImprovedTrafficStatsService.formatSpeed(connection['downloadSpeed'])}',
-                                          Icons.speed,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            // 本地地址
+                                            _buildDetailRow(
+                                              '本地地址',
+                                              '${connection['localAddr']}:${connection['localPortOnly']}',
+                                              Icons.computer,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            // 进程信息
+                                            _buildDetailRow(
+                                              '进程',
+                                              '${connection['process']} (PID: ${connection['pid']})',
+                                              Icons.apps,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            // 代理链（放在PID后面，方便查看）
+                                            _buildDetailRow(
+                                              connection['chains'] != null &&
+                                                      (connection['chains']
+                                                              as List)
+                                                          .isNotEmpty
+                                                  ? '代理链'
+                                                  : '目标',
+                                              connection['chains'] != null &&
+                                                      (connection['chains']
+                                                              as List)
+                                                          .isNotEmpty
+                                                  ? (connection['chains']
+                                                            as List)
+                                                        .join(' → ')
+                                                  : connection['target'],
+                                              Icons.route,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            // 连接状态
+                                            if (connection['state']
+                                                .toString()
+                                                .isNotEmpty) ...[
+                                              _buildDetailRow(
+                                                '状态',
+                                                connection['state'],
+                                                Icons.info_outline,
+                                              ),
+                                              const SizedBox(height: 8),
+                                            ],
+                                            // 规则
+                                            _buildDetailRow(
+                                              '匹配规则',
+                                              connection['rule'],
+                                              Icons.rule,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            // 实时速度
+                                            if (connection['uploadSpeed'] > 0 ||
+                                                connection['downloadSpeed'] >
+                                                    0) ...[
+                                              _buildDetailRow(
+                                                '实时速度',
+                                                '↑ ${ImprovedTrafficStatsService.formatSpeed(connection['uploadSpeed'])}  ↓ ${ImprovedTrafficStatsService.formatSpeed(connection['downloadSpeed'])}',
+                                                Icons.speed,
+                                              ),
+                                              const SizedBox(height: 8),
+                                            ],
+                                            // 总流量
+                                            _buildDetailRow(
+                                              '总流量',
+                                              '${ImprovedTrafficStatsService.formatBytes(connection['totalBytes'])}',
+                                              Icons.data_usage,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            // 开始时间
+                                            _buildDetailRow(
+                                              '开始时间',
+                                              _formatDateTime(
+                                                connection['startTime'],
+                                              ),
+                                              Icons.access_time,
+                                            ),
+                                          ],
                                         ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                      // 总流量
-                                      _buildDetailRow(
-                                        '总流量',
-                                        '${ImprovedTrafficStatsService.formatBytes(connection['totalBytes'])}',
-                                        Icons.data_usage,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // 开始时间
-                                      _buildDetailRow(
-                                        '开始时间',
-                                        _formatDateTime(connection['startTime']),
-                                        Icons.access_time,
                                       ),
                                     ],
-                                  ),
+                                  ],
                                 ),
-                              ],
-                            ],
-                          ),
-                        ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 );
               },
             ),
@@ -1006,18 +1217,11 @@ class _EnhancedConnectionStatusPageState extends State<EnhancedConnectionStatusP
   Widget _buildDetailRow(String label, String value, IconData icon) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 14,
-          color: AppTheme.textHint,
-        ),
+        Icon(icon, size: 14, color: AppTheme.textHint),
         const SizedBox(width: 8),
         Text(
           '$label:',
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.textSecondary,
-          ),
+          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
         ),
         const SizedBox(width: 8),
         Expanded(

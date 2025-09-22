@@ -16,6 +16,7 @@ class ConnectionStatusPage extends StatefulWidget {
 class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
   bool isPaused = false;
   String sortBy = 'time'; // time, upload, download
+  List<Map<String, dynamic>> _pausedConnections = []; // 暂停时保存的连接状态
 
   void _sortConnections(List<Map<String, dynamic>> connections) {
     switch (sortBy) {
@@ -61,6 +62,35 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('连接状态已复制到剪贴板'),
+        backgroundColor: AppTheme.successGreen,
+      ),
+    );
+  }
+
+  void _copySingleConnectionInfo(Map<String, dynamic> connection) {
+    String info = '连接详情\n';
+    info += '时间: ${DateTime.now().toString()}\n\n';
+
+    final displayHost = connection['domain']?.isNotEmpty == true
+        ? connection['domain']
+        : connection['host'];
+    info += '主机: $displayHost\n';
+    info += '本地端口: ${connection['localPort']}\n';
+    info += '进程: ${connection['process']}\n';
+    info += '协议: ${connection['protocol']}\n';
+    info +=
+        '上传: ${ImprovedTrafficStatsService.formatBytes(connection['uploadBytes'])}\n';
+    info +=
+        '下载: ${ImprovedTrafficStatsService.formatBytes(connection['downloadBytes'])}\n';
+    info += '规则: ${connection['rule']}\n';
+    info += '目标: ${connection['target']}\n';
+    info +=
+        '时长: ${ImprovedTrafficStatsService.formatDuration(connection['duration'])}\n';
+
+    Clipboard.setData(ClipboardData(text: info));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('连接详情已复制到剪贴板'),
         backgroundColor: AppTheme.successGreen,
       ),
     );
@@ -167,6 +197,13 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                         switch (value) {
                           case 'pause':
                             setState(() {
+                              if (!isPaused) {
+                                // 暂停时，保存当前连接状态
+                                _pausedConnections =
+                                    List<Map<String, dynamic>>.from(
+                                      provider.connections,
+                                    );
+                              }
                               isPaused = !isPaused;
                             });
                             break;
@@ -309,7 +346,7 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
 
                 // VPN已连接时显示连接列表
                 final connections = List<Map<String, dynamic>>.from(
-                  provider.connections,
+                  isPaused ? _pausedConnections : provider.connections,
                 );
                 _sortConnections(connections);
 
@@ -373,6 +410,24 @@ class _ConnectionStatusPageState extends State<ConnectionStatusPage> {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // 复制图标
+                              GestureDetector(
+                                onTap: () =>
+                                    _copySingleConnectionInfo(connection),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryNeon.withAlpha(20),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Icon(
+                                    Icons.copy,
+                                    size: 14,
+                                    color: AppTheme.primaryNeon,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),

@@ -1,13 +1,26 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
-/// Geosite 数据库管理器
-/// 负责下载、更新和管理 sing-box geosite 规则数据库
-/// 符合 sing-box 1.8+ 规范
-class GeositeManager {
+/// Rule Sets 管理器
+/// 负责下载、更新和管理 sing-box 规则集数据库
+/// 符合 sing-box 1.8+ 规范，使用新的规则集格式替代已废弃的 Geosite
+///
+/// 重要变更说明：
+/// - Geosite 在 sing-box 1.8.0 中废弃，在 1.12.0 中完全移除
+/// - 新版本使用 Rule Sets (.srs) 格式，提供相同功能但更高效
+/// - 规则集文件格式：geosite-xxx.srs, geoip-xxx.srs
+/// - 在路由配置中使用 "rule_set" 字段替代原来的 "geosite/geoip" 字段
+///
+/// 配置示例：
+/// ```json
+/// {
+///   "rule_set": ["geosite-cn", "geosite-google"],
+///   "outbound": "proxy"
+/// }
+/// ```
+class RuleSetsManager {
   // 使用官方推荐的远程规则集URL
   static const String _geositeBaseUrl =
       'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
@@ -16,7 +29,7 @@ class GeositeManager {
   static const String _mirrorUrl =
       'https://mirror.ghproxy.com/https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set';
 
-  // 常用的 geosite 规则集
+  // 常用的域名规则集（原 geosite 规则，现以规则集形式提供）
   static const List<String> commonRuleSets = [
     'geosite-cn', // 中国大陆网站
     'geosite-geolocation-!cn', // 非中国网站
@@ -39,7 +52,7 @@ class GeositeManager {
     'geosite-anthropic', // Anthropic
   ];
 
-  // 常用的 geoIP 规则集
+  // 常用的 IP 地址规则集
   static const List<String> commonGeoIPRuleSets = [
     'geoip-cn', // 中国IP地址
     // 'geoip-private', // 私有IP地址
@@ -63,7 +76,7 @@ class GeositeManager {
     'geoip-google', // Google IP地址
   ];
 
-  // Geosite 规则集分类
+  // 域名规则集分类（原 Geosite 类别）
   static const Map<String, List<String>> geositeCategories = {
     '常用': ['geosite-cn', 'geosite-geolocation-!cn', 'geosite-ads'],
     '社交媒体': [
@@ -107,7 +120,7 @@ class GeositeManager {
     ],
   };
 
-  // GeoIP 规则集分类
+  // IP 地址规则集分类
   static const Map<String, List<String>> geoipCategories = {
     '基础': ['geoip-cn'],
     '亚太地区': [
@@ -139,9 +152,9 @@ class GeositeManager {
   // 兼容性：保留原有的 ruleCategories
   static Map<String, List<String>> get ruleCategories => geositeCategories;
 
-  static final GeositeManager _instance = GeositeManager._internal();
-  factory GeositeManager() => _instance;
-  GeositeManager._internal();
+  static final RuleSetsManager _instance = RuleSetsManager._internal();
+  factory RuleSetsManager() => _instance;
+  RuleSetsManager._internal();
 
   /// 判断规则集类型
   static bool isGeoIPRuleset(String rulesetName) {
@@ -178,7 +191,7 @@ class GeositeManager {
 
     if (!await rulesetDir.exists()) {
       await rulesetDir.create(recursive: true);
-      print('[GeositeManager] 创建规则集目录: ${rulesetDir.path}');
+      print('[RuleSetsManager] 创建规则集目录: ${rulesetDir.path}');
     }
     return rulesetDir;
   }
@@ -200,7 +213,7 @@ class GeositeManager {
     final dir = Directory(path.join(baseDir.path, subDir));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
-      print('[GeositeManager] 创建子目录: ${dir.path}');
+      print('[RuleSetsManager] 创建子目录: ${dir.path}');
     }
 
     // 确保文件名格式正确
@@ -224,11 +237,11 @@ class GeositeManager {
     void Function(double)? onProgress,
   }) async {
     try {
-      print('[GeositeManager] 开始下载规则集: $rulesetName');
+      print('[RuleSetsManager] 开始下载规则集: $rulesetName');
 
       // 如果不是强制更新，检查文件是否已存在
       if (!forceUpdate && await isRulesetDownloaded(rulesetName)) {
-        print('[GeositeManager] 规则集 $rulesetName 已存在，跳过下载');
+        print('[RuleSetsManager] 规则集 $rulesetName 已存在，跳过下载');
         return true;
       }
 
@@ -249,17 +262,17 @@ class GeositeManager {
       }
       final url = '$baseUrl/$fileName';
 
-      print('[GeositeManager] 下载URL: $url');
+      print('[RuleSetsManager] 下载URL: $url');
 
       // 发起下载请求
       final request = http.Request('GET', Uri.parse(url));
       final streamedResponse = await request.send();
 
       if (streamedResponse.statusCode != 200) {
-        print('[GeositeManager] 下载失败，状态码: ${streamedResponse.statusCode}');
+        print('[RuleSetsManager] 下载失败，状态码: ${streamedResponse.statusCode}');
         // 如果使用主URL失败，尝试镜像
         if (!useMirror) {
-          print('[GeositeManager] 尝试使用镜像下载...');
+          print('[RuleSetsManager] 尝试使用镜像下载...');
           return downloadRuleset(
             rulesetName,
             useMirror: true,
@@ -290,13 +303,13 @@ class GeositeManager {
       final file = File(filePath);
       await file.writeAsBytes(bytes);
 
-      print('[GeositeManager] 规则集下载成功: $rulesetName (${bytes.length} bytes)');
+      print('[RuleSetsManager] 规则集下载成功: $rulesetName (${bytes.length} bytes)');
       return true;
     } catch (e) {
-      print('[GeositeManager] 下载规则集失败: $e');
+      print('[RuleSetsManager] 下载规则集失败: $e');
       // 如果是网络错误且未使用镜像，尝试镜像
       if (!useMirror && e.toString().contains('Connection')) {
-        print('[GeositeManager] 尝试使用镜像下载...');
+        print('[RuleSetsManager] 尝试使用镜像下载...');
         return downloadRuleset(
           rulesetName,
           useMirror: true,
@@ -409,7 +422,7 @@ class GeositeManager {
       completed++;
 
       if (!success) {
-        print('[GeositeManager] 下载失败: $ruleset');
+        print('[RuleSetsManager] 下载失败: $ruleset');
       }
 
       // 小延迟避免过于频繁的请求
@@ -561,7 +574,7 @@ class GeositeManager {
       }
     }
 
-    print('[GeositeManager] 找到已下载规则集: ${rulesets.length} 个');
+    print('[RuleSetsManager] 找到已下载规则集: ${rulesets.length} 个');
     return rulesets;
   }
 
@@ -572,12 +585,12 @@ class GeositeManager {
       final file = File(filePath);
       if (await file.exists()) {
         await file.delete();
-        print('[GeositeManager] 删除规则集: $rulesetName');
+        print('[RuleSetsManager] 删除规则集: $rulesetName');
         return true;
       }
       return false;
     } catch (e) {
-      print('[GeositeManager] 删除规则集失败: $e');
+      print('[RuleSetsManager] 删除规则集失败: $e');
       return false;
     }
   }
@@ -587,7 +600,7 @@ class GeositeManager {
     final dir = await _getRulesetDirectory();
     if (await dir.exists()) {
       await dir.delete(recursive: true);
-      print('[GeositeManager] 清理所有规则集');
+      print('[RuleSetsManager] 清理所有规则集');
     }
   }
 
@@ -618,3 +631,6 @@ class GeositeManager {
     return false;
   }
 }
+
+// 向后兼容：保持原有的类名作为别名
+typedef GeositeManager = RuleSetsManager;
