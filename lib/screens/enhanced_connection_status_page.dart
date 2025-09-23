@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/vpn_provider_v2.dart';
 import '../services/improved_traffic_stats_service.dart';
+import 'traffic_history_page.dart';
 
 class EnhancedConnectionStatusPage extends StatefulWidget {
   const EnhancedConnectionStatusPage({super.key});
@@ -318,6 +319,22 @@ class _EnhancedConnectionStatusPageState
                       },
                     ),
                     const SizedBox(width: 8),
+                    // 本次统计（图标入口）
+                    IconButton(
+                      tooltip: '流量统计（本次）',
+                      icon: const Icon(
+                        Icons.query_stats,
+                        color: AppTheme.primaryNeon,
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const TrafficHistoryPage(),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
                     // 菜单按钮
                     Consumer<VPNProviderV2>(
                       builder: (context, provider, _) {
@@ -614,6 +631,43 @@ class _EnhancedConnectionStatusPageState
                             filterProtocol = value ?? 'all';
                           });
                         },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 本次统计（搜索行入口）
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const TrafficHistoryPage(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.query_stats,
+                        size: 18,
+                        color: AppTheme.primaryNeon,
+                      ),
+                      label: const Text(
+                        '本次统计',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.primaryNeon,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppTheme.primaryNeon.withAlpha(20),
+                        foregroundColor: AppTheme.primaryNeon,
+                        minimumSize: const Size(0, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(
+                            color: AppTheme.primaryNeon.withAlpha(120),
+                            width: 1,
+                          ),
+                        ),
                       ),
                     ),
                   ],

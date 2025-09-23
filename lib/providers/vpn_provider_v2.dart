@@ -11,6 +11,7 @@ import '../services/dns_manager.dart';
 import '../services/improved_traffic_stats_service.dart';
 import '../services/ping_service.dart';
 import '../services/connection_stats_service.dart';
+import '../services/connection_traffic_history_service.dart';
 import '../services/singbox_native_service.dart';
 import '../utils/privilege_manager.dart';
 
@@ -321,6 +322,8 @@ class VPNProviderV2 extends ChangeNotifier {
     final success = await _connectionManager.connect(config);
 
     if (success) {
+      // 开启新会话：重置本次统计历史
+      await ConnectionTrafficHistoryService.instance.reset();
       print('[DEBUG] VPN连接成功，不再测试延时');
 
       // 启动自动选择最佳服务器（但不立即测试）
@@ -345,6 +348,8 @@ class VPNProviderV2 extends ChangeNotifier {
     _stopPingTimer();
     _stopDurationUpdateTimer();
     _stopConnectionUpdateTimer();
+    // 断开时推送一次空列表，结算活跃连接为历史记录
+    ConnectionTrafficHistoryService.instance.onConnectionStats(const []);
     final success = await _connectionManager.disconnect();
     notifyListeners();
     return success;
@@ -596,6 +601,10 @@ class VPNProviderV2 extends ChangeNotifier {
       if (stats != null) {
         _connectionInfos = stats.connections;
         _connectionSource = stats.source;
+        // 推送到本次会话历史服务（仅内存）
+        ConnectionTrafficHistoryService.instance.onConnectionStats(
+          _connectionInfos,
+        );
         notifyListeners();
       }
     } catch (e) {
