@@ -547,8 +547,11 @@ class SingBoxNativeService {
           : int.tryParse(ob['server_port']?.toString() ?? '');
 
       if (host != null && host.isNotEmpty && port != null && port > 0) {
-        // TUIC/Hysteria 基于 QUIC/UDP，跳过 TCP 探测；其它尝试 TCP 端口与 TLS 最小握手
-        if (obType != 'hysteria' && obType != 'tuic') {
+        // TUIC/Hysteria/Hysteria2 基于 QUIC/UDP，跳过 TCP 探测；其它尝试 TCP 端口与 TLS 最小握手
+        if (obType != 'hysteria' &&
+            obType != 'hysteria2' &&
+            obType != 'tuic' &&
+            obType != 'hy2') {
           try {
             final socket = await Socket.connect(
               host,
@@ -595,10 +598,13 @@ class SingBoxNativeService {
         }
       }
 
-      // TUIC/Hysteria：尝试 QUIC 握手
+      // TUIC/Hysteria/Hysteria2：尝试 QUIC 握手
       if (host != null &&
           port != null &&
-          (obType == 'tuic' || obType == 'hysteria')) {
+          (obType == 'tuic' ||
+              obType == 'hysteria' ||
+              obType == 'hysteria2' ||
+              obType == 'hy2')) {
         try {
           final tlsCfg = (ob['tls'] as Map?)?.cast<String, dynamic>();
           final sni = (tlsCfg?['server_name']?.toString() ?? host);
@@ -607,6 +613,11 @@ class SingBoxNativeService {
           final rawAlpn = tlsCfg?['alpn'];
           if (rawAlpn is List) {
             alpn = rawAlpn.whereType<String>().toList();
+          }
+          // 针对 Hysteria2/Hy2，若未设置 ALPN，补充常见标识以提高握手成功率
+          if ((alpn == null || alpn.isEmpty) &&
+              (obType == 'hysteria2' || obType == 'hy2')) {
+            alpn = ['hysteria2'];
           }
           final ok = _ffi!.probeQUIC(
             host: host,
@@ -629,13 +640,9 @@ class SingBoxNativeService {
         // 2) 通过 TUN 的 HTTP 出网探测（2~3s 超时）
         httpOk = await _probeHttpConnectivity();
         if (!httpOk) {
-          onLog?.call('检测到远端不可用或 VPS 无服务（本地仅完成启动）。');
-          // 状态提示并自动停止
-          onStatusText?.call('连接但异常');
-          // 再次确认此次探测仍属当前运行批次
-          if (isRunning && runSeq == _runSeq) {
-            await stop();
-          }
+          // 不再自动停止，避免误杀；仅给出温和提示
+          onLog?.call('联网探测暂未通过（可能被劫持/墙内拦截/运营商劫持），将继续保持连接。');
+          onStatusText?.call('已连接（待验证）');
         } else {
           onLog?.call('快速联网探测通过。');
           onStatusText?.call('连接正常');
@@ -652,24 +659,35 @@ class SingBoxNativeService {
   Future<bool> _probeHttpConnectivity() async {
     try {
       final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 2);
-      // 使用微软连接测试，HTTP 明文，避免证书问题
-      final uri = Uri.parse('http://www.msftconnecttest.com/connecttest.txt');
-      final req = await client.getUrl(uri).timeout(const Duration(seconds: 2));
-      req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-probe');
-      final resp = await req.close().timeout(const Duration(seconds: 2));
-      if (resp.statusCode == 200) {
-        // 内容很小，最多读 256 字节检查关键字
-        final bytes = await resp.fold<List<int>>(<int>[], (acc, chunk) {
-          if (acc.length < 256) acc.addAll(chunk);
-          return acc;
-        });
-        final body = utf8.decode(bytes, allowMalformed: true);
-        if (body.contains('Microsoft Connect Test')) {
-          return true;
+      client.connectionTimeout = const Duration(seconds: 3);
+      // 多源明文 HTTP 探测，降低单点被拦截带来的误报
+      final candidates = <Uri>[
+        // 谷歌连通性检测（204）
+        Uri.parse('http://connectivitycheck.gstatic.com/generate_204'),
+        // 微软连通性检测（200 + 文本）
+        Uri.parse('http://www.msftconnecttest.com/connecttest.txt'),
+      ];
+
+      for (final uri in candidates) {
+        try {
+          final req = await client
+              .getUrl(uri)
+              .timeout(const Duration(seconds: 3));
+          req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-probe');
+          final resp = await req.close().timeout(const Duration(seconds: 3));
+          // 放宽判定：2xx 或 3xx 视为可联网
+          if (resp.statusCode >= 200 && resp.statusCode < 400) {
+            // 不强制读取全量内容，最多读取少量确认返回
+            int total = 0;
+            await for (final chunk in resp) {
+              total += chunk.length;
+              if (total > 256) break;
+            }
+            return true;
+          }
+        } catch (_) {
+          // 忽略单个源失败，继续尝试下一个
         }
-        // 某些网络会返回其它内容，这里放宽：只要 200 就算可联网
-        return true;
       }
       return false;
     } catch (_) {

@@ -419,31 +419,80 @@ class NodeDelayTester {
   Future<NodeDelayResult> quickTest(VPNConfig node) async {
     print('⚡ 开始快速测试: ${node.name} (${node.server}:${node.port})');
     try {
-      // 对于 UDP-only 协议（hysteria2/tuic），优先尝试 ICMP 探测作为延时近似
+      // 对于 UDP-only 协议（hysteria2/hy2/tuic），优先进行 QUIC 最小握手探测；若无法握手，再回退 ICMP
       if (_isUdpOnlyNode(node)) {
         try {
-          final ip = _isIpAddress(node.server)
-              ? InternetAddress(node.server)
-              : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
-                    (await InternetAddress.lookup(
-                      node.server,
-                    )).firstWhere((a) => a.type == InternetAddressType.IPv4);
-          final icmp = await _icmpPingIPv4(ip.address, timeoutMs: 1200);
-          if (icmp != null && icmp >= 0) {
+          final ffi = SingBoxFFI.instance;
+          // SNI 优先从 settings.sni/host；否则用域名
+          final sni =
+              (node.settings['sni']?.toString() ??
+                      node.settings['host']?.toString() ??
+                      node.server)
+                  .toString();
+          // ALPN：若节点配置了 alpn 列表则使用；否则针对 hy2 补充 'hysteria2'
+          List<String>? alpn;
+          final rawAlpn = node.settings['alpn'];
+          if (rawAlpn is List) {
+            alpn = rawAlpn.whereType<String>().toList();
+          }
+          final t = node.type.toLowerCase();
+          if ((alpn == null || alpn.isEmpty) &&
+              (t == 'hysteria2' || t == 'hy2')) {
+            alpn = ['hysteria2'];
+          }
+          final insecure = node.settings['skipCertVerify'] == true;
+          final stopwatch = Stopwatch()..start();
+          final ok = ffi.probeQUIC(
+            host: node.server,
+            port: node.port,
+            sni: sni,
+            insecure: insecure,
+            alpn: alpn,
+            timeoutMs: 1500,
+          );
+          stopwatch.stop();
+          if (ok) {
+            final ms = stopwatch.elapsedMilliseconds == 0
+                ? 1
+                : stopwatch.elapsedMilliseconds;
             return NodeDelayResult(
               nodeId: node.id,
               nodeName: node.name,
               nodeServer: node.server,
               nodePort: node.port,
               nodeType: node.type,
-              delay: icmp,
+              delay: ms,
               isSuccess: true,
               testTime: DateTime.now(),
             );
           }
+          // 若 QUIC 握手失败，再尝试 ICMP 近似
+          try {
+            final ip = _isIpAddress(node.server)
+                ? InternetAddress(node.server)
+                : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
+                      (await InternetAddress.lookup(
+                        node.server,
+                      )).firstWhere((a) => a.type == InternetAddressType.IPv4);
+            final icmp = await _icmpPingIPv4(ip.address, timeoutMs: 1200);
+            if (icmp != null && icmp >= 0) {
+              return NodeDelayResult(
+                nodeId: node.id,
+                nodeName: node.name,
+                nodeServer: node.server,
+                nodePort: node.port,
+                nodeType: node.type,
+                delay: icmp,
+                isSuccess: true,
+                testTime: DateTime.now(),
+              );
+            }
+          } catch (e) {
+            print('⚠️ UDP-only 节点 ICMP 回退失败: $e');
+          }
+          // 最终仍失败则继续后续的 TCP 兜底流程（通常会失败/拒绝）
         } catch (e) {
-          // 忽略，继续走 TCP 探测兜底
-          print('⚠️ UDP-only 节点 ICMP 探测失败，回退 TCP: $e');
+          print('⚠️ UDP-only 节点 QUIC 探测异常: $e');
         }
       }
 

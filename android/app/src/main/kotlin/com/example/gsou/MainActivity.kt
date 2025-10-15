@@ -1,5 +1,6 @@
 package com.example.gsou
 
+import android.app.Activity
 import android.content.Intent
 import android.content.ComponentName
 import android.content.Context
@@ -14,6 +15,11 @@ import com.example.gsou.vpn.CoreVpnService
 class MainActivity : FlutterActivity() {
 	private var vpnBound = false
 	private var vpnBinder: CoreVpnService.LocalBinder? = null
+	private var pendingVpnPrepareResult: MethodChannel.Result? = null
+
+	companion object {
+		private const val REQ_VPN_PREPARE = 100
+	}
 
 	private val connection = object : ServiceConnection {
 		override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -40,10 +46,12 @@ class MainActivity : FlutterActivity() {
 				"vpnPrepare" -> {
 					val intent = VpnService.prepare(this)
 					if (intent != null) {
-						startActivityForResult(intent, 100)
-						result.success(false) // 需要用户同意
+						// 弹出系统授权对话框，并在 onActivityResult 中异步返回结果
+						pendingVpnPrepareResult = result
+						startActivityForResult(intent, REQ_VPN_PREPARE)
 					} else {
-						result.success(true) // 已同意
+						// 已经授权过，直接返回 true
+						result.success(true)
 					}
 				}
 				"vpnBind" -> {
@@ -77,6 +85,17 @@ class MainActivity : FlutterActivity() {
 					result.success(true)
 				}
 				else -> result.notImplemented()
+			}
+		}
+	}
+
+	override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+		super.onActivityResult(requestCode, resultCode, data)
+		if (requestCode == REQ_VPN_PREPARE) {
+			val pending = pendingVpnPrepareResult
+			pendingVpnPrepareResult = null
+			if (pending != null) {
+				pending.success(resultCode == Activity.RESULT_OK)
 			}
 		}
 	}

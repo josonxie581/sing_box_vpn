@@ -7,7 +7,18 @@ import 'package:path/path.dart' as path;
 // import 'package:win32/win32.dart' as win32; // Not required; use Directory.current instead
 
 // C 原型: typedef void (*LogCallback)(const char* msg);
+// 注意：typedef 需置于顶层，避免 Dart analyzer 报错
 typedef NativeLogC = Void Function(Pointer<Utf8>);
+typedef DartLogC = void Function(Pointer<Utf8>);
+
+// 将原生日志回调桥接为 Dart 打印（线程安全：仅进行简单字符串转换与打印）
+void _nativeLog(Pointer<Utf8> msg) {
+  try {
+    final s = msg.toDartString();
+    // ignore: avoid_print
+    print(s);
+  } catch (_) {}
+}
 
 /// sing-box FFI 绑定
 class SingBoxFFI {
@@ -214,7 +225,20 @@ class SingBoxFFI {
         .lookup<NativeFunction<Pointer<Utf8> Function()>>('GetVersion')
         .asFunction<Pointer<Utf8> Function()>();
 
-    // RegisterLogCallback 暂不使用
+    // RegisterLogCallback：捕获原生调试日志
+    try {
+      // C: typedef void (*LogCallback)(const char* msg);
+      final reg = _lib
+          .lookupFunction<
+            Void Function(Pointer<NativeFunction<NativeLogC>>),
+            void Function(Pointer<NativeFunction<NativeLogC>>)
+          >('RegisterLogCallback');
+      // 绑定本地回调，把 C 文本打印到 Dart 日志
+      final cbPtr = Pointer.fromFunction<NativeLogC>(_nativeLog);
+      reg(cbPtr);
+    } catch (_) {
+      // 老版本或不支持可忽略
+    }
 
     // Optional: GetLastError/FreeCString (may not exist in older DLLs)
     try {

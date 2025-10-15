@@ -10,11 +10,13 @@ static inline void callLog(LogCallback cb, const char* msg) {
 }
 */
 import "C"
+
 import (
 	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"runtime"
 	"strings"
@@ -23,10 +25,18 @@ import (
 	"unsafe"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/process"
+	plat "github.com/sagernet/sing-box/experimental/libbox/platform"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/control"
 	sjson "github.com/sagernet/sing/common/json"
+	slogger "github.com/sagernet/sing/common/logger"
+	xlist "github.com/sagernet/sing/common/x/list"
+	"github.com/sagernet/sing/service"
 
 	// 使用 sagernet fork 的 quic-go
 	quic "github.com/sagernet/quic-go"
@@ -66,7 +76,7 @@ func diagFilePath() string {
 }
 
 func dbg(msg string) {
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		// 若已有回调，交由上层统一写
 		c := C.CString("[NATIVE] " + msg)
 		C.callLog(logCB, c)
@@ -92,6 +102,61 @@ func setLastError(err error) {
 	} else {
 		lastError = ""
 	}
+}
+
+// --- Android 平台接口：让 sing-box 使用 VpnService 提供的 TUN FD，而不是自行配置内核 ---
+// 满足 experimental/libbox/platform.Interface 要求的最小实现。
+type androidPlatformInterface struct{}
+
+func (p *androidPlatformInterface) Initialize(networkManager adapter.NetworkManager) error {
+	return nil
+}
+func (p *androidPlatformInterface) UsePlatformAutoDetectInterfaceControl() bool { return false }
+func (p *androidPlatformInterface) AutoDetectInterfaceControl(fd int) error     { return nil }
+func (p *androidPlatformInterface) OpenTun(options *tun.Options, _ option.TunPlatformOptions) (tun.Tun, error) {
+	dbg("platform.OpenTun called")
+	if tunFD < 0 {
+		return nil, fmt.Errorf("no tun fd available")
+	}
+	// 不复制 FD，直接移交给 sing-tun 持有；确保 Java 侧使用 detachFd() 交出所有权
+	options.FileDescriptor = tunFD
+	// 使用用户态 gVisor 栈时不会触发内核/SELinux 的路由/接口配置
+	return tun.New(*options)
+}
+
+// 一个安全的空实现，避免上层对 interfaceMonitor 的空指针解引用
+type dummyDefaultInterfaceMonitor struct{}
+
+func (m *dummyDefaultInterfaceMonitor) Start() error                         { return nil }
+func (m *dummyDefaultInterfaceMonitor) Close() error                         { return nil }
+func (m *dummyDefaultInterfaceMonitor) DefaultInterface() *control.Interface { return nil }
+func (m *dummyDefaultInterfaceMonitor) OverrideAndroidVPN() bool             { return false }
+func (m *dummyDefaultInterfaceMonitor) AndroidVPNEnabled() bool              { return false }
+func (m *dummyDefaultInterfaceMonitor) RegisterCallback(_ tun.DefaultInterfaceUpdateCallback) *xlist.Element[tun.DefaultInterfaceUpdateCallback] {
+	return nil
+}
+func (m *dummyDefaultInterfaceMonitor) UnregisterCallback(_ *xlist.Element[tun.DefaultInterfaceUpdateCallback]) {
+}
+func (m *dummyDefaultInterfaceMonitor) RegisterMyInterface(_ string) {}
+func (m *dummyDefaultInterfaceMonitor) MyInterface() string          { return "" }
+
+func (p *androidPlatformInterface) CreateDefaultInterfaceMonitor(_ slogger.Logger) tun.DefaultInterfaceMonitor {
+	dbg("platform.CreateDefaultInterfaceMonitor -> dummy")
+	return &dummyDefaultInterfaceMonitor{}
+}
+func (p *androidPlatformInterface) Interfaces() ([]adapter.NetworkInterface, error) {
+	return []adapter.NetworkInterface{}, nil
+}
+func (p *androidPlatformInterface) UnderNetworkExtension() bool                 { return false }
+func (p *androidPlatformInterface) IncludeAllNetworks() bool                    { return false }
+func (p *androidPlatformInterface) ClearDNSCache()                              {}
+func (p *androidPlatformInterface) ReadWIFIState() adapter.WIFIState            { return adapter.WIFIState{} }
+func (p *androidPlatformInterface) SystemCertificates() []string                { return nil }
+func (p *androidPlatformInterface) SendNotification(_ *plat.Notification) error { return nil }
+
+// process.Searcher
+func (p *androidPlatformInterface) FindProcessInfo(_ context.Context, _ string, _ netip.AddrPort, _ netip.AddrPort) (*process.Info, error) {
+	return nil, os.ErrInvalid
 }
 
 // 按需设置 route 中的 auto_detect_interface 与 auto_detect_interface_ipv6（均置为 false）。
@@ -136,7 +201,7 @@ type ffiPlatformWriter struct{}
 
 func (w *ffiPlatformWriter) DisableColors() bool { return true }
 func (w *ffiPlatformWriter) WriteMessage(level log.Level, message string) {
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		cmsg := C.CString(message)
 		C.callLog(logCB, cmsg)
 		C.free(unsafe.Pointer(cmsg))
@@ -156,7 +221,7 @@ func InitSingBox() int {
 		cancel()
 	}
 	ctx, cancel = context.WithCancel(context.Background())
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		msg := C.CString("sing-box 初始化完成")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
@@ -180,7 +245,7 @@ func StartSingBox(configJSON *C.char) int {
 	}
 
 	if instance != nil {
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString("sing-box 已经在运行")
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -216,8 +281,8 @@ func StartSingBox(configJSON *C.char) int {
 		ctxWithRegistry := include.Context(ctx)
 		original := configStr
 		injected := false
-		// 尝试不同键名以适配不同版本的 schema
-		keys := []string{"fd", "file_descriptor"}
+		// 先尝试直接注入到 tun inbound 顶层：file_descriptor / fd
+		keys := []string{"file_descriptor", "fd"}
 		for _, key := range keys {
 			newStr, err := injectTunFDWithKey(original, tunFD, key)
 			if err != nil {
@@ -240,6 +305,29 @@ func StartSingBox(configJSON *C.char) int {
 			injected = true
 			dbg("StartSingBox: injected tun fd with key=" + key)
 			break
+		}
+		// 若顶层注入失败，尝试 platform 子对象注入（platform.file_descriptor / platform.fd）
+		if !injected {
+			for _, key := range keys {
+				newStr, err := injectTunFDPlatformWithKey(original, tunFD, key)
+				if err != nil {
+					dbg("StartSingBox: inject platform key=" + key + " failed: " + err.Error())
+					continue
+				}
+				var testOpt option.Options
+				if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(newStr), &testOpt); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "unknown") {
+						dbg("StartSingBox: platform schema rejected key=" + key)
+						continue
+					}
+					dbg("StartSingBox: parse after platform inject key=" + key + " error: " + err.Error())
+					continue
+				}
+				configStr = newStr
+				injected = true
+				dbg("StartSingBox: injected tun fd with platform." + key)
+				break
+			}
 		}
 		if !injected {
 			dbg("StartSingBox: no schema accepted tun fd, proceed without fd injection")
@@ -294,6 +382,11 @@ func StartSingBox(configJSON *C.char) int {
 		}
 	}
 
+	// 诊断：打印最终 tun inbound 片段
+	if runtime.GOOS == "android" {
+		logTunInboundSnippet(configStr, "StartSingBox: final")
+	}
+
 	// 刷新基线配置：每次 Start 都将当前传入配置作为新的基线
 	baseConfigJSON = configStr
 	currentConfigJSON = configStr
@@ -303,7 +396,7 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox phase=parse_options begin")
 	if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(configStr), &options); err != nil {
 		setLastError(fmt.Errorf("parse options: %w", err))
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString(fmt.Sprintf("配置解析失败: %v", err))
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -326,20 +419,18 @@ func StartSingBox(configJSON *C.char) int {
 	// 创建 sing-box 实例（使用内置日志系统；如设置了回调，则通过 PlatformWriter 输出）
 	var err error
 	var pw log.PlatformWriter
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		pw = &ffiPlatformWriter{}
 	}
 	// 确保在 Context 中注入默认的 Inbound/Outbound/Endpoint/DNS/Service 注册表
 	// 注意：ctxWithRegistry 已在上方用于解析
 	stage = "box.New"
 	dbg("StartSingBox phase=box.New begin")
-	// 如果在 Android，且传入了有效 FD，尝试把 FD 注入到配置中：
-	// 注意：具体字段名/注入方式取决于 sing-box 的 TUN inbound 实现，
-	// 这里我们先保留占位，后续可根据实际需要将 options 中的 inbound 配置改写。
+	// Android: 如有有效 tunFD，注册平台接口到 Context，使 tun inbound 走 platform.OpenTun 路径
 	if runtime.GOOS == "android" && tunFD >= 0 {
-		// TODO: 根据 sing-box 的 API，把 tunFD 注入到 options（例如 options.Inbounds[...].Tun.FD = tunFD）
-		// 当前占位：仅打日志提示
-		dbg(fmt.Sprintf("[Start] Android with TUN FD=%d (注入逻辑待实现)", tunFD))
+		dbg(fmt.Sprintf("[Start] Android registering platform interface with TUN FD=%d", tunFD))
+		platformIface := &androidPlatformInterface{}
+		ctxWithRegistry = service.ContextWith[plat.Interface](ctxWithRegistry, platformIface)
 	}
 
 	instance, err = box.New(box.Options{
@@ -350,7 +441,7 @@ func StartSingBox(configJSON *C.char) int {
 
 	if err != nil {
 		setLastError(fmt.Errorf("box.New: %w", err))
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString(fmt.Sprintf("创建实例失败: %v", err))
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -366,7 +457,7 @@ func StartSingBox(configJSON *C.char) int {
 	err = instance.Start()
 	if err != nil {
 		setLastError(fmt.Errorf("instance.Start: %w", err))
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString(fmt.Sprintf("启动失败: %v", err))
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -379,7 +470,7 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox phase=instance.Start ok")
 	stage = "done"
 
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		msg := C.CString("sing-box 启动成功")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
@@ -420,13 +511,19 @@ func injectTunFDWithKey(cfg string, fd int, key string) (string, error) {
 	for i, v := range inbounds {
 		if m, ok := v.(map[string]interface{}); ok {
 			if t, ok2 := m["type"].(string); ok2 && t == "tun" {
-				m[key] = fd
-				// 在 Android 上，路由由 VpnService 管理，避免触发 sing-box 的 netlink/route 管理
-				m["auto_route"] = false
-				if _, ok := m["strict_route"]; !ok {
-					m["strict_route"] = false
+				// 极简重写，保留 tag/type，注入 fd，并固定为 gVisor 用户态栈
+				tag, _ := m["tag"].(string)
+				nm := map[string]interface{}{
+					"type":         "tun",
+					"tag":          tag,
+					key:            fd,
+					"auto_route":   false,
+					"strict_route": false,
+					"stack":        "gvisor",
+					// 显式禁用 MTU 配置（0 表示不设置）
+					"mtu": 0,
 				}
-				inbounds[i] = m
+				inbounds[i] = nm
 				found = true
 				break
 			}
@@ -439,7 +536,10 @@ func injectTunFDWithKey(cfg string, fd int, key string) (string, error) {
 			// 关闭自动路由以避免 Android 上需要的 netlink 权限
 			"auto_route":   false,
 			"strict_route": false,
-			"mtu":          1500,
+			// 使用 gVisor 用户态网络栈
+			"stack": "gvisor",
+			// 显式禁用 MTU 配置（0 表示不设置）
+			"mtu": 0,
 		}
 		inbounds = append(inbounds, tun)
 	}
@@ -451,6 +551,87 @@ func injectTunFDWithKey(cfg string, fd int, key string) (string, error) {
 	return string(b), nil
 }
 
+// 变体：将 FD 注入到 tun inbound 的 platform 子对象中：platform.{key} = fd
+func injectTunFDPlatformWithKey(cfg string, fd int, key string) (string, error) {
+	var root map[string]interface{}
+	if err := sjson.Unmarshal([]byte(cfg), &root); err != nil {
+		return "", err
+	}
+	inbAny, ok := root["inbounds"]
+	if !ok {
+		inbAny = []interface{}{}
+	}
+	inbounds, ok := inbAny.([]interface{})
+	if !ok {
+		inbounds = []interface{}{}
+	}
+	found := false
+	for i, v := range inbounds {
+		if m, ok := v.(map[string]interface{}); ok {
+			if t, ok2 := m["type"].(string); ok2 && t == "tun" {
+				tag, _ := m["tag"].(string)
+				pm := map[string]interface{}{key: fd}
+				nm := map[string]interface{}{
+					"type":         "tun",
+					"tag":          tag,
+					"auto_route":   false,
+					"strict_route": false,
+					"stack":        "gvisor",
+					"platform":     pm,
+				}
+				inbounds[i] = nm
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		nm := map[string]interface{}{
+			"type":         "tun",
+			"auto_route":   false,
+			"strict_route": false,
+			"stack":        "gvisor",
+			"platform":     map[string]interface{}{key: fd},
+		}
+		inbounds = append(inbounds, nm)
+	}
+	root["inbounds"] = inbounds
+	b, err := sjson.Marshal(root)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// 打印最终生效的 tun inbound（用于诊断 Android 权限问题）
+func logTunInboundSnippet(cfg string, prefix string) {
+	defer func() { _ = recover() }()
+	var root map[string]interface{}
+	if err := sjson.Unmarshal([]byte(cfg), &root); err != nil {
+		dbg(prefix + ": parse cfg fail: " + err.Error())
+		return
+	}
+	inbAny, ok := root["inbounds"]
+	if !ok {
+		dbg(prefix + ": no inbounds")
+		return
+	}
+	arr, ok := inbAny.([]interface{})
+	if !ok {
+		dbg(prefix + ": inbounds not array")
+		return
+	}
+	for _, v := range arr {
+		if m, ok := v.(map[string]interface{}); ok {
+			if t, ok2 := m["type"].(string); ok2 && t == "tun" {
+				if b, err := sjson.Marshal(m); err == nil {
+					dbg(prefix + ": tun inbound = " + string(b))
+				}
+			}
+		}
+	}
+}
+
 //export StopSingBox
 func StopSingBox() int {
 
@@ -458,7 +639,7 @@ func StopSingBox() int {
 	// 先获取锁检查状态，并在关闭前尽早传播取消信号，避免 Close 阻塞于网络/DNS 超时
 	mu.Lock()
 	if instance == nil {
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString("sing-box 未运行")
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -479,7 +660,7 @@ func StopSingBox() int {
 	// 执行优雅关闭（不持锁，避免阻塞其它调用）
 	err := i.Close()
 	if err != nil {
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString(fmt.Sprintf("停止失败: %v", err))
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -490,6 +671,10 @@ func StopSingBox() int {
 	// 关闭完成后，清理全局状态
 	mu.Lock()
 	instance = nil
+	// 清理 Android TUN fd 记录，避免后续误用
+	if runtime.GOOS == "android" {
+		tunFD = -1
+	}
 	// 停止后清空当前与基线配置，等待下次 Start 设置
 	currentConfigJSON = ""
 	baseConfigJSON = ""
@@ -497,7 +682,7 @@ func StopSingBox() int {
 	ctx, cancel = context.WithCancel(context.Background())
 	mu.Unlock()
 
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		msg := C.CString("sing-box 已停止")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
@@ -530,7 +715,7 @@ func TestConfig(configJSON *C.char) int {
 
 	if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(configStr), &options); err != nil {
 		setLastError(fmt.Errorf("parse options: %w", err))
-		if logCB != nil {
+		if logCB != nil && runtime.GOOS != "android" {
 			msg := C.CString(fmt.Sprintf("配置无效: %v", err))
 			C.callLog(logCB, msg)
 			C.free(unsafe.Pointer(msg))
@@ -540,7 +725,7 @@ func TestConfig(configJSON *C.char) int {
 
 	// TODO: 可以添加更详细的配置验证
 
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		msg := C.CString("=配置验证通过")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
@@ -576,7 +761,7 @@ func Cleanup() {
 		_ = i.Close()
 	}
 
-	if logCB != nil {
+	if logCB != nil && runtime.GOOS != "android" {
 		msg := C.CString("资源清理完成")
 		C.callLog(logCB, msg)
 		C.free(unsafe.Pointer(msg))
@@ -602,6 +787,17 @@ func FreeCString(p *C.char) {
 func RegisterLogCallback(cb C.LogCallback) {
 	mu.Lock()
 	defer mu.Unlock()
+	// 警示：Dart FFI 回调（Pointer.fromFunction）只能在发起 FFI 调用的同一线程、同一 Isolate 中被同步调用。
+	// 本工程在 Android 上的 sing-box 启动/运行期间会产生大量异步日志与回调（来自不同 goroutine/线程），
+	// 若直接回调 Dart，将触发 "Cannot invoke native callback outside an isolate." 并导致崩溃。
+	// 因此在 Android 平台禁用 Dart 回调注册，改为仅输出到 stdout/诊断文件/Logcat。
+	if runtime.GOOS == "android" {
+		logCB = nil
+		// 提示一次，便于诊断（不会触发 Dart 回调）
+		fmt.Println("[NATIVE] RegisterLogCallback ignored on Android: FFI callbacks are unsafe asynchronously; using native logging only.")
+		return
+	}
+	// 非 Android 平台仍按需启用
 	logCB = cb
 }
 
@@ -859,8 +1055,8 @@ func ProbeQUIC(host *C.char, port C.int, sni *C.char, insecure C.int, alpnCsv *C
 	serverName := C.GoString(sni)
 	alpn := parseALPN(C.GoString(alpnCsv))
 	if len(alpn) == 0 {
-		// 兜底：提供常见的 QUIC ALPN，提升握手成功率
-		alpn = []string{"h3", "tuic"}
+		// 兜底：提供常见的 QUIC ALPN，提升握手成功率（覆盖 h3、tuic、hysteria/hysteria2）
+		alpn = []string{"h3", "tuic", "hysteria", "hysteria2"}
 	}
 	tlsConf := &tls.Config{ServerName: serverName, InsecureSkipVerify: insecure != 0, NextProtos: alpn}
 	qconf := &quic.Config{}

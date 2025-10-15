@@ -410,35 +410,46 @@ class RulesetManager {
     final inbounds = <Map<String, dynamic>>[];
 
     if (useTun) {
-      inbounds.add({
-        "tag": "tun-in",
-        "type": "tun",
-        // 使用稳定的接口名称
-        if (Platform.isWindows) "interface_name": "sing-box",
-        // IPv4地址配置，仅在明确启用IPv6且VPS支持时才添加IPv6
-        "address": enableIpv6
-            ? ["172.19.0.1/30", "2001:db8::1/128"]
-            : ["172.19.0.1/30"],
+      if (Platform.isAndroid) {
+        // Android: 使用外部 VpnService 建立的 TUN FD，最小化配置以避免接口配置权限
+        inbounds.add({
+          "tag": "tun-in",
+          "type": "tun",
+          "auto_route": false,
+          "strict_route": false,
+          "stack": "gvisor",
+          // 不设置 address/mtu/route 等，由原生注入 fd 后直接使用
+        });
+      } else {
+        inbounds.add({
+          "tag": "tun-in",
+          "type": "tun",
+          // 使用稳定的接口名称
+          if (Platform.isWindows) "interface_name": "sing-box",
+          // IPv4地址配置，仅在明确启用IPv6且VPS支持时才添加IPv6
+          "address": enableIpv6
+              ? ["172.19.0.1/30", "2001:db8::1/128"]
+              : ["172.19.0.1/30"],
 
-        // 使用稳定的MTU设置，避免频繁调整导致连接中断
-        "mtu": tunMtu ?? 1500, // 标准以太网MTU，最稳定
-        "auto_route": true,
-        "strict_route": tunStrictRoute,
+          // 使用稳定的MTU设置
+          "mtu": tunMtu ?? 1500,
+          "auto_route": true,
+          "strict_route": tunStrictRoute,
 
-        // 保守的嗅探配置，避免影响DNS
-        "sniff": true,
+          // 保守的嗅探配置
+          "sniff": true,
 
-        // 添加稳定性配置
-        "domain_strategy": "prefer_ipv4", // 优先IPv4提高稳定性
-        // 默认使用 system（Windows 下 Wintun），必要时可切换 gvisor
-        "stack": Platform.isWindows ? 'system' : 'system',
+          // 添加稳定性配置
+          "domain_strategy": "prefer_ipv4",
+          // 默认 system；Windows 下为 Wintun
+          "stack": Platform.isWindows ? 'system' : 'system',
 
-        // Windows平台稳定性配置
-        if (Platform.isWindows) "endpoint_independent_nat": false,
+          if (Platform.isWindows) "endpoint_independent_nat": false,
 
-        // 路由表配置，减少路由冲突
-        "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
-      });
+          // 路由表配置
+          "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
+        });
+      }
     }
 
     inbounds.add({
@@ -517,8 +528,17 @@ class RulesetManager {
       "outbound": "direct",
     };
 
+    // 在 Android TUN 模式下，劫持系统 DNS（UDP/53）给内部 dns-out，避免系统直连 DNS 失败或被污染
+    final androidTunDnsHijackRule = (useTun && Platform.isAndroid)
+        ? <String, dynamic>{
+            "protocol": ["dns"], // sing-box 支持的速记：等价于 dst port 53/udp
+            "outbound": "dns-out",
+          }
+        : null;
+
     final mergedRules = <Map<String, dynamic>>[
       inboundBypassRule,
+      if (androidTunDnsHijackRule != null) androidTunDnsHijackRule,
       ...?(routeConfig)["rules"] as List?,
     ];
     final sanitizedRules = _sanitizeRules(mergedRules);

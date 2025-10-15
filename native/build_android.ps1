@@ -62,7 +62,13 @@ $GoTags = $env:SINGBOX_GO_TAGS
 if ([string]::IsNullOrWhiteSpace($GoTags)) {
     # Default to essential features; override via SINGBOX_GO_TAGS to customize.
     # Note: 'with_reality_server' is deprecated/merged into 'with_utls' in sing-box.
-    $GoTags = 'with_quic,with_utls,with_grpc,with_clash_api'
+    # IMPORTANT: Include with_gvisor so Android can use userspace stack and accept file_descriptor schema
+    $GoTags = 'with_quic,with_utls,with_grpc,with_clash_api,with_gvisor'
+} else {
+    # Always ensure with_gvisor present
+    if ($GoTags -notmatch '(?i)with_gvisor') {
+        $GoTags = "$GoTags,with_gvisor"
+    }
 }
 Write-Info "Go build tags: $GoTags"
 
