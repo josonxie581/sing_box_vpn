@@ -166,15 +166,17 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
   }
 
   String _getStatusText() {
-    if (widget.isConnected) return '已连接';
+    if (widget.isConnected) return '停止';
     if (widget.isConnecting) return '连接中...';
     if (widget.isDisconnecting) return '断开中...';
     if (_isHovered) return '开始连接';
-    return '点击连接';
+    return '开始 ';
   }
 
   void _handleHoverEnter() {
-    if (!widget.isConnected && !widget.isConnecting && !widget.isDisconnecting) {
+    if (!widget.isConnected &&
+        !widget.isConnecting &&
+        !widget.isDisconnecting) {
       setState(() => _isHovered = true);
       _hoverController.forward();
       _rippleController.repeat();
@@ -209,12 +211,17 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
             onTapCancel: () => setState(() => _isPressed = false),
             onTap: widget.onTap,
             child: Transform.scale(
-              scale: _isPressed ? 0.95 : (_isHovered ? _hoverAnimation.value : 1.0),
+              scale: _isPressed
+                  ? 0.95
+                  : (_isHovered ? _hoverAnimation.value : 1.0),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   // 悬停时的波纹效果（只在未连接时显示）
-                  if (_isHovered && !widget.isConnected && !widget.isConnecting && !widget.isDisconnecting)
+                  if (_isHovered &&
+                      !widget.isConnected &&
+                      !widget.isConnecting &&
+                      !widget.isDisconnecting)
                     Positioned.fill(
                       child: Transform.scale(
                         scale: 1 + _rippleAnimation.value,
@@ -254,7 +261,10 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
                             spreadRadius: 2 * _glowAnimation.value,
                           ),
                         // 悬停发光效果（只在未连接时显示）
-                        if (_isHovered && !widget.isConnected && !widget.isConnecting && !widget.isDisconnecting)
+                        if (_isHovered &&
+                            !widget.isConnected &&
+                            !widget.isConnecting &&
+                            !widget.isDisconnecting)
                           BoxShadow(
                             color: AppTheme.primaryNeon.withOpacity(0.6),
                             blurRadius: 25,
@@ -263,78 +273,85 @@ class _AnimatedConnectionButtonState extends State<AnimatedConnectionButton>
                       ],
                     ),
                     child: Transform.scale(
-                scale: _pulseAnimation.value,
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [_getButtonColor(), _getButtonSecondaryColor()],
-                      stops: const [0.0, 1.0],
-                    ),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
-                      width: 2,
-                    ),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withOpacity(0.1),
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.1),
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
+                      scale: _pulseAnimation.value,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              _getButtonColor(),
+                              _getButtonSecondaryColor(),
+                            ],
+                            stops: const [0.0, 1.0],
+                          ),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.2),
+                            width: 2,
+                          ),
+                        ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.white.withOpacity(0.1),
+                                Colors.transparent,
+                                Colors.black.withOpacity(0.1),
+                              ],
+                              stops: const [0.0, 0.5, 1.0],
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Transform.rotate(
+                                angle:
+                                    (widget.isConnecting ||
+                                        widget.isDisconnecting)
+                                    ? _rotationAnimation.value * 2 * 3.14159
+                                    : 0,
+                                child: Icon(
+                                  _getIcon(),
+                                  size: widget.size * 0.35,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black.withOpacity(0.5),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 200),
+                                style: TextStyle(
+                                  fontSize:
+                                      widget.size *
+                                      (_isHovered && !widget.isConnected
+                                          ? 0.14
+                                          : 0.12),
+                                  fontWeight: FontWeight.bold,
+                                  color: _isHovered && !widget.isConnected
+                                      ? AppTheme.primaryNeon
+                                      : Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black.withOpacity(0.5),
+                                      blurRadius: 2,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: Text(_getStatusText()),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Transform.rotate(
-                          angle: (widget.isConnecting || widget.isDisconnecting)
-                              ? _rotationAnimation.value * 2 * 3.14159
-                              : 0,
-                          child: Icon(
-                            _getIcon(),
-                            size: widget.size * 0.35,
-                            color: Colors.white,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.5),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 200),
-                          style: TextStyle(
-                            fontSize: widget.size * (_isHovered && !widget.isConnected ? 0.14 : 0.12),
-                            fontWeight: FontWeight.bold,
-                            color: _isHovered && !widget.isConnected
-                                ? AppTheme.primaryNeon
-                                : Colors.white,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.5),
-                                blurRadius: 2,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: Text(
-                            _getStatusText(),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
                     ),
                   ),
                 ],
