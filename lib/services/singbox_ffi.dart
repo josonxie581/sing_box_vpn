@@ -17,6 +17,7 @@ class SingBoxFFI {
   // 函数指针
   late final Function _initSingBox;
   late final Function _startSingBox;
+  late final Function? _startSingBoxWithTunFd;
   late final Function _stopSingBox;
   late final Function _isRunning;
   late final Function _testConfig;
@@ -76,15 +77,19 @@ class SingBoxFFI {
     final libraryPath = _getLibraryPath();
     _ffiDiag('FFI: _loadLibrary begin -> target=$libraryPath');
 
-    if (!Platform.isWindows) {
+    final isWindows = Platform.isWindows;
+    final isAndroid = Platform.isAndroid;
+    if (!isWindows && !isAndroid) {
       throw UnsupportedError('暂不支持该平台');
     }
 
-    // 将工作目录切换到可执行文件目录，提升依赖 DLL 的可发现性
+    // Windows: 将工作目录切换到可执行文件目录，提升依赖 DLL 的可发现性
     try {
-      final exeDir = path.dirname(Platform.resolvedExecutable);
-      Directory.current = exeDir;
-      _ffiDiag('FFI: set CWD to $exeDir');
+      if (isWindows) {
+        final exeDir = path.dirname(Platform.resolvedExecutable);
+        Directory.current = exeDir;
+        _ffiDiag('FFI: set CWD to $exeDir');
+      }
     } catch (e) {
       _ffiDiag('FFI: set CWD failed: $e');
     }
@@ -151,6 +156,12 @@ class SingBoxFFI {
       );
     }
 
+    if (Platform.isAndroid) {
+      // Android: .so 会被系统从标准库搜索路径加载，直接传库名即可。
+      // 需要在项目中放置：android/app/src/main/jniLibs/<abi>/libsingbox.so
+      return 'libsingbox.so';
+    }
+
     throw UnsupportedError('暂不支持该平台');
   }
 
@@ -166,6 +177,17 @@ class SingBoxFFI {
     _startSingBox = _lib
         .lookup<NativeFunction<Int32 Function(Pointer<Utf8>)>>('StartSingBox')
         .asFunction<int Function(Pointer<Utf8>)>();
+
+    // Optional: StartSingBoxWithTunFd(char* configJSON, int fd) -> int
+    try {
+      _startSingBoxWithTunFd = _lib
+          .lookup<NativeFunction<Int32 Function(Pointer<Utf8>, Int32)>>(
+            'StartSingBoxWithTunFd',
+          )
+          .asFunction<int Function(Pointer<Utf8>, int)>();
+    } catch (_) {
+      _startSingBoxWithTunFd = null;
+    }
 
     // StopSingBox() -> int
     _stopSingBox = _lib
@@ -288,6 +310,21 @@ class SingBoxFFI {
     final configPtr = configJson.toNativeUtf8();
     try {
       return _startSingBox(configPtr);
+    } finally {
+      malloc.free(configPtr);
+    }
+  }
+
+  /// 使用指定的 TUN FD 启动（Android 专用）
+  int startWithTunFd(String configJson, int fd) {
+    if (_startSingBoxWithTunFd == null) {
+      // 回落到普通启动
+      return start(configJson);
+    }
+    final configPtr = configJson.toNativeUtf8();
+    try {
+      final f = _startSingBoxWithTunFd as int Function(Pointer<Utf8>, int);
+      return f(configPtr, fd);
     } finally {
       malloc.free(configPtr);
     }

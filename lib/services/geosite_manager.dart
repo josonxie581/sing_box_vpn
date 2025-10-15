@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -208,6 +209,25 @@ class RuleSetsManager {
       subDir = 'geosite';
     } else {
       subDir = 'other';
+    }
+
+    // 优先检查外部存储的应用专属目录，便于用户手动拷贝（Android 无需额外权限）
+    try {
+      final extDir = await getExternalStorageDirectory();
+      if (extDir != null) {
+        final candidateDir = Directory(
+          path.join(extDir.path, 'rulesets', subDir),
+        );
+        final candidateFile = path.join(
+          candidateDir.path,
+          rulesetName.endsWith('.srs') ? rulesetName : '$rulesetName.srs',
+        );
+        if (File(candidateFile).existsSync()) {
+          return candidateFile;
+        }
+      }
+    } catch (_) {
+      // 忽略外部存储异常，回退内部路径
     }
 
     final dir = Directory(path.join(baseDir.path, subDir));
@@ -525,6 +545,9 @@ class RuleSetsManager {
 
   /// 获取已下载的规则集列表
   Future<List<String>> getDownloadedRulesets() async {
+    // 确保部分基础规则集（随包提供）已落盘，避免首次进入页面列表为空
+    await _ensureBundledBaseline();
+
     final baseDir = await _getRulesetDirectory();
     if (!await baseDir.exists()) {
       return [];
@@ -576,6 +599,40 @@ class RuleSetsManager {
 
     print('[RuleSetsManager] 找到已下载规则集: ${rulesets.length} 个');
     return rulesets;
+  }
+
+  /// 将随包内置的一小部分基础规则集复制到应用目录（若不存在）
+  Future<void> _ensureBundledBaseline() async {
+    final candidates = <String>[
+      'geosite-ads',
+      'geosite-cn',
+      'geosite-geolocation-!cn',
+      'geoip-cn',
+    ];
+
+    for (final name in candidates) {
+      try {
+        final isGeoip = name.startsWith('geoip-');
+        final assetPath = isGeoip
+            ? 'assets/rulesets/geo/geoip/$name.srs'
+            : 'assets/rulesets/geo/geosite/$name.srs';
+
+        final destPath = await getRulesetPath(name);
+        final destFile = File(destPath);
+        if (!await destFile.exists()) {
+          // 若资产中不存在相应文件，load 会抛异常，直接忽略即可
+          final data = await rootBundle.load(assetPath);
+          await destFile.create(recursive: true);
+          await destFile.writeAsBytes(
+            data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+            flush: true,
+          );
+          print('[RuleSetsManager] 初次导入随包规则集: $name -> $destPath');
+        }
+      } catch (e) {
+        // 资产可能未包含该文件或 IO 失败，这里静默忽略，不阻断其它条目
+      }
+    }
   }
 
   /// 删除规则集

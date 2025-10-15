@@ -18,12 +18,13 @@ import 'utils/simple_single_instance.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await acrylic.Window.initialize();
-  // 设置窗口效果为禁用
-  await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
-
-  await windowManager.ensureInitialized();
+  // 仅桌面平台才初始化窗口/毛玻璃等能力
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await acrylic.Window.initialize();
+    // 设置窗口效果为禁用
+    await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
+    await windowManager.ensureInitialized();
+  }
 
   // 提前预加载 sing-box FFI 库（异步执行，不阻塞启动流程）
   if (Platform.isWindows) {
@@ -85,33 +86,35 @@ void main() async {
     exit(0);
   }
 
-  const windowOptions = WindowOptions(
-    size: Size(450, 680),
-    minimumSize: Size(450, 680),
-    maximumSize: Size(450, 12000),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
-    title: 'Gsou',
-  );
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    const windowOptions = WindowOptions(
+      size: Size(450, 680),
+      minimumSize: Size(450, 680),
+      maximumSize: Size(450, 12000),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+      title: 'Gsou',
+    );
 
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-    await windowManager.setResizable(true);
-    await windowManager.setMaximizable(false);
-    await windowManager.setMinimumSize(const Size(450, 680));
-    await windowManager.setMaximumSize(const Size(450, 12000));
-    await windowManager.setPreventClose(true); // 防止直接关闭
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+      await windowManager.setResizable(true);
+      await windowManager.setMaximizable(false);
+      await windowManager.setMinimumSize(const Size(450, 680));
+      await windowManager.setMaximumSize(const Size(450, 12000));
+      await windowManager.setPreventClose(true); // 防止直接关闭
 
-    // 设置窗口图标
-    try {
-      await windowManager.setIcon('assets/app_icon.ico');
-    } catch (e) {
-      print('设置窗口图标失败: $e');
-    }
-  });
+      // 设置窗口图标
+      try {
+        await windowManager.setIcon('assets/app_icon.ico');
+      } catch (e) {
+        print('设置窗口图标失败: $e');
+      }
+    });
+  }
 
   runApp(
     MultiProvider(
@@ -130,8 +133,12 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> with WindowListener {
   final SystemTray _systemTray = SystemTray();
+  // 仅桌面平台使用 AppWindow，Android/iOS 置空避免插件初始化
   // ignore: unused_field
-  final AppWindow _appWindow = AppWindow();
+  final AppWindow? _appWindow =
+      (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+      ? AppWindow()
+      : null;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   Timer? _taskbarTimer;
@@ -145,19 +152,23 @@ class _MyAppState extends State<MyApp> with WindowListener {
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
-    _initSystemTray();
-    _taskbarTimer?.cancel();
-    _taskbarTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (t) => _updateTaskbarAndTray(),
-    );
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+      _initSystemTray();
+      _taskbarTimer?.cancel();
+      _taskbarTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (t) => _updateTaskbarAndTray(),
+      );
+    }
   }
 
   @override
   void dispose() {
     _taskbarTimer?.cancel();
-    windowManager.removeListener(this);
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
     _cleanupAndExit();
     super.dispose();
   }
@@ -198,6 +209,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _initSystemTray() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return; // Android/iOS 不使用系统托盘
+    }
     final String path = _resolveTrayIconPath();
 
     await _systemTray.initSystemTray(
@@ -260,6 +274,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _enterOverlayMode() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (_isEnteringOverlay || _isMinimized) return;
     _isEnteringOverlay = true;
 
@@ -336,6 +353,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _restoreNormalWindow() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (!_isMinimized || _isRestoringWindow) return;
     _isRestoringWindow = true;
 
@@ -440,6 +460,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   @override
   void onWindowEvent(String eventName) {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (eventName == 'minimize') {
       // 拦截最小化事件，改为进入悬浮窗模式
       if (!_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
@@ -458,14 +481,19 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   @override
   void onWindowClose() {
-    // 拦截关闭事件，改为隐藏到托盘
-    windowManager.hide();
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // 拦截关闭事件，改为隐藏到托盘
+      windowManager.hide();
+    }
   }
 
   // onWindowDestroy 在当前 window_manager 版本可能不存在，清理已在 dispose 中进行
 
   @override
   void onWindowResize() {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (_isMinimized) return;
     // 保持窗口宽度为400
     windowManager.getSize().then((size) {

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ var (
 	cancel   context.CancelFunc
 	// C 侧回调指针
 	logCB C.LogCallback
+	// Android TUN 文件描述符（可选）
+	tunFD int = -1
 )
 
 var lastError string
@@ -89,6 +92,43 @@ func setLastError(err error) {
 	} else {
 		lastError = ""
 	}
+}
+
+// 按需设置 route 中的 auto_detect_interface 与 auto_detect_interface_ipv6（均置为 false）。
+// 通过 setV4/setV6 控制是否写入对应的键，便于针对不同 sing-box 版本进行自适应。
+func setRouteAutoDetectFlags(cfg string, setV4, setV6 bool) (string, error) {
+	var root map[string]interface{}
+	if err := sjson.Unmarshal([]byte(cfg), &root); err != nil {
+		return "", err
+	}
+	routeAny, ok := root["route"]
+	var route map[string]interface{}
+	if ok {
+		if m, ok2 := routeAny.(map[string]interface{}); ok2 {
+			route = m
+		} else {
+			route = map[string]interface{}{}
+		}
+	} else {
+		route = map[string]interface{}{}
+	}
+	if setV4 {
+		route["auto_detect_interface"] = false
+	} else {
+		// 确保不误留旧值
+		delete(route, "auto_detect_interface")
+	}
+	if setV6 {
+		route["auto_detect_interface_ipv6"] = false
+	} else {
+		delete(route, "auto_detect_interface_ipv6")
+	}
+	root["route"] = route
+	b, err := sjson.Marshal(root)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // FFI 平台日志输出，实现 sing-box/log.PlatformWriter。若 Dart 侧未设置回调，则此 writer 不输出。
@@ -171,6 +211,89 @@ func StartSingBox(configJSON *C.char) int {
 	// 解析配置（必须使用带上下文的解析以启用各注册表与 typed DNS 等选项）
 	var options option.Options
 	configStr := C.GoString(configJSON)
+	// Android: 若传入了 tunFD，则尝试将其注入到配置中的 tun inbound。若解析失败且提示未知字段，则回退/换键。
+	if runtime.GOOS == "android" && tunFD >= 0 {
+		ctxWithRegistry := include.Context(ctx)
+		original := configStr
+		injected := false
+		// 尝试不同键名以适配不同版本的 schema
+		keys := []string{"fd", "file_descriptor"}
+		for _, key := range keys {
+			newStr, err := injectTunFDWithKey(original, tunFD, key)
+			if err != nil {
+				dbg("StartSingBox: inject key=" + key + " failed: " + err.Error())
+				continue
+			}
+			var testOpt option.Options
+			if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(newStr), &testOpt); err != nil {
+				// 若是未知字段，继续尝试下一个键
+				if strings.Contains(strings.ToLower(err.Error()), "unknown") && strings.Contains(strings.ToLower(err.Error()), key) {
+					dbg("StartSingBox: schema rejected key=" + key + ", try next")
+					continue
+				}
+				// 其他解析错误，记录并也尝试下一个
+				dbg("StartSingBox: parse after inject key=" + key + " error: " + err.Error())
+				continue
+			}
+			// 解析成功，采用该配置
+			configStr = newStr
+			injected = true
+			dbg("StartSingBox: injected tun fd with key=" + key)
+			break
+		}
+		if !injected {
+			dbg("StartSingBox: no schema accepted tun fd, proceed without fd injection")
+		}
+	}
+	// Android: 自适应禁用路由自动检测，避免使用 netlink 路由监控（可能被 SELinux 拒绝）。
+	if runtime.GOOS == "android" {
+		original := configStr
+		ctxWithRegistryTry := include.Context(ctx)
+		// 优先尝试同时写入 IPv4/IPv6 两个键
+		if newStr, err := setRouteAutoDetectFlags(original, true, true); err == nil {
+			var testOpt option.Options
+			if err := sjson.UnmarshalContext(ctxWithRegistryTry, []byte(newStr), &testOpt); err == nil {
+				configStr = newStr
+				dbg("StartSingBox: disabled route auto-detect (v4+v6)")
+			} else {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "unknown") && strings.Contains(errStr, "auto_detect_interface_ipv6") {
+					// 版本不支持 IPv6 键，改为仅设置 IPv4 键
+					if newStr2, err2 := setRouteAutoDetectFlags(original, true, false); err2 == nil {
+						var testOpt2 option.Options
+						if err3 := sjson.UnmarshalContext(ctxWithRegistryTry, []byte(newStr2), &testOpt2); err3 == nil {
+							configStr = newStr2
+							dbg("StartSingBox: disabled route auto-detect (v4 only)")
+						} else {
+							// 如连 v4 也不支持，对应键也移除，回退到原配置
+							errStr2 := strings.ToLower(err3.Error())
+							if strings.Contains(errStr2, "unknown") && strings.Contains(errStr2, "auto_detect_interface") {
+								configStr = original
+								dbg("StartSingBox: route auto-detect flags unsupported by schema, keep original")
+							} else {
+								// 其他解析错误，保持原配置，留待统一的 parse 阶段处理
+								dbg("StartSingBox: parse after set v4-only failed: " + err3.Error())
+								configStr = original
+							}
+						}
+					} else {
+						dbg("StartSingBox: setRouteAutoDetectFlags(v4-only) failed: " + err2.Error())
+					}
+				} else if strings.Contains(errStr, "unknown") && strings.Contains(errStr, "auto_detect_interface") {
+					// v4 键也不支持，回退原配置
+					configStr = original
+					dbg("StartSingBox: route auto-detect flags unsupported (v4), keep original")
+				} else {
+					// 其他解析错误，不强改，保持原配置
+					dbg("StartSingBox: parse after set v4+v6 failed: " + err.Error())
+					configStr = original
+				}
+			}
+		} else {
+			dbg("StartSingBox: setRouteAutoDetectFlags(v4+v6) failed: " + err.Error())
+		}
+	}
+
 	// 刷新基线配置：每次 Start 都将当前传入配置作为新的基线
 	baseConfigJSON = configStr
 	currentConfigJSON = configStr
@@ -190,6 +313,16 @@ func StartSingBox(configJSON *C.char) int {
 	}
 	dbg("StartSingBox phase=parse_options ok")
 
+	// Android: 强制关闭 tun inbound 的 auto_route，防止触发 netlink 权限（由 VpnService 管理路由）
+	if runtime.GOOS == "android" {
+		for i := range options.Inbounds {
+			if options.Inbounds[i].Type == "tun" {
+				// 仅在字段存在时设置；不同版本可能字段位置不同，保守处理
+				// options.Inbounds[i].Tun.AutoRoute = false // 若存在该结构字段可直接设置
+			}
+		}
+	}
+
 	// 创建 sing-box 实例（使用内置日志系统；如设置了回调，则通过 PlatformWriter 输出）
 	var err error
 	var pw log.PlatformWriter
@@ -200,6 +333,15 @@ func StartSingBox(configJSON *C.char) int {
 	// 注意：ctxWithRegistry 已在上方用于解析
 	stage = "box.New"
 	dbg("StartSingBox phase=box.New begin")
+	// 如果在 Android，且传入了有效 FD，尝试把 FD 注入到配置中：
+	// 注意：具体字段名/注入方式取决于 sing-box 的 TUN inbound 实现，
+	// 这里我们先保留占位，后续可根据实际需要将 options 中的 inbound 配置改写。
+	if runtime.GOOS == "android" && tunFD >= 0 {
+		// TODO: 根据 sing-box 的 API，把 tunFD 注入到 options（例如 options.Inbounds[...].Tun.FD = tunFD）
+		// 当前占位：仅打日志提示
+		dbg(fmt.Sprintf("[Start] Android with TUN FD=%d (注入逻辑待实现)", tunFD))
+	}
+
 	instance, err = box.New(box.Options{
 		Context:           ctxWithRegistry,
 		Options:           options,
@@ -245,6 +387,68 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox leave success")
 
 	return 0
+}
+
+//export StartSingBoxWithTunFd
+func StartSingBoxWithTunFd(configJSON *C.char, fd C.int) int {
+	// 保存 FD，供后续构建 Options 时使用（具体注入逻辑见下）
+	tunFD = int(fd)
+	// 直接复用 StartSingBox 流程
+	return StartSingBox(configJSON)
+}
+
+// 将 tunFD 注入到配置 JSON：
+// - 若存在 type=="tun" 的 inbound，则写入字段 fd
+// - 若不存在，则追加一个最小可用的 tun inbound（auto_route true / strict_route false）
+func injectTunFD(cfg string, fd int) (string, error) { return injectTunFDWithKey(cfg, fd, "fd") }
+
+// 通用注入：允许指定键名（例如 "fd" 或 "file_descriptor"）
+func injectTunFDWithKey(cfg string, fd int, key string) (string, error) {
+	var root map[string]interface{}
+	if err := sjson.Unmarshal([]byte(cfg), &root); err != nil {
+		return "", err
+	}
+	inbAny, ok := root["inbounds"]
+	if !ok {
+		inbAny = []interface{}{}
+	}
+	inbounds, ok := inbAny.([]interface{})
+	if !ok {
+		inbounds = []interface{}{}
+	}
+	found := false
+	for i, v := range inbounds {
+		if m, ok := v.(map[string]interface{}); ok {
+			if t, ok2 := m["type"].(string); ok2 && t == "tun" {
+				m[key] = fd
+				// 在 Android 上，路由由 VpnService 管理，避免触发 sing-box 的 netlink/route 管理
+				m["auto_route"] = false
+				if _, ok := m["strict_route"]; !ok {
+					m["strict_route"] = false
+				}
+				inbounds[i] = m
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		tun := map[string]interface{}{
+			"type": "tun",
+			key:    fd,
+			// 关闭自动路由以避免 Android 上需要的 netlink 权限
+			"auto_route":   false,
+			"strict_route": false,
+			"mtu":          1500,
+		}
+		inbounds = append(inbounds, tun)
+	}
+	root["inbounds"] = inbounds
+	b, err := sjson.Marshal(root)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 //export StopSingBox

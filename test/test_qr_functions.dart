@@ -1,8 +1,14 @@
+// ignore_for_file: avoid_print
+
 import 'dart:io';
-import 'lib/services/windows_screen_capture.dart';
-import 'lib/services/qr_decoder.dart';
+import '../lib/services/windows_screen_capture.dart';
+import '../lib/services/qr_decoder.dart';
 
 void main() async {
+  if (!Platform.isWindows) {
+    print('Skip: Windows-only QR functions test.');
+    return;
+  }
   print('=== QR码功能测试 ===\n');
 
   // 测试1：剪贴板图片识别

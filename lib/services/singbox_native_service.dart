@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'singbox_ffi.dart';
 import '../models/vpn_config.dart';
+import 'package:flutter/services.dart';
 
 /// sing-box 原生服务管理类（使用 FFI）
 class SingBoxNativeService {
@@ -31,6 +32,9 @@ class SingBoxNativeService {
   Function(bool)? onStatusChanged;
   // 新增：用于传递更细粒度的连接状态文案（例如：已连接/连接正常/连接但异常/未连接）
   Function(String)? onStatusText;
+
+  // Android 平台通道
+  static const MethodChannel _androidCh = MethodChannel('singbox/native');
 
   // 已存在 isRunning getter，避免重复定义
 
@@ -244,8 +248,64 @@ class SingBoxNativeService {
       // 将配置转换为 JSON
       final configJson = jsonEncode(config);
 
+      // Android: 若启用 TUN，则先准备 VPN 与 TUN FD
+      int? tunFd;
+      if (Platform.isAndroid) {
+        try {
+          final prepared =
+              await _androidCh.invokeMethod<bool>('vpnPrepare') ?? false;
+          if (!prepared) {
+            onLog?.call('请在系统弹窗中允许 VPN 权限后重试');
+            return false;
+          }
+          final bound = await _androidCh.invokeMethod<bool>('vpnBind') ?? false;
+          if (!bound) {
+            onLog?.call('绑定 VpnService 失败');
+            return false;
+          }
+          // 等待绑定完成，最多等待 1 秒
+          for (var i = 0; i < 10; i++) {
+            final isBound =
+                await _androidCh.invokeMethod<bool>('vpnIsBound') ?? false;
+            if (isBound) break;
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+          // 请求打开 TUN
+          tunFd = await _androidCh.invokeMethod<int>('vpnOpenTunAndGetFd', {
+            'mtu': 1500,
+            'ipv4Cidr': '10.225.0.2/30',
+            'routeCidr': '0.0.0.0/0',
+            'session': 'Sing-Box VPN',
+          });
+          // -2: 服务未绑定好，短暂重试一次
+          if (tunFd == -2) {
+            await Future.delayed(const Duration(milliseconds: 150));
+            tunFd = await _androidCh.invokeMethod<int>('vpnOpenTunAndGetFd', {
+              'mtu': 1500,
+              'ipv4Cidr': '10.225.0.2/30',
+              'routeCidr': '0.0.0.0/0',
+              'session': 'Sing-Box VPN',
+            });
+          }
+          if (tunFd == null || tunFd < 0) {
+            onLog?.call('创建 TUN 失败 (fd=${tunFd ?? -999})');
+            try {
+              await _androidCh.invokeMethod('vpnCloseTun');
+            } catch (_) {}
+            await _androidCh.invokeMethod('vpnUnbind');
+            return false;
+          }
+        } catch (e) {
+          onLog?.call('Android TUN 准备异常: $e');
+          return false;
+        }
+      }
+
       // 直接在主线程启动服务，避免Isolate导致DLL重复加载
       Future<int> _startOnce(String json, {Duration? timeout}) async {
+        if (Platform.isAndroid && tunFd != null) {
+          return _ffi!.startWithTunFd(json, tunFd);
+        }
         return _ffi!.start(json);
       }
 
@@ -438,6 +498,12 @@ class SingBoxNativeService {
         await _postStartProbe(config, runSeq);
       } catch (_) {
         // 忽略探测异常
+        if (Platform.isAndroid) {
+          try {
+            await _androidCh.invokeMethod('vpnCloseTun');
+            await _androidCh.invokeMethod('vpnUnbind');
+          } catch (_) {}
+        }
       } finally {
         // 无需复位 _lastProbeScheduledSeq，这个值用于避免重复调度；
         // 当下一次 start 增加 runSeq 时会自然失效。
@@ -686,6 +752,12 @@ class SingBoxNativeService {
       onLog?.call('停止异常: $e');
       ok = false;
     } finally {
+      if (Platform.isAndroid) {
+        try {
+          await _androidCh.invokeMethod('vpnCloseTun');
+          await _androidCh.invokeMethod('vpnUnbind');
+        } catch (_) {}
+      }
       final toComplete = completer;
       // 确保 _stopFuture 清理
       _stopFuture = null;

@@ -1,4 +1,5 @@
 ﻿import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../models/proxy_mode.dart';
 import 'dns_manager.dart';
@@ -220,7 +221,29 @@ class RulesetManager {
     for (final filename in filenames) {
       try {
         final path = await _getRulesetPath(filename);
-        if (File(path).existsSync()) {
+        var exists = File(path).existsSync();
+        // 若目标文件不存在，尝试从打包的 assets 复制一份到应用数据目录
+        if (!exists) {
+          try {
+            final assetRelPath = filename.startsWith('geoip')
+                ? 'assets/rulesets/geo/geoip/$filename'
+                : 'assets/rulesets/geo/geosite/$filename';
+            final bytes = await rootBundle.load(assetRelPath);
+            await File(path).writeAsBytes(
+              bytes.buffer.asUint8List(
+                bytes.offsetInBytes,
+                bytes.lengthInBytes,
+              ),
+              flush: true,
+            );
+            exists = true;
+            print('[RulesetManager] 从资产复制规则集: $assetRelPath -> $path');
+          } catch (_) {
+            // 忽略复制失败，继续走原有不存在分支日志
+          }
+        }
+
+        if (exists) {
           final tag = filename.replaceAll('.srs', '');
           validRulesets.add({
             "tag": tag,
