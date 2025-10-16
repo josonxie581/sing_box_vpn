@@ -330,6 +330,7 @@ class NodeDelayTester {
       // 1. 先检测VPN连接状态
       final isVpnConnected = await _detectVpnConnection();
       print('[分流延时测试] VPN连接状态: ${isVpnConnected ? "已连接" : "未连接"}');
+      // TCP-only：不进行 QUIC/ICMP 预探测，直接按模式走 TCP 绕过/系统测试
 
       // 根据模式决定测试路径
       switch (latencyMode) {
@@ -341,12 +342,9 @@ class NodeDelayTester {
           print('[分流延时测试] 模式=systemOnly，未连VPN，使用标准测试');
           return await _standardDelayTest(node);
         case LatencyTestMode.bypass:
-          if (isVpnConnected) {
-            print('[分流延时测试] 模式=bypass，使用绕过测试');
-            return await _bypassTestWithRouteRule(node);
-          }
-          print('[分流延时测试] 模式=bypass，未连VPN，使用标准测试');
-          return await _standardDelayTest(node);
+          // 总是使用“独立实例/直连路由”的绕过测试，无论是否已连 VPN
+          print('[分流延时测试] 模式=bypass（强制），使用独立实例直连路由测试');
+          return await _bypassTestWithRouteRule(node);
         case LatencyTestMode.auto:
           if (!isVpnConnected) {
             print('[分流延时测试] 模式=auto，未连VPN，使用标准测试');
@@ -376,27 +374,8 @@ class NodeDelayTester {
 
   /// HTTP连接测试（直连不使用代理）
   Future<int> _httpConnectTest(VPNConfig node) async {
-    final stopwatch = Stopwatch()..start();
-    final client = HttpClient();
-    client.findProxy = (uri) => 'DIRECT'; // 强制直连
-    client.badCertificateCallback = (cert, host, port) => true;
-    client.connectionTimeout = Duration(milliseconds: timeout);
-
-    try {
-      // 构造一个URL，直接连接到VPN服务器（可能会失败，但能测量连接时间）
-      final uri = Uri.parse('http://${node.server}:${node.port}');
-      final request = await client
-          .getUrl(uri)
-          .timeout(Duration(milliseconds: timeout));
-      await request.close().timeout(Duration(milliseconds: 500)); // 短超时，只测连接
-    } catch (e) {
-      // 连接建立后的错误是正常的，我们只关心连接时间
-    } finally {
-      stopwatch.stop();
-      client.close();
-    }
-
-    return stopwatch.elapsedMilliseconds;
+    // 已废弃：不再单独做 HTTP 连接只为测延时，保留方法占位避免外部引用报错
+    throw UnimplementedError();
   }
 
   /// 原始Socket测试
@@ -419,104 +398,74 @@ class NodeDelayTester {
   Future<NodeDelayResult> quickTest(VPNConfig node) async {
     print('⚡ 开始快速测试: ${node.name} (${node.server}:${node.port})');
     try {
-      // 对于 UDP-only 协议（hysteria2/hy2/tuic），优先进行 QUIC 最小握手探测；若无法握手，再回退 ICMP
+      // 统一解析为真实 IPv4，避免 FakeIP/IPv6 带来的抖动
+      final targetIPv4 = await _resolveIPv4ForTest(node);
+      final host = targetIPv4?.address ?? node.server;
+
+      // 对于 UDP-only 协议（hysteria2/hy2/tuic），严格按照 TCP-only：
+      // 直接走标准 TCP 连接测试（_tcpProbePort 会返回 443），不进行 QUIC/ICMP 回退
       if (_isUdpOnlyNode(node)) {
-        try {
-          final ffi = SingBoxFFI.instance;
-          // SNI 优先从 settings.sni/host；否则用域名
-          final sni =
-              (node.settings['sni']?.toString() ??
-                      node.settings['host']?.toString() ??
-                      node.server)
-                  .toString();
-          // ALPN：若节点配置了 alpn 列表则使用；否则针对 hy2 补充 'hysteria2'
-          List<String>? alpn;
-          final rawAlpn = node.settings['alpn'];
-          if (rawAlpn is List) {
-            alpn = rawAlpn.whereType<String>().toList();
-          }
-          final t = node.type.toLowerCase();
-          if ((alpn == null || alpn.isEmpty) &&
-              (t == 'hysteria2' || t == 'hy2')) {
-            alpn = ['hysteria2'];
-          }
-          final insecure = node.settings['skipCertVerify'] == true;
-          final stopwatch = Stopwatch()..start();
-          final ok = ffi.probeQUIC(
-            host: node.server,
-            port: node.port,
-            sni: sni,
-            insecure: insecure,
-            alpn: alpn,
-            timeoutMs: 1500,
-          );
-          stopwatch.stop();
-          if (ok) {
-            final ms = stopwatch.elapsedMilliseconds == 0
-                ? 1
-                : stopwatch.elapsedMilliseconds;
-            return NodeDelayResult(
-              nodeId: node.id,
-              nodeName: node.name,
-              nodeServer: node.server,
-              nodePort: node.port,
-              nodeType: node.type,
-              delay: ms,
-              isSuccess: true,
-              testTime: DateTime.now(),
-            );
-          }
-          // 若 QUIC 握手失败，再尝试 ICMP 近似
+        print('[快速测试][UDP-only] TCP-only 策略，端口候选 [443,80,22]，取最小 RTT');
+        final candidates = <int>[443, 80, 22];
+        int? best;
+        int usedPort = 443;
+        for (final p in candidates) {
+          final sw = Stopwatch()..start();
           try {
-            final ip = _isIpAddress(node.server)
-                ? InternetAddress(node.server)
-                : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
-                      (await InternetAddress.lookup(
-                        node.server,
-                      )).firstWhere((a) => a.type == InternetAddressType.IPv4);
-            final icmp = await _icmpPingIPv4(ip.address, timeoutMs: 1200);
-            if (icmp != null && icmp >= 0) {
-              return NodeDelayResult(
-                nodeId: node.id,
-                nodeName: node.name,
-                nodeServer: node.server,
-                nodePort: node.port,
-                nodeType: node.type,
-                delay: icmp,
-                isSuccess: true,
-                testTime: DateTime.now(),
-              );
+            final sock = await Socket.connect(
+              host,
+              p,
+              timeout: Duration(milliseconds: timeout),
+            );
+            sw.stop();
+            sock.destroy();
+            final ms = sw.elapsedMilliseconds;
+            if (best == null || ms < best) {
+              best = ms;
+              usedPort = p;
             }
           } catch (e) {
-            print('⚠️ UDP-only 节点 ICMP 回退失败: $e');
+            sw.stop();
+            if (_isTcpRefusedError(e)) {
+              final ms = sw.elapsedMilliseconds;
+              if (best == null || ms < best) {
+                best = ms;
+                usedPort = p;
+              }
+            }
           }
-          // 最终仍失败则继续后续的 TCP 兜底流程（通常会失败/拒绝）
-        } catch (e) {
-          print('⚠️ UDP-only 节点 QUIC 探测异常: $e');
         }
+        if (best != null) {
+          return NodeDelayResult(
+            nodeId: node.id,
+            nodeName: node.name,
+            nodeServer: node.server,
+            nodePort: usedPort,
+            nodeType: node.type,
+            delay: best!,
+            isSuccess: true,
+            testTime: DateTime.now(),
+          );
+        }
+        return _createFailedResult(node, 'UDP-only 节点 TCP 测试超时/不可达');
       }
 
       // 增加连接前的调试信息
       final port = _tcpProbePort(node);
-      print('📡 正在连接到 ${node.server}:$port...');
+      print('📡 正在连接到 ${host}:$port...');
 
       final stopwatch = Stopwatch()..start();
-      final startTime = DateTime.now().microsecondsSinceEpoch;
 
       // 尝试绕过VPN路由，使用原始网络接口
       final socket = await Socket.connect(
-        node.server,
+        host,
         port,
         timeout: Duration(milliseconds: timeout),
-        sourceAddress: null, // 让系统选择源地址
+        sourceAddress: null,
       );
 
-      final endTime = DateTime.now().microsecondsSinceEpoch;
       stopwatch.stop();
-
-      // 使用微秒计算，然后转换为毫秒，提高精度
-      final delayMicroseconds = endTime - startTime;
-      final delay = (delayMicroseconds / 1000).round();
+      final delay = stopwatch.elapsedMilliseconds;
 
       // 验证连接是否真实建立，检查本地和远程地址
       final remoteAddress = socket.remoteAddress.address;
@@ -528,7 +477,7 @@ class NodeDelayTester {
 
       // 仅输出一行初测摘要，避免把初测延时误认为最终结果
       print(
-        '📍 初测: ${node.name} local=$localAddress:$localPort -> remote=$remoteAddress:$remotePort, t=${delay}ms (${delayMicroseconds}μs)',
+        '📍 初测: ${node.name} local=$localAddress:$localPort -> remote=$remoteAddress:$remotePort, t=${delay}ms',
       );
 
       // 检查是否连接到了正确的远程服务器
@@ -536,7 +485,7 @@ class NodeDelayTester {
         print('⚠️ 警告: 连接地址不匹配! 期望: ${node.server}, 实际: $remoteAddress');
       }
 
-      // 如果结果可疑（过低、FakeIP、或者本地地址与远端地址相同），尝试 ICMP 源绑定回退，获取更接近真实的 RTT
+      // 如果结果可疑（过低、FakeIP、或者本地地址与远端地址相同），仅记录日志，不再进行 ICMP 回退（TCP-only）
       var finalDelay = delay;
       String? realIpForRecord;
       final suspicious =
@@ -545,48 +494,12 @@ class NodeDelayTester {
           localAddress == remoteAddress;
       if (suspicious) {
         print(
-          '⚠️ 警告: 结果可疑(延时: ${delay}ms, local=$localAddress, remote=$remoteAddress)，尝试ICMP源绑定回退',
+          '⚠️ 警告: 结果可疑(延时: ${delay}ms, local=$localAddress, remote=$remoteAddress)，按 TCP-only 保留此结果',
         );
-        try {
-          final ip = _isIpAddress(node.server)
-              ? InternetAddress(node.server)
-              : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
-                    (await InternetAddress.lookup(node.server)).firstWhere(
-                      (a) =>
-                          a.type == InternetAddressType.IPv4 &&
-                          !_isFakeIp(a.address),
-                    );
-          String? srcBind;
-          try {
-            srcBind = await _pickPhysicalIPv4();
-          } catch (_) {}
-          int? icmp;
-          if (srcBind != null && Platform.isWindows) {
-            icmp = await _icmpPingIPv4(
-              ip.address,
-              timeoutMs: 1200,
-              sourceIp: srcBind,
-            );
-          }
-          icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
-          if (icmp != null && icmp >= 0) {
-            print(
-              '[快速测试] ICMP回退成功: ${icmp}ms (目标 ${ip.address}${srcBind != null ? ', 源 ' + srcBind : ''})',
-            );
-            finalDelay = icmp;
-            realIpForRecord = ip.address;
-          } else {
-            print('[快速测试] ICMP回退无结果，保留原始值');
-          }
-        } catch (e) {
-          print('[快速测试] ICMP回退异常: $e');
-        }
       }
 
       // 打印最终结果（可能是 ICMP 回退后的值）
-      print(
-        '✅ 最终结果: ${node.name} -> ${finalDelay}ms${realIpForRecord != null ? ' (目标IP ' + realIpForRecord + ')' : ''}',
-      );
+      print('✅ 最终结果: ${node.name} -> ${finalDelay}ms');
 
       return NodeDelayResult(
         nodeId: node.id,
@@ -600,6 +513,30 @@ class NodeDelayTester {
         realIpAddress: realIpForRecord,
       );
     } catch (e) {
+      // 若是“连接被拒绝”，也按成功返回 RTT
+      if (_isTcpRefusedError(e)) {
+        // 无法直接知道刚才的计时，重新测一次快速 RTT（短超时）
+        try {
+          final sw = Stopwatch()..start();
+          await Socket.connect(
+            node.server,
+            _tcpProbePort(node),
+            timeout: Duration(milliseconds: timeout),
+          );
+          sw.stop();
+          final ms = sw.elapsedMilliseconds;
+          return NodeDelayResult(
+            nodeId: node.id,
+            nodeName: node.name,
+            nodeServer: node.server,
+            nodePort: _tcpProbePort(node),
+            nodeType: node.type,
+            delay: ms,
+            isSuccess: true,
+            testTime: DateTime.now(),
+          );
+        } catch (_) {}
+      }
       print('❌ 快速测试失败: ${node.name} - $e');
       return _createFailedResult(node, 'TCP连接失败: $e');
     }
@@ -713,6 +650,8 @@ class NodeDelayTester {
   Future<NodeDelayResult> _bypassTestWithRouteRule(VPNConfig node) async {
     try {
       print('[独立实例延时测试] 开始测试: ${node.name} (${node.server}:${node.port})');
+
+      // 你的需求：无论协议，绕过路径优先走 TCP（latency-test-in / 源绑定 / 动态直连）
 
       // 首选方案：通过固定的 latency-test-in 入站（SOCKS5@127.0.0.1:17890）直连
       // 优点：无需修改/重载配置，不会影响现有连接状态（特别是 TUN）
@@ -958,30 +897,9 @@ class NodeDelayTester {
 
     // 关键点：为避免 sing-box 的 DNS/FakeIP 干扰，这里总是先在客户端侧解析真实 IPv4，
     // 再以 IPv4 形式发起 SOCKS CONNECT。这样可确保直连到真实目标 IP。
-    InternetAddress? targetIPv4;
-    if (_isIpAddress(node.server)) {
-      targetIPv4 = InternetAddress(node.server);
-    } else {
-      // 优先使用直连UDP解析（绑定物理网卡），避免 TUN/FakeIP 干扰
-      targetIPv4 = await _resolveIPv4Direct(node.server, timeoutMs: 1500);
-      if (targetIPv4 == null) {
-        // 兜底：系统解析（可能被 TUN/FakeIP 劫持，仅作最后尝试）
-        try {
-          final addrs = await InternetAddress.lookup(
-            node.server,
-          ).timeout(const Duration(seconds: 2));
-          final cand = addrs.firstWhere(
-            (a) => a.type == InternetAddressType.IPv4,
-            orElse: () => InternetAddress('0.0.0.0'),
-          );
-          if (cand.address != '0.0.0.0' && !_isFakeIp(cand.address)) {
-            targetIPv4 = cand;
-          }
-        } catch (_) {}
-      }
-      if (targetIPv4 == null) {
-        throw StateError('解析目标域名失败（无可用真实 IPv4）：${node.server}');
-      }
+    final targetIPv4 = await _resolveIPv4ForTest(node);
+    if (targetIPv4 == null) {
+      throw StateError('解析目标域名失败（无可用真实 IPv4）：${node.server}');
     }
 
     // 针对 UDP-only 节点（如 hysteria2/tuic），避免直连其 UDP 端口的 TCP，改用 443 作为 TCP 测量端口
@@ -1041,10 +959,12 @@ class NodeDelayTester {
         throw StateError('SOCKS5 应答版本错误: ${head[0]}');
       }
       final rep = head[1];
-      final atyp = head[3];
+      // 日志：即便连接被拒绝（rep!=0），我们也把耗时当作 RTT
       if (rep != 0x00) {
-        throw StateError('SOCKS5 连接失败，REP=$rep');
+        // 记录一次，但不抛错
+        // print('[latency-test-in] REP=$rep (非0表示目标拒绝/失败)，仍返回握手耗时');
       }
+      final atyp = head[3];
       int remain;
       switch (atyp) {
         case 0x01:
@@ -1060,7 +980,8 @@ class NodeDelayTester {
         default:
           throw StateError('未知 ATYP: $atyp');
       }
-      // 读取剩余的 BND.ADDR/BND.PORT 字段（不关心具体值，这里仅为完成握手）
+      // 读取剩余的 BND.ADDR/BND.PORT 字段（不关心具体值，这里仅为完成握手）；
+      // 即便 rep != 0（连接失败/被拒绝），我们也把耗时作为 RTT 返回
       await waitBytes(remain);
 
       sw.stop();
@@ -1078,45 +999,27 @@ class NodeDelayTester {
         testTime: DateTime.now(),
       );
     } catch (e) {
-      socket?.destroy();
       throw Exception('通过 latency-test-in 入站测试失败: $e');
     }
   }
 
-  /// 使用运行中的 sing-box 通过动态路由规则将目标直连，测试后移除
+  /// 通过动态直连路由规则临时绕过（仅匹配 TCP + 指定端口），测完即清理
   Future<NodeDelayResult> _testWithDynamicDirectRule(VPNConfig node) async {
-    // 检查 FFI 是否支持动态路由
     try {
       final ffi = SingBoxFFI.instance;
-      if (!ffi.supportsRouteRules) {
-        throw StateError('当前 DLL 不支持动态路由规则');
-      }
 
-      // 解析目标地址到真实 IPv4（优先直连UDP解析，避免 FakeIP）
+      // 解析真实 IPv4（优先直连解析）
       final resolved = <String>[];
       if (_isIpAddress(node.server)) {
         resolved.add('${node.server}/32');
       } else {
-        final real = await _resolveIPv4Direct(node.server, timeoutMs: 1500);
-        if (real != null) {
-          resolved.add('${real.address}/32');
-        } else {
-          // 兜底：系统解析（排除 FakeIP 网段）
-          try {
-            final addrs = await InternetAddress.lookup(
-              node.server,
-            ).timeout(const Duration(seconds: 2));
-            for (final a in addrs) {
-              if (a.type == InternetAddressType.IPv4 && !_isFakeIp(a.address)) {
-                resolved.add('${a.address}/32');
-              }
-            }
-          } catch (_) {}
+        final ip = await _resolveIPv4Direct(node.server, timeoutMs: 1500);
+        if (ip != null) {
+          resolved.add('${ip.address}/32');
         }
       }
 
-      // 构造直连规则：按 IP/端口 直连，域名仅作兜底（当解析失败时）
-      // 重要：仅匹配 TCP，端口使用探测端口（UDP-only 节点使用 443），避免影响 hy2/tuic 的 UDP 正常出站
+      // 构造直连规则（仅 TCP，端口为探测端口；UDP-only 节点使用 443）
       final tag = 'latency-bypass-${DateTime.now().millisecondsSinceEpoch}';
       final probePort = _tcpProbePort(node);
       final ipRule = <String, dynamic>{
@@ -1124,10 +1027,9 @@ class NodeDelayTester {
         if (resolved.isNotEmpty) 'ip_cidr': resolved,
         if (!_isIpAddress(node.server)) 'domain': ['full:${node.server}'],
         'port': probePort,
-        'network': 'tcp', // 单值使用字符串，避免某些运行时解析器仅接受字符串
+        'network': 'tcp',
         'outbound': 'direct',
       };
-
       final ipRuleJson = json.encode(ipRule);
 
       print('[动态规则绕过] 添加直连规则(仅TCP): $ipRuleJson');
@@ -1143,40 +1045,34 @@ class NodeDelayTester {
         throw StateError('添加动态路由规则失败${err.isNotEmpty ? ': ' + err : ''}');
       }
 
-      // 某些实现需要 reload 才生效（若不支持会忽略）
+      // 可能需要 reload 才生效（若不支持会忽略）
       try {
         final ok = ffi.reloadConfig();
         if (!ok) {
-          // 如果重载失败，直接进行软重连以恢复（尤其是 TUN 模式）
           await _softReconnectIfUsingTun();
         }
       } catch (_) {}
 
       try {
-        // 现在执行标准 TCP 测试，此时应由 TUN 捕获并按规则直连
+        // 路由规则就位后，执行一次标准 TCP 测试（应绕过 VPN）
         final result = await _standardDelayTest(node, isVpnBypass: true);
-
-        // 若延时异常过低，说明规则未生效或仍被 VPN 干扰
         if (result.isSuccess && result.delay < 5) {
           print('[动态规则绕过] 警告: 延时过低(${result.delay}ms)，可能仍受VPN路由影响');
         }
-
         return result;
       } finally {
-        // 移除动态规则（优先移除指定规则）；失败时再清空所有临时规则
+        // 清理规则并尝试恢复路由
         print('[动态规则绕过] 移除直连规则');
         bool removed = false;
         try {
           removed = ffi.removeRouteRule(ipRuleJson);
         } catch (_) {}
-
         try {
           final ok2 = ffi.reloadConfig();
           if (!ok2) {
             await _softReconnectIfUsingTun();
           }
         } catch (_) {}
-
         if (!removed) {
           try {
             ffi.clearRouteRules();
@@ -1186,8 +1082,6 @@ class NodeDelayTester {
             }
           } catch (_) {}
         }
-
-        // 动态规则路径可能导致路由抖动；最后再做一次软修复
         await _softReconnectIfUsingTun();
       }
     } catch (e) {
@@ -1312,17 +1206,108 @@ class NodeDelayTester {
 
   /// 使用系统路由表方法进行测试（备用方案）
   Future<NodeDelayResult> _testWithSystemRouting(VPNConfig node) async {
-    print('[系统路由测试] 使用系统路由表方法测试: ${node.name}');
-
-    // 这是备用方案，直接使用标准测试但标记为系统路由
+    print('[系统路由测试] 使用系统路由表方法测试: ${node.name} (TCP-only)');
+    // 直接使用标准 TCP 测试但标记为系统路由；不做 QUIC/ICMP 兜底
     final result = await _standardDelayTest(node, isVpnBypass: false);
-
-    // 如果延时异常小，给出警告
     if (result.isSuccess && result.delay < 10) {
       print('[系统路由测试] 警告: 延时过小(${result.delay}ms)，可能仍被VPN路由影响');
     }
-
     return result;
+  }
+
+  /// 执行 QUIC 最小握手测量（仅针对 UDP-only 节点）；成功返回结果，否则返回 null
+  Future<NodeDelayResult?> _tryQuicHandshake(
+    VPNConfig node, {
+    int timeoutMs = 1500,
+  }) async {
+    try {
+      final ffi = SingBoxFFI.instance;
+      final sni =
+          (node.settings['sni']?.toString() ??
+                  node.settings['host']?.toString() ??
+                  node.server)
+              .toString();
+      List<String>? alpn;
+      final rawAlpn = node.settings['alpn'];
+      if (rawAlpn is List) {
+        alpn = rawAlpn.whereType<String>().toList();
+      }
+      final t = node.type.toLowerCase();
+      if ((alpn == null || alpn.isEmpty) && (t == 'hysteria2' || t == 'hy2')) {
+        alpn = ['hysteria2'];
+      }
+      final insecure = node.settings['skipCertVerify'] == true;
+      final sw = Stopwatch()..start();
+      final ok = ffi.probeQUIC(
+        host: node.server,
+        port: node.port,
+        sni: sni,
+        insecure: insecure,
+        alpn: alpn,
+        timeoutMs: timeoutMs,
+      );
+      sw.stop();
+      if (ok) {
+        final ms = sw.elapsedMilliseconds == 0 ? 1 : sw.elapsedMilliseconds;
+        return NodeDelayResult(
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeServer: node.server,
+          nodePort: node.port,
+          nodeType: node.type,
+          delay: ms,
+          isSuccess: true,
+          testTime: DateTime.now(),
+        );
+      }
+    } catch (e) {
+      print('⚠️ QUIC 最小握手测量异常: $e');
+    }
+    return null;
+  }
+
+  /// UDP-only 节点的 ICMP 兜底
+  Future<NodeDelayResult?> _icmpFallbackNode(
+    VPNConfig node, {
+    int timeoutMs = 1200,
+  }) async {
+    try {
+      final ip = _isIpAddress(node.server)
+          ? InternetAddress(node.server)
+          : await _resolveIPv4Direct(node.server, timeoutMs: timeoutMs) ??
+                (await InternetAddress.lookup(
+                  node.server,
+                )).firstWhere((a) => a.type == InternetAddressType.IPv4);
+      String? srcBind;
+      try {
+        srcBind = await _pickPhysicalIPv4();
+      } catch (_) {}
+      int? icmp;
+      if (srcBind != null && Platform.isWindows) {
+        icmp = await _icmpPingIPv4(
+          ip.address,
+          timeoutMs: timeoutMs,
+          sourceIp: srcBind,
+        );
+      }
+      icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: timeoutMs);
+      if (icmp != null && icmp >= 0) {
+        return NodeDelayResult(
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeServer: node.server,
+          nodePort: node.port,
+          nodeType: node.type,
+          delay: icmp,
+          isSuccess: true,
+          testTime: DateTime.now(),
+          realIpAddress: ip.address,
+        );
+      }
+    } catch (e) {
+      print('⚠️ UDP-only 节点 ICMP 回退异常: $e');
+    }
+    return null;
   }
 
   /// 执行direct测试
@@ -1552,44 +1537,74 @@ class NodeDelayTester {
     }
 
     final sw = Stopwatch()..start();
-    final probePort = _tcpProbePort(node);
     try {
-      final socket = await Socket.connect(
-        node.server,
-        probePort,
-        timeout: Duration(milliseconds: timeout),
-        // 明确使用 InternetAddress 以避免在某些 Dart 版本中对 String 的兼容性问题
-        sourceAddress: InternetAddress(sourceIp),
-      );
-
-      sw.stop();
-      final delay = sw.elapsedMilliseconds;
-      final local = socket.address.address;
-      final remote = socket.remoteAddress.address;
-      socket.destroy();
-
-      print(
-        '[源地址绑定绕过] 连接成功，本地: $local -> 远程: $remote，端口: $probePort，延时: ${delay}ms',
-      );
-      if (local != sourceIp) {
-        print('[源地址绑定绕过] 警告: 实际本地地址($local)与期望($sourceIp)不一致，可能未生效');
+      final candidates = <int>[_tcpProbePort(node), 80, 22];
+      final targetIPv4 = await _resolveIPv4ForTest(node);
+      final host = targetIPv4?.address ?? node.server;
+      int? best;
+      int usedPort = candidates.first;
+      for (final p in candidates) {
+        try {
+          final s = await Socket.connect(
+            host,
+            p,
+            timeout: Duration(milliseconds: timeout),
+            sourceAddress: InternetAddress(sourceIp),
+          );
+          sw.stop();
+          final delay = sw.elapsedMilliseconds;
+          final local = s.address.address;
+          final remote = s.remoteAddress.address;
+          s.destroy();
+          if (best == null || delay < best) {
+            best = delay;
+            usedPort = p;
+          }
+          print('[源地址绑定绕过] 成功: $local -> $remote，端口: $p，延时: ${delay}ms');
+        } catch (e) {
+          sw.stop();
+          if (_isTcpRefusedError(e)) {
+            final ms = sw.elapsedMilliseconds;
+            if (best == null || ms < best) {
+              best = ms;
+              usedPort = p;
+            }
+            print('[源地址绑定绕过] 被拒绝: 端口 $p，RTT=${ms}ms');
+          }
+        } finally {
+          sw.reset();
+          sw.start();
+        }
       }
-      if (delay < 5 && !_isLocalAddress(remote)) {
-        print('[源地址绑定绕过] 警告: 延时过低(${delay}ms)，可能仍受VPN路由影响');
+      if (best != null) {
+        return NodeDelayResult(
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeServer: node.server,
+          nodePort: usedPort,
+          nodeType: node.type,
+          delay: best,
+          isSuccess: true,
+          testTime: DateTime.now(),
+        );
       }
-
-      return NodeDelayResult(
-        nodeId: node.id,
-        nodeName: node.name,
-        nodeServer: node.server,
-        nodePort: node.port,
-        nodeType: node.type,
-        delay: delay,
-        isSuccess: true,
-        testTime: DateTime.now(),
-      );
+      throw Exception('源地址绑定直连失败: 所有端口均超时/不可达');
     } catch (e) {
       sw.stop();
+      if (_isTcpRefusedError(e)) {
+        final ms = sw.elapsedMilliseconds;
+        print('[源地址绑定绕过] 连接被拒绝，返回 RTT=${ms}ms');
+        return NodeDelayResult(
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeServer: node.server,
+          nodePort: node.port,
+          nodeType: node.type,
+          delay: ms,
+          isSuccess: true,
+          testTime: DateTime.now(),
+        );
+      }
       throw Exception('源地址绑定直连失败: $e');
     }
   }
@@ -1650,8 +1665,10 @@ class NodeDelayTester {
 
     try {
       final port = overridePort ?? _tcpProbePort(node);
+      final targetIPv4 = await _resolveIPv4ForTest(node);
+      final host = targetIPv4?.address ?? node.server;
       final socket = await Socket.connect(
-        node.server,
+        host,
         port,
         timeout: Duration(milliseconds: timeout),
       );
@@ -1681,146 +1698,150 @@ class NodeDelayTester {
         realIpAddress: remote,
       );
 
-      // 在 systemOnly 路径下，如果命中 FakeIP 或延时过低，则尝试一次“物理网卡源绑定的 ICMP”回退，给出更接近真实的值
+      // TCP-only：不做 ICMP 回退；仅记录可疑情况
       if (!isVpnBypass) {
         final isFake = _isFakeIp(remote);
-        final tooLow = delay <= 15; // 极低延时，疑似本机/回环
+        final tooLow = delay <= 15;
         if (isFake || tooLow) {
           print(
-            '[系统路由测试] 发现${isFake ? ' FakeIP' : ''}${tooLow ? ' 异常低延时' : ''}，尝试ICMP源绑定回退',
+            '[系统路由测试] 注意: ${isFake ? '命中FakeIP' : ''}${tooLow ? ' / 延时异常低' : ''}，按 TCP-only 保留原值',
           );
-          try {
-            final ip = _isIpAddress(node.server)
-                ? InternetAddress(node.server)
-                : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
-                      (await InternetAddress.lookup(node.server)).firstWhere(
-                        (a) =>
-                            a.type == InternetAddressType.IPv4 &&
-                            !_isFakeIp(a.address),
-                      );
-            String? srcBind;
-            try {
-              srcBind = await _pickPhysicalIPv4();
-            } catch (_) {}
-            int? icmp;
-            if (srcBind != null && Platform.isWindows) {
-              icmp = await _icmpPingIPv4(
-                ip.address,
-                timeoutMs: 1200,
-                sourceIp: srcBind,
-              );
-            }
-            icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
-            if (icmp != null && icmp >= 0) {
-              print(
-                '[系统路由测试] ICMP回退成功: ${icmp}ms (目标 ${ip.address}${srcBind != null ? ', 源 ' + srcBind : ''})',
-              );
-              base = NodeDelayResult(
-                nodeId: node.id,
-                nodeName: node.name,
-                nodeServer: node.server,
-                nodePort: port,
-                nodeType: node.type,
-                delay: icmp,
-                isSuccess: true,
-                testTime: DateTime.now(),
-                realIpAddress: ip.address,
-              );
-            } else {
-              print('[系统路由测试] ICMP回退无结果，保留系统路由测得的值');
-            }
-          } catch (e) {
-            print('[系统路由测试] ICMP回退异常: $e');
-          }
-          // 结束 (isFake || tooLow)
         }
-        // 结束 (!isVpnBypass)
       }
 
       return base;
     } catch (e) {
       stopwatch.stop();
-      // 针对 UDP-only 节点的 TCP 端口拒绝，尝试对 443 端口做一次兜底测量
+
+      // 若是“连接被拒绝”，按成功返回 RTT
+      if (_isTcpRefusedError(e)) {
+        final ms = stopwatch.elapsedMilliseconds;
+        print('[标准测试] 连接被拒绝，返回 RTT=${ms}ms');
+        return NodeDelayResult(
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeServer: node.server,
+          nodePort: overridePort ?? _tcpProbePort(node),
+          nodeType: node.type,
+          delay: ms,
+          isSuccess: true,
+          testTime: DateTime.now(),
+          realIpAddress: null,
+        );
+      }
+
+      // 针对 UDP-only 节点的超时等情况，尝试对 443/80/22 端口做一次兜底测量
       final isUdp = _isUdpOnlyNode(node);
-      final msg = e.toString();
-      final refused =
-          (e is SocketException) &&
-          ((e.osError?.errorCode ?? 0) == 1225 ||
-              msg.contains('拒绝') ||
-              msg.toLowerCase().contains('refused'));
-      if (overridePort == null && isUdp && refused) {
-        // 如果探测端口原本就已经是 443，则不再重复尝试相同端口
-        final currentProbePort = _tcpProbePort(node);
-        if (currentProbePort != 443) {
+      if (overridePort == null && isUdp) {
+        final targetIPv4 = await _resolveIPv4ForTest(node);
+        final host = targetIPv4?.address ?? node.server;
+        int? best;
+        int usedPort = 443;
+        for (final p in [443, 80, 22]) {
+          final sw = Stopwatch()..start();
           try {
-            final retry = await _standardDelayTest(
-              node,
-              isVpnBypass: isVpnBypass,
-              overridePort: 443,
+            final s = await Socket.connect(
+              host,
+              p,
+              timeout: Duration(milliseconds: timeout),
             );
-            return retry;
-          } catch (_) {}
+            sw.stop();
+            s.destroy();
+            final ms = sw.elapsedMilliseconds;
+            if (best == null || ms < best) {
+              best = ms;
+              usedPort = p;
+            }
+          } catch (ee) {
+            sw.stop();
+            if (_isTcpRefusedError(ee)) {
+              final ms = sw.elapsedMilliseconds;
+              if (best == null || ms < best) {
+                best = ms;
+                usedPort = p;
+              }
+            }
+          }
         }
-        // 仍不行，尝试 ICMP 探测作为兜底；优先绑定物理网卡源地址确保不经由 VPN
-        try {
-          final ip = _isIpAddress(node.server)
-              ? InternetAddress(node.server)
-              : await _resolveIPv4Direct(node.server, timeoutMs: 1200) ??
-                    (await InternetAddress.lookup(
-                      node.server,
-                    )).firstWhere((a) => a.type == InternetAddressType.IPv4);
-
-          String? srcBind;
-          try {
-            srcBind = await _pickPhysicalIPv4();
-          } catch (_) {}
-
-          // Windows 下优先使用带源地址绑定的 ping，提高绕过 VPN 的命中率
-          int? icmp;
-          if (srcBind != null && Platform.isWindows) {
-            icmp = await _icmpPingIPv4(
-              ip.address,
-              timeoutMs: 1200,
-              sourceIp: srcBind,
-            );
-          }
-          icmp ??= await _icmpPingIPv4(ip.address, timeoutMs: 1200);
-
-          if (icmp != null && icmp >= 0) {
-            return NodeDelayResult(
-              nodeId: node.id,
-              nodeName: node.name,
-              nodeServer: node.server,
-              nodePort: overridePort ?? _tcpProbePort(node),
-              nodeType: node.type,
-              delay: icmp,
-              isSuccess: true,
-              testTime: DateTime.now(),
-            );
-          }
-        } catch (_) {}
+        if (best != null) {
+          return NodeDelayResult(
+            nodeId: node.id,
+            nodeName: node.name,
+            nodeServer: node.server,
+            nodePort: usedPort,
+            nodeType: node.type,
+            delay: best,
+            isSuccess: true,
+            testTime: DateTime.now(),
+            realIpAddress: null,
+          );
+        }
       }
       return _createFailedResult(node, '标准测试失败: $e');
     }
   }
 
-  /// Windows 下调用系统 ping 进行单次 ICMP 测量，返回毫秒；失败返回 null
+  // 统一解析真实 IPv4：直连 DNS 优先，其次系统 DNS（过滤常见 FakeIP 段）
+  Future<InternetAddress?> _resolveIPv4ForTest(VPNConfig node) async {
+    try {
+      if (_isIpAddress(node.server)) return InternetAddress(node.server);
+      final direct = await _resolveIPv4Direct(node.server, timeoutMs: 1500);
+      if (direct != null) return direct;
+      final addrs = await InternetAddress.lookup(
+        node.server,
+      ).timeout(const Duration(seconds: 2));
+      for (final a in addrs) {
+        if (a.type == InternetAddressType.IPv4 && !_isFakeIp(a.address)) {
+          return a;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // 识别“TCP 连接被拒绝”的错误
+  bool _isTcpRefusedError(Object e) {
+    if (e is SocketException) {
+      final code = e.osError?.errorCode ?? 0;
+      final msg = (e.message + ' ' + (e.osError?.message ?? '')).toLowerCase();
+      if (code == 10061 || code == 1225 || code == 111 || code == 61) {
+        return true; // Windows(10061/1225), Linux/Android(111), macOS(61)
+      }
+      if (msg.contains('refused') ||
+          msg.contains('actively refused') ||
+          msg.contains('拒绝') ||
+          msg.contains('被拒绝')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 单次 ICMP 测量（跨平台）：
+  /// - Windows: ping -n 1 -w <ms> [-S src]
+  /// - Android/Linux: ping -c 1 -W <sec> -w <sec>
+  /// 返回毫秒；失败返回 null
   Future<int?> _icmpPingIPv4(
     String ipv4, {
     int timeoutMs = 1000,
     String? sourceIp,
   }) async {
     try {
-      // -n 1 仅一次；-w 超时（毫秒）
-      final args = <String>['-n', '1', '-w', timeoutMs.toString()];
-      // Windows 支持 -S 绑定源地址（需为本机接口 IPv4）
-      if (Platform.isWindows && sourceIp != null && sourceIp.isNotEmpty) {
-        args.addAll(['-S', sourceIp]);
+      List<String> args = [];
+      String cmd = 'ping';
+      if (Platform.isWindows) {
+        args = ['-n', '1', '-w', timeoutMs.toString()];
+        if (sourceIp != null && sourceIp.isNotEmpty) {
+          args.addAll(['-S', sourceIp]);
+        }
+      } else {
+        final sec = (timeoutMs / 1000).ceil();
+        args = ['-c', '1', '-W', sec.toString(), '-w', sec.toString()];
       }
       args.add(ipv4);
 
       final result = await Process.run(
-        'ping',
+        cmd,
         args,
         runInShell: true,
       ).timeout(Duration(milliseconds: timeoutMs + 500));
@@ -1828,20 +1849,22 @@ class NodeDelayTester {
       final out = (result.stdout as String?) ?? '';
       final err = (result.stderr as String?) ?? '';
       final text = out.isNotEmpty ? out : err;
-      // 兼容中英文：time=12ms / 时间=12ms / time<1ms / 时间<1ms
+      // Windows: time=12ms / 时间=12ms / time<1ms；Linux/Android: time=12.3 ms
       final patterns = <RegExp>[
-        RegExp(r'time[=<]\s*(\d+)ms', caseSensitive: false),
-        RegExp(r'时间[=<]\s*(\d+)ms'),
+        RegExp(r'time[=<]\s*(\d+(?:\.\d+)?)\s*ms', caseSensitive: false),
+        RegExp(r'时间[=<]\s*(\d+(?:\.\d+)?)\s*ms'),
       ];
       for (final re in patterns) {
         final m = re.firstMatch(text);
         if (m != null) {
-          final v = int.tryParse(m.group(1)!);
-          if (v != null) return v;
+          final s = m.group(1)!;
+          final v = double.tryParse(s);
+          if (v != null) return v < 1.0 ? 1 : v.round();
         }
       }
-      // 处理 "时间<1ms" 的场景
-      if (text.contains('时间<1ms') || text.toLowerCase().contains('time<1ms')) {
+      if (text.contains('时间<1ms') ||
+          text.toLowerCase().contains('time<1ms') ||
+          text.toLowerCase().contains('time< 1ms')) {
         return 1;
       }
       return null;

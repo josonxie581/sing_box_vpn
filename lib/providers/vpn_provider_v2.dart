@@ -51,6 +51,13 @@ class VPNProviderV2 extends ChangeNotifier {
 
   // 初始化
   Future<void> _init() async {
+    // Android：注册快捷方式回调，使 MainActivity 的快捷方式动作可以控制服务
+    if (Platform.isAndroid) {
+      try {
+        SingBoxNativeService.registerAndroidShortcutHandlers(_singboxService);
+      } catch (_) {}
+    }
+
     await _configManager.loadConfigs();
     await _connectionManager.init();
     await _loadPreferences();

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">gsou</string>
+    <string name="shortcut_vpn_on_short">VPN On</string>
+    <string name="shortcut_vpn_on_long">开启 VPN</string>
+    <string name="shortcut_vpn_off_short">VPN Off</string>
+    <string name="shortcut_vpn_off_long">关闭 VPN</string>
+    <string name="shortcut_vpn_toggle_short">VPN On/Off</string>
+</resources>

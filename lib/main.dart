@@ -10,14 +10,30 @@ import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 import 'providers/vpn_provider_v2.dart';
 import 'services/improved_traffic_stats_service.dart';
 import 'services/singbox_ffi.dart';
+import 'services/singbox_native_service.dart';
 import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
 import 'utils/privilege_manager.dart';
 import 'utils/simple_single_instance.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Android：在 runApp 之前尽早注册快捷方式处理器并通知原生就绪，避免事件丢失/延迟
+  if (Platform.isAndroid) {
+    try {
+      // 提前注册 Dart 侧处理器（无需等 Provider 初始化）
+      SingBoxNativeService.registerAndroidShortcutHandlers(
+        SingBoxNativeService(),
+      );
+      // 通知原生 Dart 已就绪（提前发一次，Provider 初始化后仍会生效）
+      const channelName = 'singbox/native';
+      final ch = const MethodChannel(channelName);
+      // ignore: unawaited_futures
+      ch.invokeMethod('nativeReady');
+    } catch (_) {}
+  }
   // 仅桌面平台才初始化窗口/毛玻璃等能力
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await acrylic.Window.initialize();
@@ -64,26 +80,28 @@ void main() async {
     }
   }
 
-  // 提权逻辑完成后再进行单实例检查，避免重启新进程与旧实例竞争
-  bool isUniqueInstance = true;
-  try {
-    print('开始单实例检查...');
-    isUniqueInstance = await SimpleSingleInstance.isUniqueInstance().timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        print('单实例检查超时，允许启动');
-        return true;
-      },
-    );
-    print('单实例检查结果: $isUniqueInstance');
-  } catch (e) {
-    print('单实例检查异常，允许启动: $e');
-    isUniqueInstance = true;
-  }
+  // 仅桌面平台执行单实例检查；移动端允许系统多实例调度（避免快捷方式前台化被误判退出）
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    bool isUniqueInstance = true;
+    try {
+      print('开始单实例检查...');
+      isUniqueInstance = await SimpleSingleInstance.isUniqueInstance().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print('单实例检查超时，允许启动');
+          return true;
+        },
+      );
+      print('单实例检查结果: $isUniqueInstance');
+    } catch (e) {
+      print('单实例检查异常，允许启动: $e');
+      isUniqueInstance = true;
+    }
 
-  if (!isUniqueInstance) {
-    print('应用已在运行，退出当前实例');
-    exit(0);
+    if (!isUniqueInstance) {
+      print('应用已在运行，退出当前实例');
+      exit(0);
+    }
   }
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -122,6 +140,18 @@ void main() async {
       child: const MyApp(),
     ),
   );
+
+  // Android：应用启动后尽早通知原生侧 Dart 已就绪，避免快捷方式事件丢失
+  if (Platform.isAndroid) {
+    try {
+      const channelName = 'singbox/native';
+      final ch = const MethodChannel(channelName);
+      // 忽略返回值/错误，尽量早通知
+      // 不使用 await 以避免阻塞 UI 初始化
+      // ignore: unawaited_futures
+      ch.invokeMethod('nativeReady');
+    } catch (_) {}
+  }
 }
 
 class MyApp extends StatefulWidget {

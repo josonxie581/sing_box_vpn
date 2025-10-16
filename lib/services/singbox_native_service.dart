@@ -6,6 +6,12 @@ import 'package:path/path.dart' as path;
 import 'singbox_ffi.dart';
 import '../models/vpn_config.dart';
 import 'package:flutter/services.dart';
+import 'geosite_manager.dart';
+import '../models/proxy_mode.dart';
+import 'config_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dns_manager.dart';
+import '../services/connection_manager.dart';
 
 /// sing-box 原生服务管理类（使用 FFI）
 class SingBoxNativeService {
@@ -35,6 +41,302 @@ class SingBoxNativeService {
 
   // Android 平台通道
   static const MethodChannel _androidCh = MethodChannel('singbox/native');
+
+  // 供 Android MainActivity 快捷方式触发
+  static void registerAndroidShortcutHandlers(SingBoxNativeService svc) {
+    if (!Platform.isAndroid) return;
+    _androidCh.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'shortcutVpnOn':
+          try {
+            // 优先走统一的 ConnectionManager 流程，保证 Clash API/统计 等一致
+            final vpn = await _pickLastOrCurrentVPNConfig();
+            if (vpn != null) {
+              final prefs = await SharedPreferences.getInstance();
+              final cm = ConnectionManager();
+              await cm.init();
+              // 应用偏好设置
+              final modeName =
+                  prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+              final mode = ProxyMode.values.firstWhere(
+                (m) => m.name == modeName,
+                orElse: () => ProxyMode.rule,
+              );
+              cm.setProxyMode(mode);
+              cm.setUseTun(prefs.getBool('use_tun') ?? Platform.isAndroid);
+              cm.setTunStrictRoute(
+                prefs.getBool('tun_strict_route') ??
+                    (prefs.getBool('dns_strict_route') ?? false),
+              );
+              cm.setLocalPort(
+                prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort,
+              );
+              cm.setClashApi(
+                prefs.getBool('enable_clash_api') ?? true,
+                prefs.getInt('clash_api_port') ?? 9090,
+                prefs.getString('clash_api_secret') ?? '',
+              );
+              final ok = await cm.connect(vpn);
+              if (!ok) {
+                svc.onLog?.call('快捷方式启动失败');
+              } else {
+                svc.onLog?.call('快捷方式已启动');
+              }
+            } else {
+              // 兜底：构建临时配置直接启动
+              final cfg = await _loadLastOrDefaultConfig();
+              if (cfg != null) {
+                final ok = await svc.start(cfg);
+                svc.onLog?.call(ok ? '快捷方式已启动(兜底)' : '快捷方式启动失败(兜底)');
+              }
+            }
+          } catch (_) {}
+          return;
+        case 'shortcutVpnOff':
+          try {
+            // 使用统一的断开流程，确保停止统计/清理代理等
+            final cm = ConnectionManager();
+            await cm.disconnect();
+            // 通知 Android 层断开完成，可以安全后台化了
+            if (Platform.isAndroid) {
+              try {
+                await _androidCh.invokeMethod('shortcutActionCompleted');
+              } catch (_) {}
+            }
+          } catch (_) {}
+          return;
+        case 'shortcutVpnToggle':
+          try {
+            final cm = ConnectionManager();
+            if (cm.isConnected) {
+              await cm.disconnect();
+              // 通知 Android 层操作完成
+              if (Platform.isAndroid) {
+                try {
+                  await _androidCh.invokeMethod('shortcutActionCompleted');
+                } catch (_) {}
+              }
+            } else {
+              final vpn = await _pickLastOrCurrentVPNConfig();
+              if (vpn != null) {
+                final prefs = await SharedPreferences.getInstance();
+                await cm.init();
+                final modeName =
+                    prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+                final mode = ProxyMode.values.firstWhere(
+                  (m) => m.name == modeName,
+                  orElse: () => ProxyMode.rule,
+                );
+                cm.setProxyMode(mode);
+                cm.setUseTun(prefs.getBool('use_tun') ?? Platform.isAndroid);
+                cm.setTunStrictRoute(
+                  prefs.getBool('tun_strict_route') ??
+                      (prefs.getBool('dns_strict_route') ?? false),
+                );
+                cm.setLocalPort(
+                  prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort,
+                );
+                cm.setClashApi(
+                  prefs.getBool('enable_clash_api') ?? true,
+                  prefs.getInt('clash_api_port') ?? 9090,
+                  prefs.getString('clash_api_secret') ?? '',
+                );
+                await cm.connect(vpn);
+                // 通知 Android 层操作完成
+                if (Platform.isAndroid) {
+                  try {
+                    await _androidCh.invokeMethod('shortcutActionCompleted');
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+          return;
+      }
+    });
+
+    // 通知原生：Dart 已注册快捷方式处理器，可安全分发缓存的动作
+    // 忽略异常（通道可能尚未就绪）
+    Future(() async {
+      try {
+        await _androidCh.invokeMethod('shortcutHandlerReady');
+      } catch (_) {}
+    });
+  }
+
+  /// 确保为配置中引用到的 rule_set 标签注册 provider（本地 .srs 文件）
+  Future<void> _ensureRuleSetProviders(Map<String, dynamic> config) async {
+    try {
+      final route = (config['route'] as Map?)?.cast<String, dynamic>() ?? {};
+      final dns = (config['dns'] as Map?)?.cast<String, dynamic>() ?? {};
+
+      // 收集在 route.rules 与 dns.rules 中被引用到的 rule_set 标签
+      Set<String> referencedTags = {};
+
+      void collect(dynamic rulesAny) {
+        final rules = (rulesAny as List?)?.cast<Map>() ?? const [];
+        for (final r in rules) {
+          final rs = (r['rule_set'] as List?)?.cast<dynamic>() ?? const [];
+          for (final x in rs) {
+            final tag = x?.toString().trim();
+            if (tag != null && tag.isNotEmpty) referencedTags.add(tag);
+          }
+        }
+      }
+
+      collect(route['rules']);
+      collect(dns['rules']);
+
+      if (referencedTags.isEmpty) return; // 无引用则无需处理
+
+      // 当前已注册的 providers（route.rule_set）
+      final providers = <Map<String, dynamic>>[
+        ...(((route['rule_set'] as List?)?.cast<Map>()) ?? const []).map(
+          (e) => e.cast<String, dynamic>(),
+        ),
+      ];
+
+      Set<String> existingTags = providers
+          .map((e) => (e['tag'] ?? '').toString())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+
+      final needTags = referencedTags.difference(existingTags);
+      if (needTags.isEmpty) return;
+
+      final mgr = GeositeManager(); // typedef RuleSetsManager
+
+      Future<Map<String, dynamic>?> buildProvider(String tag) async {
+        try {
+          // 推断类别与资产路径
+          final isGeoip = tag.startsWith('geoip-');
+          final pathStr = await mgr.getRulesetPath(tag);
+          final file = File(pathStr);
+          if (!file.existsSync()) {
+            // 尝试从 assets 复制一份（_ensureBundledBaseline 会在 getDownloadedRulesets 调用时兜底）
+            // 这里直接尝试按约定路径加载并写出
+            try {
+              final assetPath = isGeoip
+                  ? 'assets/rulesets/geo/geoip/$tag.srs'
+                  : 'assets/rulesets/geo/geosite/$tag.srs';
+              final data = await rootBundle.load(assetPath);
+              await file.create(recursive: true);
+              await file.writeAsBytes(
+                data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+                flush: true,
+              );
+              onLog?.call('已从资产导入规则集: $tag');
+            } catch (_) {
+              // 资产内可能没有该文件，忽略
+            }
+          }
+
+          if (file.existsSync()) {
+            return {
+              'tag': tag,
+              'type': 'local',
+              'format': 'binary',
+              'path': file.path,
+            };
+          } else {
+            onLog?.call('缺少规则集文件（跳过注册）: $tag');
+            return null;
+          }
+        } catch (e) {
+          onLog?.call('规则集注册失败 $tag: $e');
+          return null;
+        }
+      }
+
+      // 构建缺失的 provider 项
+      final additions = <Map<String, dynamic>>[];
+      for (final tag in needTags) {
+        final p = await buildProvider(tag);
+        if (p != null) additions.add(p);
+      }
+
+      if (additions.isEmpty) return;
+
+      // 写回到 config.route.rule_set
+      final newProviders = [...providers, ...additions];
+      config['route'] = {...route, 'rule_set': newProviders};
+
+      onLog?.call('已注册 ${additions.length} 个规则集提供者');
+    } catch (e) {
+      // 非致命，启动可继续
+      onLog?.call('自动注入规则集提供者时出错：$e');
+    }
+  }
+
+  // 简化的最近配置读取（占位实现）：返回 null 则忽略
+  static Future<Map<String, dynamic>?> _loadLastOrDefaultConfig() async {
+    try {
+      final cfgMgr = ConfigManager();
+      // 若尚未加载，先加载配置
+      if (cfgMgr.configs.isEmpty) {
+        await cfgMgr.loadConfigs();
+      }
+      // 选择配置：优先当前配置，其次第一个
+      final vpn =
+          cfgMgr.currentConfig ??
+          (cfgMgr.configs.isNotEmpty ? cfgMgr.configs.first : null);
+      if (vpn == null) {
+        return null; // 无可用节点
+      }
+
+      // 读取用户偏好，尽量与应用内连接路径保持一致
+      final prefs = await SharedPreferences.getInstance();
+      // 代理模式（缺省为 rule）
+      final modeName = prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+      final mode = ProxyMode.values.firstWhere(
+        (m) => m.name == modeName,
+        orElse: () => ProxyMode.rule,
+      );
+      // 是否使用 TUN（Android 默认 true）
+      final useTun = prefs.getBool('use_tun') ?? Platform.isAndroid;
+      // DNS / 路由相关
+      final strictRoute =
+          prefs.getBool('dns_strict_route') ?? false; // 与 DnsManager 保持一致
+      final enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
+      final localPort =
+          prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort;
+      // Clash API 设置（默认启用，端口 9090）
+      final enableClashApi = prefs.getBool('enable_clash_api') ?? true;
+      final clashApiPort = prefs.getInt('clash_api_port') ?? 9090;
+      final clashApiSecret = prefs.getString('clash_api_secret') ?? '';
+
+      // 生成完整 sing-box 配置
+      final config = await vpn.toSingBoxConfig(
+        mode: mode,
+        localPort: localPort,
+        useTun: useTun,
+        tunStrictRoute: strictRoute,
+        preferredTunStack: null,
+        enableClashApi: enableClashApi,
+        clashApiPort: clashApiPort,
+        clashApiSecret: clashApiSecret,
+        tunMtu: 1500,
+        enableIpv6: enableIpv6,
+      );
+      return config;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 选择当前或第一个可用的 VPNConfig（供 ConnectionManager 使用）
+  static Future<VPNConfig?> _pickLastOrCurrentVPNConfig() async {
+    try {
+      final cfgMgr = ConfigManager();
+      if (cfgMgr.configs.isEmpty) {
+        await cfgMgr.loadConfigs();
+      }
+      return cfgMgr.currentConfig ??
+          (cfgMgr.configs.isNotEmpty ? cfgMgr.configs.first : null);
+    } catch (_) {
+      return null;
+    }
+  }
 
   // 已存在 isRunning getter，避免重复定义
 
@@ -148,6 +450,13 @@ class SingBoxNativeService {
       if (!await initialize()) {
         return false;
       }
+    }
+
+    // 在启动前，确保为 DNS/Route 中引用到的 rule_set 标签注入 providers（本地 .srs 文件路径）
+    try {
+      await _ensureRuleSetProviders(config);
+    } catch (e) {
+      onLog?.call('准备规则集提供者失败：$e');
     }
 
     _ffi ??= SingBoxFFI.instance;

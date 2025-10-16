@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="vpn_toggle"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_vpn_toggle_short">
+        <intent
+            android:action="com.example.gsou.ACTION_VPN_TOGGLE"
+            android:targetClass="com.example.gsou.ShortcutProxyActivity"
+            android:targetPackage="com.example.gsou" />
+    </shortcut>
+</shortcuts>
