@@ -760,8 +760,6 @@ class DnsManager {
       'disable_cache': disableCache,
       'disable_expire': disableExpire,
       'reverse_mapping': _resolveInboundDomains,
-      // 保持兼容的配置
-      'client_subnet': '0.0.0.0/0',
     };
 
     // DNS严格路由配置：启用后确保DNS查询严格按照路由规则进行

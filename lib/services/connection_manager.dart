@@ -41,8 +41,8 @@ class ConnectionManager {
   // 运行时健康监控
   Timer? _healthCheckTimer;
   int _consecutiveFailures = 0; // 连续探测失败次数
-  static const int _healthCheckIntervalSeconds = 60; // 每60秒检测一次
-  static const int _maxConsecutiveFailures = 3; // 连续失败3次才触发重连
+  static const int _healthCheckIntervalSeconds = 120; // 每120秒检测一次
+  static const int _maxConsecutiveFailures = 5; // 连续失败5次才触发重连
   bool _isRecovering = false; // 防止重连重入
 
   // 连接设置
@@ -432,7 +432,7 @@ class ConnectionManager {
       Duration(seconds: _healthCheckIntervalSeconds),
       (_) => _performHealthCheck(),
     );
-    _addLog('运行时健康监控已启动 (每${_healthCheckIntervalSeconds}s检测一次)');
+    _addLog('运行时健康监控已启动 (每${_healthCheckIntervalSeconds}s, 连续$_maxConsecutiveFailures次失败触发恢复)');
   }
 
   void _stopHealthCheck() {
@@ -477,21 +477,24 @@ class ConnectionManager {
     }
   }
 
-  /// 轻量级连通性探测
+  /// 轻量级健康探测 — 仅检查本地 Clash API 是否响应（不经过 sing-box 网络栈）
   Future<bool> _probeConnectivity() async {
+    if (!_enableClashApi) return true; // 未启用 Clash API 则跳过
+    final client = HttpClient();
     try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 5);
-      final uri = Uri.parse('http://www.msftconnecttest.com/connecttest.txt');
-      final req = await client.getUrl(uri).timeout(const Duration(seconds: 5));
-      req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-health');
-      final resp = await req.close().timeout(const Duration(seconds: 5));
-      final ok = resp.statusCode == 200;
-      // 消耗 response body 避免连接泄漏
+      client.connectionTimeout = const Duration(seconds: 3);
+      final uri = Uri.parse('http://127.0.0.1:$_clashApiPort/traffic');
+      final req = await client.getUrl(uri).timeout(const Duration(seconds: 3));
+      if (_clashApiSecret.isNotEmpty) {
+        req.headers.set('Authorization', 'Bearer $_clashApiSecret');
+      }
+      final resp = await req.close().timeout(const Duration(seconds: 3));
       await resp.drain<void>();
-      return ok;
+      return resp.statusCode == 200;
     } catch (_) {
       return false;
+    } finally {
+      client.close(force: true);
     }
   }
 
