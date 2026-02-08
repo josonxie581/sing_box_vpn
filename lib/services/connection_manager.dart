@@ -38,6 +38,13 @@ class ConnectionManager {
   final List<String> _logs = [];
   DateTime? _connectionStartTime;
 
+  // 运行时健康监控
+  Timer? _healthCheckTimer;
+  int _consecutiveFailures = 0; // 连续探测失败次数
+  static const int _healthCheckIntervalSeconds = 60; // 每60秒检测一次
+  static const int _maxConsecutiveFailures = 3; // 连续失败3次才触发重连
+  bool _isRecovering = false; // 防止重连重入
+
   // 连接设置
   ProxyMode _proxyMode = ProxyMode.rule;
   bool _useTun = false;
@@ -171,6 +178,9 @@ class ConnectionManager {
           await enableSystemProxy();
         }
 
+        // 启动运行时健康监控
+        _startHealthCheck();
+
         return true;
       } else {
         _updateStatus(ConnectionStatus.error, '连接失败');
@@ -195,6 +205,9 @@ class ConnectionManager {
     _updateStatus(ConnectionStatus.disconnecting, '正在断开...');
 
     try {
+      // 停止健康监控
+      _stopHealthCheck();
+
       // 停止流量统计
       _trafficService.stop();
 
@@ -394,6 +407,124 @@ class ConnectionManager {
       }
     } catch (_) {
       // 忽略关闭失败
+    }
+  }
+
+  // ============== 运行时健康监控 ==============
+
+  void _startHealthCheck() {
+    _stopHealthCheck();
+    _consecutiveFailures = 0;
+    _isRecovering = false;
+    _healthCheckTimer = Timer.periodic(
+      Duration(seconds: _healthCheckIntervalSeconds),
+      (_) => _performHealthCheck(),
+    );
+    _addLog('运行时健康监控已启动 (每${_healthCheckIntervalSeconds}s检测一次)');
+  }
+
+  void _stopHealthCheck() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
+    _consecutiveFailures = 0;
+    _isRecovering = false;
+  }
+
+  Future<void> _performHealthCheck() async {
+    if (_status != ConnectionStatus.connected || _isRecovering) return;
+
+    // 先检查 sing-box 进程是否还在运行
+    if (!_singBoxService.isRunning) {
+      _addLog('[健康检查] sing-box 进程已停止，触发自动重连');
+      _consecutiveFailures = _maxConsecutiveFailures;
+      _tryAutoRecover();
+      return;
+    }
+
+    // 通过 HTTP 探测出网连通性
+    try {
+      final ok = await _probeConnectivity();
+      if (ok) {
+        if (_consecutiveFailures > 0) {
+          _addLog('[健康检查] 连通性恢复正常 (之前连续失败${_consecutiveFailures}次)');
+        }
+        _consecutiveFailures = 0;
+      } else {
+        _consecutiveFailures++;
+        _addLog('[健康检查] 连通性探测失败 ($_consecutiveFailures/$_maxConsecutiveFailures)');
+        if (_consecutiveFailures >= _maxConsecutiveFailures) {
+          _tryAutoRecover();
+        }
+      }
+    } catch (e) {
+      _consecutiveFailures++;
+      _addLog('[健康检查] 探测异常: $e ($_consecutiveFailures/$_maxConsecutiveFailures)');
+      if (_consecutiveFailures >= _maxConsecutiveFailures) {
+        _tryAutoRecover();
+      }
+    }
+  }
+
+  /// 轻量级连通性探测
+  Future<bool> _probeConnectivity() async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 5);
+      final uri = Uri.parse('http://www.msftconnecttest.com/connecttest.txt');
+      final req = await client.getUrl(uri).timeout(const Duration(seconds: 5));
+      req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-health');
+      final resp = await req.close().timeout(const Duration(seconds: 5));
+      final ok = resp.statusCode == 200;
+      // 消耗 response body 避免连接泄漏
+      await resp.drain<void>();
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 自动恢复连接
+  Future<void> _tryAutoRecover() async {
+    if (_isRecovering || _currentConfig == null) return;
+    _isRecovering = true;
+
+    final config = _currentConfig!;
+    _addLog('[自动恢复] 连续${_consecutiveFailures}次探测失败，尝试重启 sing-box...');
+
+    try {
+      // 重新生成配置并重启（使用热重启，尽量减少中断）
+      final effectiveIpv6 = _dnsManager.enableIpv6
+          ? await _dnsManager.detectIpv6Support()
+          : false;
+
+      final singBoxConfig = await config.toSingBoxConfig(
+        mode: _proxyMode,
+        localPort: _localPort,
+        useTun: _useTun,
+        tunStrictRoute: _tunStrictRoute,
+        preferredTunStack: _singBoxService.preferredTunStack,
+        enableClashApi: _enableClashApi,
+        clashApiPort: _clashApiPort,
+        clashApiSecret: _clashApiSecret,
+        enableIpv6: effectiveIpv6,
+      );
+
+      final restarted = await _singBoxService.restart(singBoxConfig);
+      if (restarted) {
+        _addLog('[自动恢复] sing-box 重启成功');
+        _consecutiveFailures = 0;
+
+        // 重新设置系统代理
+        if (_autoSystemProxy && !_useTun) {
+          await enableSystemProxy();
+        }
+      } else {
+        _addLog('[自动恢复] sing-box 重启失败');
+      }
+    } catch (e) {
+      _addLog('[自动恢复] 重启异常: $e');
+    } finally {
+      _isRecovering = false;
     }
   }
 }

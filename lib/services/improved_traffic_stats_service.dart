@@ -45,6 +45,12 @@ class ImprovedTrafficStatsService {
   int _idleZeroTicks = 0; // 连续原始零速计数
   static const int _idleZeroThreshold = 2; // 连续多少次零速后强制归零
 
+  // WebSocket 活性检测
+  DateTime? _lastWebSocketDataTime; // 上次收到 WebSocket 数据的时间
+  static const int _webSocketStaleSeconds = 10; // 超过此秒数无数据视为断连
+  int _reconnectAttempts = 0; // 重连尝试次数
+  static const int _maxReconnectDelay = 30; // 最大重连延迟(秒)
+
   // 流量数据
   final TrafficData _currentData = TrafficData();
   double _ema1Up = 0;
@@ -98,15 +104,22 @@ class ImprovedTrafficStatsService {
     _connectionStartTime = DateTime.now();
     _connectionDuration = Duration.zero;
 
+    // 重置重连计数
+    _reconnectAttempts = 0;
+    _lastWebSocketDataTime = null;
+
     // 尝试连接 WebSocket
     if (_isClashApiEnabled) {
       _connectWebSocket();
     }
 
-    // 启动定时更新（作为备用方案）
+    // 启动定时更新（兼顾 WebSocket 活性检测和 HTTP 轮询兜底）
     _updateTimer = Timer.periodic(_updateInterval, (timer) {
-      // 仅在 WebSocket 未连接时使用轮询
-      if (_trafficWebSocket == null) {
+      if (_trafficWebSocket != null) {
+        // WebSocket 已连接：检查是否还活着
+        _checkWebSocketHealth();
+      } else {
+        // WebSocket 未连接：使用 HTTP 轮询兜底
         _updateTrafficStats();
       }
     });
@@ -128,7 +141,37 @@ class ImprovedTrafficStatsService {
     _durationTimer = null;
     _connectionStartTime = null;
     _connectionDuration = Duration.zero;
+    _reconnectAttempts = 0;
+    _lastWebSocketDataTime = null;
     _disconnectWebSocket();
+  }
+
+  /// 检查 WebSocket 活性，如果长时间无数据则视为断连
+  void _checkWebSocketHealth() {
+    if (_lastWebSocketDataTime == null) return;
+    final elapsed = DateTime.now().difference(_lastWebSocketDataTime!).inSeconds;
+    if (elapsed >= _webSocketStaleSeconds) {
+      print('[TrafficStats] WebSocket 已 ${elapsed}s 无数据，视为断连，重新连接');
+      _disconnectWebSocket();
+      _scheduleReconnect();
+    }
+  }
+
+  /// 带退避的重连调度
+  void _scheduleReconnect() {
+    if (!_isRunning || !_isClashApiEnabled) return;
+    // 指数退避：2, 4, 8, 16, 30(上限) 秒
+    final delay = math.min(
+      2 * math.pow(2, _reconnectAttempts).toInt(),
+      _maxReconnectDelay,
+    );
+    _reconnectAttempts++;
+    print('[TrafficStats] 将在 ${delay}s 后尝试第 $_reconnectAttempts 次重连');
+    Future.delayed(Duration(seconds: delay), () {
+      if (_isRunning && _isClashApiEnabled) {
+        _connectWebSocket();
+      }
+    });
   }
 
   /// 连接 WebSocket
@@ -145,37 +188,30 @@ class ImprovedTrafficStatsService {
     try {
       // 连接 Clash WebSocket
       _trafficWebSocket = await WebSocket.connect(url, headers: headers);
+      _reconnectAttempts = 0; // 连接成功，重置重连计数
+      _lastWebSocketDataTime = DateTime.now();
 
       _trafficStreamSubscription = _trafficWebSocket!.listen(
         (data) {
           _handleWebSocketData(data);
         },
         onError: (error) {
-          // WebSocket 错误
+          print('[TrafficStats] WebSocket 错误: $error');
           _disconnectWebSocket();
-          // 5秒后重试
-          Future.delayed(Duration(seconds: 5), () {
-            if (_isRunning && _isClashApiEnabled) {
-              _connectWebSocket();
-            }
-          });
+          _scheduleReconnect();
         },
         onDone: () {
-          // WebSocket 连接关闭
+          print('[TrafficStats] WebSocket 连接关闭');
           _disconnectWebSocket();
-          // 5秒后重试
-          Future.delayed(Duration(seconds: 5), () {
-            if (_isRunning && _isClashApiEnabled) {
-              _connectWebSocket();
-            }
-          });
+          _scheduleReconnect();
         },
       );
 
-      // WebSocket 连接成功
+      print('[TrafficStats] WebSocket 连接成功');
     } catch (e) {
-      // WebSocket 连接失败
+      print('[TrafficStats] WebSocket 连接失败: $e');
       _disconnectWebSocket();
+      _scheduleReconnect(); // 连接失败也要重试
     }
   }
 
@@ -190,6 +226,8 @@ class ImprovedTrafficStatsService {
   /// 处理 WebSocket 数据
   void _handleWebSocketData(dynamic data) {
     try {
+      _lastWebSocketDataTime = DateTime.now(); // 更新活性时间戳
+
       final Map<String, dynamic> json = jsonDecode(data);
       final int newUploadSpeed =
           (json['up'] as num?)?.toInt() ?? 0; // 原始瞬时速度 (bytes/s)

@@ -7,20 +7,22 @@ project(gsou LANGUAGES CXX)
 # the on-disk name of your application.
 set(BINARY_NAME "Gsou")
 
-# 预编译 sing-box DLL
-message(STATUS "执行 sing-box 预编译...")
-
 # CMAKE_SOURCE_DIR 在此处指向 windows 目录，因此需要回到项目根目录
 get_filename_component(PROJECT_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
-execute_process(
-  COMMAND dart tools/prebuild.dart
-  WORKING_DIRECTORY ${PROJECT_ROOT_DIR}
-  RESULT_VARIABLE PREBUILD_RESULT
-)
-
-if(NOT PREBUILD_RESULT EQUAL 0)
-  message(WARNING "sing-box 预编译失败，将使用回退模式")
+# 预编译 sing-box DLL（仅在 DLL 不存在时尝试，通常由 build_all.ps1 预先完成）
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/singbox.dll")
+  message(STATUS "singbox.dll 不存在，尝试执行预编译...")
+  execute_process(
+    COMMAND dart tools/prebuild.dart
+    WORKING_DIRECTORY ${PROJECT_ROOT_DIR}
+    RESULT_VARIABLE PREBUILD_RESULT
+  )
+  if(NOT PREBUILD_RESULT EQUAL 0)
+    message(WARNING "sing-box 预编译失败，将使用回退模式")
+  endif()
+else()
+  message(STATUS "singbox.dll 已存在，跳过预编译")
 endif()
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
