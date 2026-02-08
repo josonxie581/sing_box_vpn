@@ -705,23 +705,6 @@ class DnsManager {
       }
     }
 
-    // 操作系统/CDN 系统域名始终走直连 DNS（全局模式除外）
-    // 这些域名是 Windows/系统后台流量，走代理 DNS 会频繁超时产生大量错误日志
-    if (!forceProxyDns) {
-      rules.insert(0, {
-        'domain_suffix': [
-          'microsoft.com',
-          'windows.com',
-          'windowsupdate.com',
-          'msftconnecttest.com',
-          'msftncsi.com',
-          'apple.com',
-          'icloud.com',
-        ],
-        'server': 'local',
-      });
-    }
-
     // 当未开启 DNS 分流时，为关键境外域名强制使用代理 DNS
     // 全局模式下所有域名都已经使用代理DNS，不需要特殊处理
     if (!enableRoutingNow && proxyDNSTag != null && !forceProxyDns) {

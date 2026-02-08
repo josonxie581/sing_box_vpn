@@ -544,7 +544,7 @@ class RulesetManager {
     final sanitizedRules = _sanitizeRules(mergedRules);
 
     final config = <String, dynamic>{
-      "log": {"level": "error", "timestamp": true},
+      "log": {"level": "fatal", "timestamp": true},
       "dns": getDnsConfig(mode, useTun: useTun),
       "inbounds": inbounds,
       "outbounds": baseOutbounds,
