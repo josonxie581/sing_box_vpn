@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:math';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:path/path.dart' as path;
 // import 'package:win32/win32.dart' as win32; // Not required; use Directory.current instead
 
@@ -36,6 +37,7 @@ class SingBoxFFI {
   late final Function _getVersion;
   Pointer<Utf8> Function()? _getLastError;
   void Function(Pointer<Utf8>)? _freeCString;
+  Pointer<Utf8> Function()? _drainLogs;
   // 严格探测
   int Function(Pointer<Utf8>, int, Pointer<Utf8>, int, Pointer<Utf8>, int)?
   _probeTLS;
@@ -225,19 +227,21 @@ class SingBoxFFI {
         .lookup<NativeFunction<Pointer<Utf8> Function()>>('GetVersion')
         .asFunction<Pointer<Utf8> Function()>();
 
-    // RegisterLogCallback：捕获原生调试日志
-    try {
-      // C: typedef void (*LogCallback)(const char* msg);
-      final reg = _lib
-          .lookupFunction<
-            Void Function(Pointer<NativeFunction<NativeLogC>>),
-            void Function(Pointer<NativeFunction<NativeLogC>>)
-          >('RegisterLogCallback');
-      // 绑定本地回调，把 C 文本打印到 Dart 日志
-      final cbPtr = Pointer.fromFunction<NativeLogC>(_nativeLog);
-      reg(cbPtr);
-    } catch (_) {
-      // 老版本或不支持可忽略
+    // RegisterLogCallback：仅在 Debug 注册，避免 Release 下线程回调导致崩溃
+    if (kDebugMode) {
+      try {
+        // C: typedef void (*LogCallback)(const char* msg);
+        final reg = _lib
+            .lookupFunction<
+              Void Function(Pointer<NativeFunction<NativeLogC>>),
+              void Function(Pointer<NativeFunction<NativeLogC>>)
+            >('RegisterLogCallback');
+        // 绑定本地回调，把 C 文本打印到 Dart 日志
+        final cbPtr = Pointer.fromFunction<NativeLogC>(_nativeLog);
+        reg(cbPtr);
+      } catch (_) {
+        // 老版本或不支持可忽略
+      }
     }
 
     // Optional: GetLastError/FreeCString (may not exist in older DLLs)
@@ -261,6 +265,14 @@ class SingBoxFFI {
           .asFunction<void Function(Pointer<Utf8>)>();
     } catch (_) {
       _freeCString = null;
+    }
+
+    try {
+      _drainLogs = _lib
+          .lookup<NativeFunction<Pointer<Utf8> Function()>>('SbDrainLogs')
+          .asFunction<Pointer<Utf8> Function()>();
+    } catch (_) {
+      _drainLogs = null;
     }
 
     // 尝试绑定新的路由规则管理函数（可能不存在于旧版DLL）
@@ -385,6 +397,22 @@ class SingBoxFFI {
       _freeCString?.call(p);
     } catch (_) {}
     return s;
+  }
+
+  /// 拉取并清空原生日志缓冲（为空返回空字符串）
+  String drainLogs() {
+    try {
+      if (_drainLogs == null) return '';
+      final p = _drainLogs!.call();
+      if (p == nullptr) return '';
+      final s = p.toDartString();
+      try {
+        _freeCString?.call(p);
+      } catch (_) {}
+      return s;
+    } catch (_) {
+      return '';
+    }
   }
 
   /// TLS 严格探测（最小握手）

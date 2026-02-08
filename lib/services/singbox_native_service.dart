@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:path/path.dart' as path;
 import 'singbox_ffi.dart';
 import '../models/vpn_config.dart';
@@ -28,6 +29,9 @@ class SingBoxNativeService {
   // Batch B: 首段文件日志
   IOSink? _earlyFileLogSink; // 早期文件日志（捕捉 UI 不显示阶段）
   String? _preferredTunStack; // 最近一次成功的 TUN 栈（持久化加载）
+
+  Timer? _logPollTimer;
+  IOSink? _releaseLogSink;
 
   // 外部可写入/读取首选栈
   String? get preferredTunStack => _preferredTunStack;
@@ -477,6 +481,7 @@ class SingBoxNativeService {
           onStatusText?.call('已连接'); // 保持已连接文案
           final runSeq = (++_runSeq);
           _schedulePostStartProbe(config, runSeq);
+          _startLogPolling();
           return true;
         } else {
           final detail = _ffi!.getLastError();
@@ -648,6 +653,7 @@ class SingBoxNativeService {
           // 启动后做一次轻量可用性探测（不影响主流程）
           final runSeq = (++_runSeq);
           _schedulePostStartProbe(config, runSeq);
+          _startLogPolling();
           return true;
         case -1:
           onLog?.call('sing-box 已经在运行');
@@ -1022,6 +1028,7 @@ class SingBoxNativeService {
       _started = false;
       onStatusChanged?.call(false);
       onStatusText?.call('未连接');
+      _stopLogPolling();
       completer.complete(true);
       _stopFuture = null;
       return await completer.future;
@@ -1079,6 +1086,7 @@ class SingBoxNativeService {
       onLog?.call('停止异常: $e');
       ok = false;
     } finally {
+      _stopLogPolling();
       if (Platform.isAndroid) {
         try {
           await _androidCh.invokeMethod('vpnCloseTun');
@@ -1141,6 +1149,7 @@ class SingBoxNativeService {
       _initialized = false;
     }
     // 健康探测已移除
+    _stopLogPolling();
     _closeEarlyFileLogger();
   }
 
@@ -1207,6 +1216,66 @@ class SingBoxNativeService {
   void _earlyFileLog(String line) {
     try {
       _earlyFileLogSink?.writeln('[${DateTime.now().toIso8601String()}] $line');
+    } catch (_) {}
+  }
+
+  void _startLogPolling() {
+    if (kDebugMode) return; // Debug 继续用回调，避免重复
+    if (_logPollTimer != null) return;
+    _initReleaseLogSink();
+    _logPollTimer = Timer.periodic(
+      const Duration(milliseconds: 400),
+      (_) => _flushNativeLogs(),
+    );
+    _flushNativeLogs();
+  }
+
+  void _stopLogPolling() {
+    _logPollTimer?.cancel();
+    _logPollTimer = null;
+    _closeReleaseLogSink();
+  }
+
+  void _flushNativeLogs() {
+    try {
+      _ffi ??= SingBoxFFI.instance;
+      final raw = _ffi!.drainLogs();
+      if (raw.isEmpty) return;
+      for (final line in raw.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+        onLog?.call(trimmed);
+        _writeReleaseLog(trimmed);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _initReleaseLogSink() async {
+    if (_releaseLogSink != null) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final logDir = Directory(path.join(dir.path, 'sing-box'));
+      if (!await logDir.exists()) {
+        await logDir.create(recursive: true);
+      }
+      final file = File(path.join(logDir.path, 'release.log'));
+      _releaseLogSink = file.openWrite(mode: FileMode.append);
+      _releaseLogSink?.writeln(
+        '=== Session ${DateTime.now().toIso8601String()} ===',
+      );
+    } catch (_) {}
+  }
+
+  void _closeReleaseLogSink() {
+    try {
+      _releaseLogSink?.close();
+    } catch (_) {}
+    _releaseLogSink = null;
+  }
+
+  void _writeReleaseLog(String line) {
+    try {
+      _releaseLogSink?.writeln('[${DateTime.now().toIso8601String()}] $line');
     } catch (_) {}
   }
 

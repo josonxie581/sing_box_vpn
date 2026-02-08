@@ -51,10 +51,15 @@ var (
 	logCB C.LogCallback
 	// Android TUN 文件描述符（可选）
 	tunFD int = -1
+	// 原生日志缓冲（避免跨线程回调导致崩溃）
+	logBufMu  sync.Mutex
+	logBuffer []string
 )
 
 var lastError string
 var lastRestartAt time.Time
+
+const logBufMax = 2000
 
 // 记录当前运行配置与动态插入的路由规则（JSON 文本形式）
 // pristineConfigJSON 记录“无临时规则”的基线配置
@@ -76,9 +81,11 @@ func diagFilePath() string {
 }
 
 func dbg(msg string) {
+	line := "[NATIVE] " + msg
+	pushLog(line)
 	if logCB != nil && runtime.GOOS != "android" {
 		// 若已有回调，交由上层统一写
-		c := C.CString("[NATIVE] " + msg)
+		c := C.CString(line)
 		C.callLog(logCB, c)
 		C.free(unsafe.Pointer(c))
 	} else {
@@ -87,11 +94,35 @@ func dbg(msg string) {
 		if err != nil {
 			return
 		}
-		_, _ = f.WriteString(fmt.Sprintf("%s [NATIVE] %s\n", timestamp(), msg))
+		_, _ = f.WriteString(fmt.Sprintf("%s %s\n", timestamp(), line))
 		_ = f.Close()
 	}
 	// 同时输出到标准输出，便于在控制台查看（若有）
-	fmt.Println(fmt.Sprintf("%s [NATIVE] %s", timestamp(), msg))
+	fmt.Println(fmt.Sprintf("%s %s", timestamp(), line))
+}
+
+func pushLog(msg string) {
+	if msg == "" {
+		return
+	}
+	logBufMu.Lock()
+	logBuffer = append(logBuffer, msg)
+	if len(logBuffer) > logBufMax {
+		logBuffer = logBuffer[len(logBuffer)-logBufMax:]
+	}
+	logBufMu.Unlock()
+}
+
+func emitLog(msg string) {
+	if msg == "" {
+		return
+	}
+	pushLog(msg)
+	if logCB != nil && runtime.GOOS != "android" {
+		c := C.CString(msg)
+		C.callLog(logCB, c)
+		C.free(unsafe.Pointer(c))
+	}
 }
 
 func timestamp() string { return time.Now().Format("2006-01-02T15:04:05.000Z07:00") }
@@ -201,6 +232,7 @@ type ffiPlatformWriter struct{}
 
 func (w *ffiPlatformWriter) DisableColors() bool { return true }
 func (w *ffiPlatformWriter) WriteMessage(level log.Level, message string) {
+	pushLog(message)
 	if logCB != nil && runtime.GOOS != "android" {
 		cmsg := C.CString(message)
 		C.callLog(logCB, cmsg)
@@ -222,9 +254,7 @@ func InitSingBox() int {
 	}
 	ctx, cancel = context.WithCancel(context.Background())
 	if logCB != nil && runtime.GOOS != "android" {
-		msg := C.CString("sing-box 初始化完成")
-		C.callLog(logCB, msg)
-		C.free(unsafe.Pointer(msg))
+		emitLog("sing-box 初始化完成")
 	}
 	dbg("InitSingBox leave")
 
@@ -245,11 +275,7 @@ func StartSingBox(configJSON *C.char) int {
 	}
 
 	if instance != nil {
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString("sing-box 已经在运行")
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog("sing-box 已经在运行")
 		dbg("StartSingBox fast-return already running")
 		return -1 // 已经在运行
 	}
@@ -396,11 +422,7 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox phase=parse_options begin")
 	if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(configStr), &options); err != nil {
 		setLastError(fmt.Errorf("parse options: %w", err))
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString(fmt.Sprintf("配置解析失败: %v", err))
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog(fmt.Sprintf("配置解析失败: %v", err))
 		dbg("StartSingBox phase=parse_options fail")
 		return -2
 	}
@@ -419,7 +441,7 @@ func StartSingBox(configJSON *C.char) int {
 	// 创建 sing-box 实例（使用内置日志系统；如设置了回调，则通过 PlatformWriter 输出）
 	var err error
 	var pw log.PlatformWriter
-	if logCB != nil && runtime.GOOS != "android" {
+	if runtime.GOOS != "android" {
 		pw = &ffiPlatformWriter{}
 	}
 	// 确保在 Context 中注入默认的 Inbound/Outbound/Endpoint/DNS/Service 注册表
@@ -441,11 +463,7 @@ func StartSingBox(configJSON *C.char) int {
 
 	if err != nil {
 		setLastError(fmt.Errorf("box.New: %w", err))
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString(fmt.Sprintf("创建实例失败: %v", err))
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog(fmt.Sprintf("创建实例失败: %v", err))
 		dbg("StartSingBox phase=box.New fail")
 		return -3
 	}
@@ -457,11 +475,7 @@ func StartSingBox(configJSON *C.char) int {
 	err = instance.Start()
 	if err != nil {
 		setLastError(fmt.Errorf("instance.Start: %w", err))
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString(fmt.Sprintf("启动失败: %v", err))
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog(fmt.Sprintf("启动失败: %v", err))
 		instance.Close()
 		instance = nil
 		dbg("StartSingBox phase=instance.Start fail")
@@ -470,14 +484,23 @@ func StartSingBox(configJSON *C.char) int {
 	dbg("StartSingBox phase=instance.Start ok")
 	stage = "done"
 
-	if logCB != nil && runtime.GOOS != "android" {
-		msg := C.CString("sing-box 启动成功")
-		C.callLog(logCB, msg)
-		C.free(unsafe.Pointer(msg))
-	}
+	emitLog("sing-box 启动成功")
 	dbg("StartSingBox leave success")
 
 	return 0
+}
+
+//export SbDrainLogs
+func SbDrainLogs() *C.char {
+	logBufMu.Lock()
+	if len(logBuffer) == 0 {
+		logBufMu.Unlock()
+		return C.CString("")
+	}
+	joined := strings.Join(logBuffer, "\n")
+	logBuffer = nil
+	logBufMu.Unlock()
+	return C.CString(joined)
 }
 
 //export StartSingBoxWithTunFd
@@ -639,11 +662,7 @@ func StopSingBox() int {
 	// 先获取锁检查状态，并在关闭前尽早传播取消信号，避免 Close 阻塞于网络/DNS 超时
 	mu.Lock()
 	if instance == nil {
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString("sing-box 未运行")
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog("sing-box 未运行")
 		mu.Unlock()
 		return -1 // 未运行
 	}
@@ -660,11 +679,7 @@ func StopSingBox() int {
 	// 执行优雅关闭（不持锁，避免阻塞其它调用）
 	err := i.Close()
 	if err != nil {
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString(fmt.Sprintf("停止失败: %v", err))
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog(fmt.Sprintf("停止失败: %v", err))
 		return -2
 	}
 
@@ -682,11 +697,7 @@ func StopSingBox() int {
 	ctx, cancel = context.WithCancel(context.Background())
 	mu.Unlock()
 
-	if logCB != nil && runtime.GOOS != "android" {
-		msg := C.CString("sing-box 已停止")
-		C.callLog(logCB, msg)
-		C.free(unsafe.Pointer(msg))
-	}
+	emitLog("sing-box 已停止")
 	dbg("->StopSingBox leave success")
 
 	return 0
@@ -715,21 +726,13 @@ func TestConfig(configJSON *C.char) int {
 
 	if err := sjson.UnmarshalContext(ctxWithRegistry, []byte(configStr), &options); err != nil {
 		setLastError(fmt.Errorf("parse options: %w", err))
-		if logCB != nil && runtime.GOOS != "android" {
-			msg := C.CString(fmt.Sprintf("配置无效: %v", err))
-			C.callLog(logCB, msg)
-			C.free(unsafe.Pointer(msg))
-		}
+		emitLog(fmt.Sprintf("配置无效: %v", err))
 		return -1
 	}
 
 	// TODO: 可以添加更详细的配置验证
 
-	if logCB != nil && runtime.GOOS != "android" {
-		msg := C.CString("=配置验证通过")
-		C.callLog(logCB, msg)
-		C.free(unsafe.Pointer(msg))
-	}
+	emitLog("=配置验证通过")
 	return 0
 }
 
@@ -761,11 +764,7 @@ func Cleanup() {
 		_ = i.Close()
 	}
 
-	if logCB != nil && runtime.GOOS != "android" {
-		msg := C.CString("资源清理完成")
-		C.callLog(logCB, msg)
-		C.free(unsafe.Pointer(msg))
-	}
+	emitLog("资源清理完成")
 }
 
 //export SbGetLastError

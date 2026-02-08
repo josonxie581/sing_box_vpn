@@ -1,11 +1,14 @@
 // -*- coding: utf-8 -*-
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
+import 'package:path_provider/path_provider.dart';
 
 import 'providers/vpn_provider_v2.dart';
 import 'services/improved_traffic_stats_service.dart';
@@ -20,6 +23,39 @@ import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _CrashLogger.init();
+
+  FlutterError.onError = (details) {
+    _CrashLogger.log('flutter', details.exception, details.stack);
+    FlutterError.presentError(details);
+  };
+
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    _CrashLogger.log('platform', error, stack);
+    return false;
+  };
+
+  final errorPort = RawReceivePort((dynamic pair) {
+    try {
+      final list = pair as List;
+      final error = list[0];
+      final stack = list.length > 1 ? list[1] : null;
+      _CrashLogger.log('isolate', error, stack is StackTrace ? stack : null);
+    } catch (_) {}
+  });
+  Isolate.current.addErrorListener(errorPort.sendPort);
+
+  await runZonedGuarded(
+    () async {
+      await _bootstrap();
+    },
+    (error, stack) {
+      _CrashLogger.log('zone', error, stack);
+    },
+  );
+}
+
+Future<void> _bootstrap() async {
   // Android：在 runApp 之前尽早注册快捷方式处理器并通知原生就绪，避免事件丢失/延迟
   if (Platform.isAndroid) {
     try {
@@ -150,6 +186,34 @@ void main() async {
       // 不使用 await 以避免阻塞 UI 初始化
       // ignore: unawaited_futures
       ch.invokeMethod('nativeReady');
+    } catch (_) {}
+  }
+}
+
+class _CrashLogger {
+  static IOSink? _sink;
+
+  static Future<void> init() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final logDir = Directory('${dir.path}${Platform.pathSeparator}sing-box');
+      if (!await logDir.exists()) {
+        await logDir.create(recursive: true);
+      }
+      final file = File('${logDir.path}${Platform.pathSeparator}crash.log');
+      _sink = file.openWrite(mode: FileMode.append);
+      _sink?.writeln('=== Session ${DateTime.now().toIso8601String()} ===');
+    } catch (_) {}
+  }
+
+  static void log(String tag, Object error, StackTrace? stack) {
+    try {
+      final ts = DateTime.now().toIso8601String();
+      _sink?.writeln('[$ts] [$tag] $error');
+      if (stack != null) {
+        _sink?.writeln(stack.toString());
+      }
+      _sink?.flush();
     } catch (_) {}
   }
 }

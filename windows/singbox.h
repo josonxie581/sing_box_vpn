@@ -87,6 +87,8 @@ extern "C" {
 
 extern __declspec(dllexport) GoInt InitSingBox();
 extern __declspec(dllexport) GoInt StartSingBox(char* configJSON);
+extern __declspec(dllexport) char* SbDrainLogs();
+extern __declspec(dllexport) GoInt StartSingBoxWithTunFd(char* configJSON, int fd);
 extern __declspec(dllexport) GoInt StopSingBox();
 extern __declspec(dllexport) GoInt IsRunning();
 extern __declspec(dllexport) GoInt TestConfig(char* configJSON);
