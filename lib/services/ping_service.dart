@@ -30,7 +30,7 @@ class SingBoxApiConfig {
 class PingService {
   // 保留默认超时常量由各测试器内部定义与控制，此处不再冗余定义
 
-  // sing-box Clash API 配置
+  // sing-box Clash API 配置（保留占位，以便未来扩展；当前 Windows 口径未使用）
   static SingBoxApiConfig _apiConfig = const SingBoxApiConfig();
 
   /// 设置 sing-box API 配置
@@ -106,24 +106,28 @@ class PingService {
     VPNConfig? currentConfig,
   }) async {
     try {
-      print(
-        '[DEBUG] 开始测试节点延时: ${config.name} (${config.server}:${config.port})',
-      );
+      print('[DEBUG] Windows口径：统一使用“节点握手RTT”测延时 -> ${config.name}');
 
       if (isConnected) {
-        print('[DEBUG] 检测到VPN已连接状态');
-
-        // 检查是否是当前连接的服务器
-        if (currentConfig != null && currentConfig.server == config.server) {
-          print('[DEBUG] 测试当前连接的VPN服务器，使用特殊检测方法');
-          return await _testCurrentVPNServer(config);
-        } else {
-          print('[DEBUG] 测试其他VPN服务器，TCP连接可能被当前VPN路由影响');
-          return await _testOtherVPNServer(config);
-        }
+        // 已连接：为避免 VPN 路由干扰，使用“绕过”路径进行节点握手测试
+        final tester = NodeDelayTester(
+          timeout: 6000,
+          enableIpInfo: false,
+          latencyMode: LatencyTestMode.bypass,
+        );
+        final result = await tester.realTest(config);
+        if (result.isSuccess) return result.delay;
+        return -1;
       } else {
-        print('[DEBUG] 未连接VPN，使用标准TCP测试');
-        return await _testStandardTCP(config);
+        // 未连接：按你的要求，同样走“独立实例直连路由”的绕过路径，确保与 Windows 口径一致
+        final tester = NodeDelayTester(
+          timeout: 5000,
+          enableIpInfo: false,
+          latencyMode: LatencyTestMode.bypass,
+        );
+        final result = await tester.realTest(config);
+        if (result.isSuccess) return result.delay;
+        return -1;
       }
     } catch (e) {
       print('[DEBUG] 节点 ${config.name} 延时测试异常: $e');
@@ -131,92 +135,9 @@ class PingService {
     }
   }
 
-  /// 测试当前连接的VPN服务器
-  static Future<int> _testCurrentVPNServer(VPNConfig config) async {
-    // 对于当前连接的VPN服务器，使用sing-box创建独立实例进行真实延时测试
-    print('[DEBUG] 使用sing-box独立实例测试当前连接的VPN服务器');
+  // Windows 口径已统一在 pingConfig 内部通过 NodeDelayTester 实现
 
-    final tester = NodeDelayTester(
-      timeout: 8000, // 稍长的超时，因为要创建临时实例
-      enableIpInfo: false,
-      latencyMode: LatencyTestMode.systemOnly,
-    );
-
-    try {
-      // 使用realTest进行真实延时测试，绕过当前VPN路由
-      final result = await tester.realTest(config);
-
-      if (result.isSuccess) {
-        print('[DEBUG] sing-box真实延时测试成功: ${result.delay}ms');
-        return result.delay;
-      } else {
-        print('[DEBUG] sing-box真实延时测试失败: ${result.errorMessage}');
-        // 如果sing-box测试失败，回退到TCP测试但标记为不准确
-        return await _testStandardTCPWithWarning(config);
-      }
-    } catch (e) {
-      print('[DEBUG] sing-box测试异常: $e，回退到TCP测试');
-      return await _testStandardTCPWithWarning(config);
-    }
-  }
-
-  /// 带警告的标准TCP测试（用于当前连接的VPN服务器）
-  static Future<int> _testStandardTCPWithWarning(VPNConfig config) async {
-    final result = await _testStandardTCP(config);
-
-    if (result > 0 && result < 50) {
-      print('[DEBUG] 警告: 当前连接的VPN服务器延时过小(${result}ms)，可能不准确');
-      print('[DEBUG] 这是因为TCP连接被VPN本地网络栈处理，没有经过真实网络路径');
-      print('[DEBUG] 返回特殊状态(-2)表示当前连接的服务器');
-
-      // 返回-2表示这是当前连接的服务器，延时不准确
-      return -2;
-    }
-
-    return result;
-  }
-
-  /// 测试其他VPN服务器
-  static Future<int> _testOtherVPNServer(VPNConfig config) async {
-    print('[DEBUG] 测试非当前连接的VPN服务器');
-    // 已连接状态下，必须绕过当前VPN路由进行真实延时测试
-    final tester = NodeDelayTester(
-      timeout: 8000,
-      enableIpInfo: false,
-      latencyMode: LatencyTestMode.systemOnly,
-    );
-    try {
-      final result = await tester.realTest(config);
-      if (result.isSuccess) {
-        print('[DEBUG] 真实延时测试成功: ${result.delay}ms');
-        return result.delay;
-      }
-      print('[DEBUG] 真实延时测试失败: ${result.errorMessage}');
-      return -1;
-    } catch (e) {
-      print('[DEBUG] 真实延时测试异常: $e');
-      return -1;
-    }
-  }
-
-  /// 标准TCP测试
-  static Future<int> _testStandardTCP(VPNConfig config) async {
-    final tester = NodeDelayTester(
-      timeout: 5000,
-      enableIpInfo: false,
-      latencyMode: LatencyTestMode.systemOnly,
-    );
-
-    final result = await tester.quickTest(config);
-
-    if (result.isSuccess) {
-      print('[DEBUG] 节点 ${config.name} 延时测试成功: ${result.delay}ms');
-      return result.delay;
-    } else {
-      print('[DEBUG] 节点 ${config.name} 延时测试失败: ${result.errorMessage}');
-      return -1;
-    }
-  }
+  // 其余 Clash API 相关的私有方法已移除，以统一 Windows 口径
 
   /// 批量检测多个节点配置的延时
   ///

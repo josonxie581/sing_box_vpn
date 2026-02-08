@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'dart:io';
 import '../lib/services/qr_decoder.dart';
 import '../lib/services/simple_qr_functions.dart';
@@ -17,7 +19,7 @@ void main() async {
     print('❌ 未能从剪贴板读取文本');
   }
 
-  print('\n' + '='*50 + '\n');
+  print('\n' + '=' * 50 + '\n');
 
   // 测试2: 测试剪贴板图片读取
   print('测试2: 剪贴板图片二维码识别');
@@ -32,7 +34,7 @@ void main() async {
     print('❌ 未能从剪贴板图片识别二维码');
   }
 
-  print('\n' + '='*50 + '\n');
+  print('\n' + '=' * 50 + '\n');
 
   // 测试3: 测试文件二维码识别
   print('测试3: 文件二维码识别');
@@ -45,7 +47,9 @@ void main() async {
       final fileQrText = await QrDecoderService.decodeFromFile(filePath);
       if (fileQrText != null) {
         print('✅ 成功从文件识别二维码:');
-        print('内容: ${fileQrText.substring(0, 100.clamp(0, fileQrText.length))}...');
+        print(
+          '内容: ${fileQrText.substring(0, 100.clamp(0, fileQrText.length))}...',
+        );
       } else {
         print('❌ 未能从文件识别二维码');
       }

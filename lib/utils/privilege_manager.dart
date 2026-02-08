@@ -52,6 +52,10 @@ class PrivilegeManager {
   static PrivilegeManager? _instance;
 
   PrivilegeManager._() {
+    // 非 Windows 平台不加载任何系统 DLL，避免崩溃
+    if (!Platform.isWindows) {
+      return;
+    }
     try {
       _kernel32 = ffi.DynamicLibrary.open('kernel32.dll');
       _advapi32 = ffi.DynamicLibrary.open('advapi32.dll');
@@ -314,6 +318,10 @@ Start-Process -FilePath "$exePath" -Verb RunAs -WindowStyle Normal
   /// 检查 TUN 模式的可用性
   /// 返回状态信息
   TunAvailability checkTunAvailability() {
+    // Android 使用 VpnService，应用内可用
+    if (Platform.isAndroid) {
+      return TunAvailability.available;
+    }
     if (!Platform.isWindows) {
       return TunAvailability.notSupported;
     }
@@ -338,7 +346,6 @@ Start-Process -FilePath "$exePath" -Verb RunAs -WindowStyle Normal
 
     return TunAvailability.available;
   }
-
 }
 
 /// TUN 模式可用性状态

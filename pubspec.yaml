@@ -109,9 +109,9 @@ flutter:
   
   # 璧勬簮鏂囦欢
   assets:
-    - assets/
-    - assets/rulesets/geo/geosite/
+    - assets/app_icon.ico
     - assets/rulesets/geo/geoip/
+    - assets/rulesets/geo/geosite/
 
 # 鑷畾涔夋瀯寤鸿剼鏈?
 build_runner:

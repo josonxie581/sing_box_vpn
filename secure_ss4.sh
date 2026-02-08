@@ -179,8 +179,14 @@ EOF
 auto_enable_bbr() {
     echo -e "\n${blue}================== BBR优化 ==================${re}"
 
-    check_bbr_status
-    local bbr_status=$?
+    # 在 set -e 环境下，直接调用会因非0退出而终止脚本，
+    # 这里通过 if 包裹以安全获取返回码，不中断后续安装流程
+    local bbr_status
+    if check_bbr_status; then
+        bbr_status=0
+    else
+        bbr_status=$?
+    fi
 
     case $bbr_status in
         0)
@@ -201,6 +207,67 @@ auto_enable_bbr() {
     esac
 
     echo -e "${blue}============================================${re}\n"
+}
+
+# 系统级 TCP KeepAlive 配置（与是否支持 BBR 无关，始终可用）
+configure_tcp_keepalive() {
+    purple "⚙️ 配置系统级 TCP KeepAlive 参数..."
+    # 目标系统文件（优先）
+    local sys_ka_file="/etc/sysctl.d/99-sbvpn-keepalive.conf"
+    local local_ka_file="$WORKDIR/99-sbvpn-keepalive.conf"
+    local can_root=false
+    local can_sudo=false
+
+    # 判断权限
+    if [ "$(id -u 2>/dev/null || echo 1)" -eq 0 ]; then
+        can_root=true
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        can_sudo=true
+    fi
+
+    # 配置内容
+    local ka_content
+    ka_content=$(cat << 'EOF'
+# TCP KeepAlive 优化（由 secure_ss4.sh 自动生成）
+net.ipv4.tcp_keepalive_time = 120
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+
+# 适度的安全与健壮性（不依赖 BBR）
+net.ipv4.tcp_synack_retries = 3
+net.ipv4.tcp_syn_retries = 5
+EOF
+)
+
+    # 尝试写入系统路径
+    if [ "$can_root" = true ]; then
+        echo "$ka_content" > "$sys_ka_file" 2>/dev/null || true
+        if [ -f "$sys_ka_file" ]; then
+            # 应用配置
+            if sysctl --system >/dev/null 2>&1; then :; else sysctl -p "$sys_ka_file" >/dev/null 2>&1 || true; fi
+            green "✅ TCP KeepAlive 参数已配置（系统级）"
+            return 0
+        fi
+    elif [ "$can_sudo" = true ]; then
+        echo "$ka_content" | sudo tee "$sys_ka_file" >/dev/null 2>&1 || true
+        if sudo test -f "$sys_ka_file" 2>/dev/null; then
+            sudo sysctl --system >/dev/null 2>&1 || sudo sysctl -p "$sys_ka_file" >/dev/null 2>&1 || true
+            green "✅ TCP KeepAlive 参数已配置（系统级，sudo）"
+            return 0
+        fi
+    fi
+
+    # 无法写入系统路径，则降级写入到工作目录并提示
+    echo "$ka_content" > "$local_ka_file" 2>/dev/null || true
+    if [ -f "$local_ka_file" ]; then
+        yellow "⚠️ 无法写入 /etc/sysctl.d，已将配置保存到: $local_ka_file"
+        yellow "如需系统级生效，请手动执行（需root权限）："
+        echo "  1) sudo cp '$local_ka_file' '$sys_ka_file'"
+        echo "  2) sudo sysctl --system  或  sudo sysctl -p '$sys_ka_file'"
+        return 0
+    fi
+
+    yellow "⚠️ TCP KeepAlive 配置未能写入（权限不足），此步骤已跳过，不影响后续安装"
 }
 
 # 连接诊断功能
@@ -2538,6 +2605,9 @@ install_singbox() {
 
     # 自动启用BBR优化
     auto_enable_bbr
+
+    # 无论是否支持 BBR，都配置 TCP KeepAlive，增强连接保活
+    configure_tcp_keepalive
 
     # 检查端口
     check_port

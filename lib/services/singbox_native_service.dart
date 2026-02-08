@@ -5,6 +5,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'singbox_ffi.dart';
 import '../models/vpn_config.dart';
+import 'package:flutter/services.dart';
+import 'geosite_manager.dart';
+import '../models/proxy_mode.dart';
+import 'config_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dns_manager.dart';
+import '../services/connection_manager.dart';
 
 /// sing-box 原生服务管理类（使用 FFI）
 class SingBoxNativeService {
@@ -31,6 +38,305 @@ class SingBoxNativeService {
   Function(bool)? onStatusChanged;
   // 新增：用于传递更细粒度的连接状态文案（例如：已连接/连接正常/连接但异常/未连接）
   Function(String)? onStatusText;
+
+  // Android 平台通道
+  static const MethodChannel _androidCh = MethodChannel('singbox/native');
+
+  // 供 Android MainActivity 快捷方式触发
+  static void registerAndroidShortcutHandlers(SingBoxNativeService svc) {
+    if (!Platform.isAndroid) return;
+    _androidCh.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'shortcutVpnOn':
+          try {
+            // 优先走统一的 ConnectionManager 流程，保证 Clash API/统计 等一致
+            final vpn = await _pickLastOrCurrentVPNConfig();
+            if (vpn != null) {
+              final prefs = await SharedPreferences.getInstance();
+              final cm = ConnectionManager();
+              await cm.init();
+              // 应用偏好设置
+              final modeName =
+                  prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+              final mode = ProxyMode.values.firstWhere(
+                (m) => m.name == modeName,
+                orElse: () => ProxyMode.rule,
+              );
+              cm.setProxyMode(mode);
+              cm.setUseTun(prefs.getBool('use_tun') ?? Platform.isAndroid);
+              cm.setTunStrictRoute(
+                prefs.getBool('tun_strict_route') ??
+                    (prefs.getBool('dns_strict_route') ?? false),
+              );
+              cm.setLocalPort(
+                prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort,
+              );
+              cm.setClashApi(
+                prefs.getBool('enable_clash_api') ?? true,
+                prefs.getInt('clash_api_port') ?? 9090,
+                prefs.getString('clash_api_secret') ?? '',
+              );
+              final ok = await cm.connect(vpn);
+              if (!ok) {
+                svc.onLog?.call('快捷方式启动失败');
+              } else {
+                svc.onLog?.call('快捷方式已启动');
+              }
+            } else {
+              // 兜底：构建临时配置直接启动
+              final cfg = await _loadLastOrDefaultConfig();
+              if (cfg != null) {
+                final ok = await svc.start(cfg);
+                svc.onLog?.call(ok ? '快捷方式已启动(兜底)' : '快捷方式启动失败(兜底)');
+              }
+            }
+          } catch (_) {}
+          return;
+        case 'shortcutVpnOff':
+          try {
+            // 使用统一的断开流程，确保停止统计/清理代理等
+            final cm = ConnectionManager();
+            await cm.disconnect();
+            // 通知 Android 层断开完成，可以安全后台化了
+            if (Platform.isAndroid) {
+              try {
+                await _androidCh.invokeMethod('shortcutActionCompleted');
+              } catch (_) {}
+            }
+          } catch (_) {}
+          return;
+        case 'shortcutVpnToggle':
+          try {
+            final cm = ConnectionManager();
+            if (cm.isConnected) {
+              await cm.disconnect();
+              // 通知 Android 层操作完成
+              if (Platform.isAndroid) {
+                try {
+                  await _androidCh.invokeMethod('shortcutActionCompleted');
+                } catch (_) {}
+              }
+            } else {
+              final vpn = await _pickLastOrCurrentVPNConfig();
+              if (vpn != null) {
+                final prefs = await SharedPreferences.getInstance();
+                await cm.init();
+                final modeName =
+                    prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+                final mode = ProxyMode.values.firstWhere(
+                  (m) => m.name == modeName,
+                  orElse: () => ProxyMode.rule,
+                );
+                cm.setProxyMode(mode);
+                cm.setUseTun(prefs.getBool('use_tun') ?? Platform.isAndroid);
+                cm.setTunStrictRoute(
+                  prefs.getBool('tun_strict_route') ??
+                      (prefs.getBool('dns_strict_route') ?? false),
+                );
+                cm.setLocalPort(
+                  prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort,
+                );
+                cm.setClashApi(
+                  prefs.getBool('enable_clash_api') ?? true,
+                  prefs.getInt('clash_api_port') ?? 9090,
+                  prefs.getString('clash_api_secret') ?? '',
+                );
+                await cm.connect(vpn);
+                // 通知 Android 层操作完成
+                if (Platform.isAndroid) {
+                  try {
+                    await _androidCh.invokeMethod('shortcutActionCompleted');
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+          return;
+      }
+    });
+
+    // 通知原生：Dart 已注册快捷方式处理器，可安全分发缓存的动作
+    // 忽略异常（通道可能尚未就绪）
+    Future(() async {
+      try {
+        await _androidCh.invokeMethod('shortcutHandlerReady');
+      } catch (_) {}
+    });
+  }
+
+  /// 确保为配置中引用到的 rule_set 标签注册 provider（本地 .srs 文件）
+  Future<void> _ensureRuleSetProviders(Map<String, dynamic> config) async {
+    try {
+      final route = (config['route'] as Map?)?.cast<String, dynamic>() ?? {};
+      final dns = (config['dns'] as Map?)?.cast<String, dynamic>() ?? {};
+
+      // 收集在 route.rules 与 dns.rules 中被引用到的 rule_set 标签
+      Set<String> referencedTags = {};
+
+      void collect(dynamic rulesAny) {
+        final rules = (rulesAny as List?)?.cast<Map>() ?? const [];
+        for (final r in rules) {
+          final rs = (r['rule_set'] as List?)?.cast<dynamic>() ?? const [];
+          for (final x in rs) {
+            final tag = x?.toString().trim();
+            if (tag != null && tag.isNotEmpty) referencedTags.add(tag);
+          }
+        }
+      }
+
+      collect(route['rules']);
+      collect(dns['rules']);
+
+      if (referencedTags.isEmpty) return; // 无引用则无需处理
+
+      // 当前已注册的 providers（route.rule_set）
+      final providers = <Map<String, dynamic>>[
+        ...(((route['rule_set'] as List?)?.cast<Map>()) ?? const []).map(
+          (e) => e.cast<String, dynamic>(),
+        ),
+      ];
+
+      Set<String> existingTags = providers
+          .map((e) => (e['tag'] ?? '').toString())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+
+      final needTags = referencedTags.difference(existingTags);
+      if (needTags.isEmpty) return;
+
+      final mgr = GeositeManager(); // typedef RuleSetsManager
+
+      Future<Map<String, dynamic>?> buildProvider(String tag) async {
+        try {
+          // 推断类别与资产路径
+          final isGeoip = tag.startsWith('geoip-');
+          final pathStr = await mgr.getRulesetPath(tag);
+          final file = File(pathStr);
+          if (!file.existsSync()) {
+            // 尝试从 assets 复制一份（_ensureBundledBaseline 会在 getDownloadedRulesets 调用时兜底）
+            // 这里直接尝试按约定路径加载并写出
+            try {
+              final assetPath = isGeoip
+                  ? 'assets/rulesets/geo/geoip/$tag.srs'
+                  : 'assets/rulesets/geo/geosite/$tag.srs';
+              final data = await rootBundle.load(assetPath);
+              await file.create(recursive: true);
+              await file.writeAsBytes(
+                data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+                flush: true,
+              );
+              onLog?.call('已从资产导入规则集: $tag');
+            } catch (_) {
+              // 资产内可能没有该文件，忽略
+            }
+          }
+
+          if (file.existsSync()) {
+            return {
+              'tag': tag,
+              'type': 'local',
+              'format': 'binary',
+              'path': file.path,
+            };
+          } else {
+            onLog?.call('缺少规则集文件（跳过注册）: $tag');
+            return null;
+          }
+        } catch (e) {
+          onLog?.call('规则集注册失败 $tag: $e');
+          return null;
+        }
+      }
+
+      // 构建缺失的 provider 项
+      final additions = <Map<String, dynamic>>[];
+      for (final tag in needTags) {
+        final p = await buildProvider(tag);
+        if (p != null) additions.add(p);
+      }
+
+      if (additions.isEmpty) return;
+
+      // 写回到 config.route.rule_set
+      final newProviders = [...providers, ...additions];
+      config['route'] = {...route, 'rule_set': newProviders};
+
+      onLog?.call('已注册 ${additions.length} 个规则集提供者');
+    } catch (e) {
+      // 非致命，启动可继续
+      onLog?.call('自动注入规则集提供者时出错：$e');
+    }
+  }
+
+  // 简化的最近配置读取（占位实现）：返回 null 则忽略
+  static Future<Map<String, dynamic>?> _loadLastOrDefaultConfig() async {
+    try {
+      final cfgMgr = ConfigManager();
+      // 若尚未加载，先加载配置
+      if (cfgMgr.configs.isEmpty) {
+        await cfgMgr.loadConfigs();
+      }
+      // 选择配置：优先当前配置，其次第一个
+      final vpn =
+          cfgMgr.currentConfig ??
+          (cfgMgr.configs.isNotEmpty ? cfgMgr.configs.first : null);
+      if (vpn == null) {
+        return null; // 无可用节点
+      }
+
+      // 读取用户偏好，尽量与应用内连接路径保持一致
+      final prefs = await SharedPreferences.getInstance();
+      // 代理模式（缺省为 rule）
+      final modeName = prefs.getString('proxy_mode') ?? ProxyMode.rule.name;
+      final mode = ProxyMode.values.firstWhere(
+        (m) => m.name == modeName,
+        orElse: () => ProxyMode.rule,
+      );
+      // 是否使用 TUN（Android 默认 true）
+      final useTun = prefs.getBool('use_tun') ?? Platform.isAndroid;
+      // DNS / 路由相关
+      final strictRoute =
+          prefs.getBool('dns_strict_route') ?? false; // 与 DnsManager 保持一致
+      final enableIpv6 = prefs.getBool('dns_enable_ipv6') ?? false;
+      final localPort =
+          prefs.getInt('dns_local_port') ?? DnsManager.defaultLocalPort;
+      // Clash API 设置（默认启用，端口 9090）
+      final enableClashApi = prefs.getBool('enable_clash_api') ?? true;
+      final clashApiPort = prefs.getInt('clash_api_port') ?? 9090;
+      final clashApiSecret = prefs.getString('clash_api_secret') ?? '';
+
+      // 生成完整 sing-box 配置
+      final config = await vpn.toSingBoxConfig(
+        mode: mode,
+        localPort: localPort,
+        useTun: useTun,
+        tunStrictRoute: strictRoute,
+        preferredTunStack: null,
+        enableClashApi: enableClashApi,
+        clashApiPort: clashApiPort,
+        clashApiSecret: clashApiSecret,
+        tunMtu: 1500,
+        enableIpv6: enableIpv6,
+      );
+      return config;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 选择当前或第一个可用的 VPNConfig（供 ConnectionManager 使用）
+  static Future<VPNConfig?> _pickLastOrCurrentVPNConfig() async {
+    try {
+      final cfgMgr = ConfigManager();
+      if (cfgMgr.configs.isEmpty) {
+        await cfgMgr.loadConfigs();
+      }
+      return cfgMgr.currentConfig ??
+          (cfgMgr.configs.isNotEmpty ? cfgMgr.configs.first : null);
+    } catch (_) {
+      return null;
+    }
+  }
 
   // 已存在 isRunning getter，避免重复定义
 
@@ -146,6 +452,13 @@ class SingBoxNativeService {
       }
     }
 
+    // 在启动前，确保为 DNS/Route 中引用到的 rule_set 标签注入 providers（本地 .srs 文件路径）
+    try {
+      await _ensureRuleSetProviders(config);
+    } catch (e) {
+      onLog?.call('准备规则集提供者失败：$e');
+    }
+
     _ffi ??= SingBoxFFI.instance;
     // 若存在正在停止流程，先等待其完成，避免与新启动竞态
     final existingStop = _stopFuture;
@@ -244,8 +557,64 @@ class SingBoxNativeService {
       // 将配置转换为 JSON
       final configJson = jsonEncode(config);
 
+      // Android: 若启用 TUN，则先准备 VPN 与 TUN FD
+      int? tunFd;
+      if (Platform.isAndroid) {
+        try {
+          final prepared =
+              await _androidCh.invokeMethod<bool>('vpnPrepare') ?? false;
+          if (!prepared) {
+            onLog?.call('请在系统弹窗中允许 VPN 权限后重试');
+            return false;
+          }
+          final bound = await _androidCh.invokeMethod<bool>('vpnBind') ?? false;
+          if (!bound) {
+            onLog?.call('绑定 VpnService 失败');
+            return false;
+          }
+          // 等待绑定完成，最多等待 1 秒
+          for (var i = 0; i < 10; i++) {
+            final isBound =
+                await _androidCh.invokeMethod<bool>('vpnIsBound') ?? false;
+            if (isBound) break;
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+          // 请求打开 TUN
+          tunFd = await _androidCh.invokeMethod<int>('vpnOpenTunAndGetFd', {
+            'mtu': 1500,
+            'ipv4Cidr': '10.225.0.2/30',
+            'routeCidr': '0.0.0.0/0',
+            'session': 'Sing-Box VPN',
+          });
+          // -2: 服务未绑定好，短暂重试一次
+          if (tunFd == -2) {
+            await Future.delayed(const Duration(milliseconds: 150));
+            tunFd = await _androidCh.invokeMethod<int>('vpnOpenTunAndGetFd', {
+              'mtu': 1500,
+              'ipv4Cidr': '10.225.0.2/30',
+              'routeCidr': '0.0.0.0/0',
+              'session': 'Sing-Box VPN',
+            });
+          }
+          if (tunFd == null || tunFd < 0) {
+            onLog?.call('创建 TUN 失败 (fd=${tunFd ?? -999})');
+            try {
+              await _androidCh.invokeMethod('vpnCloseTun');
+            } catch (_) {}
+            await _androidCh.invokeMethod('vpnUnbind');
+            return false;
+          }
+        } catch (e) {
+          onLog?.call('Android TUN 准备异常: $e');
+          return false;
+        }
+      }
+
       // 直接在主线程启动服务，避免Isolate导致DLL重复加载
       Future<int> _startOnce(String json, {Duration? timeout}) async {
+        if (Platform.isAndroid && tunFd != null) {
+          return _ffi!.startWithTunFd(json, tunFd);
+        }
         return _ffi!.start(json);
       }
 
@@ -438,6 +807,12 @@ class SingBoxNativeService {
         await _postStartProbe(config, runSeq);
       } catch (_) {
         // 忽略探测异常
+        if (Platform.isAndroid) {
+          try {
+            await _androidCh.invokeMethod('vpnCloseTun');
+            await _androidCh.invokeMethod('vpnUnbind');
+          } catch (_) {}
+        }
       } finally {
         // 无需复位 _lastProbeScheduledSeq，这个值用于避免重复调度；
         // 当下一次 start 增加 runSeq 时会自然失效。
@@ -481,8 +856,11 @@ class SingBoxNativeService {
           : int.tryParse(ob['server_port']?.toString() ?? '');
 
       if (host != null && host.isNotEmpty && port != null && port > 0) {
-        // TUIC/Hysteria 基于 QUIC/UDP，跳过 TCP 探测；其它尝试 TCP 端口与 TLS 最小握手
-        if (obType != 'hysteria' && obType != 'tuic') {
+        // TUIC/Hysteria/Hysteria2 基于 QUIC/UDP，跳过 TCP 探测；其它尝试 TCP 端口与 TLS 最小握手
+        if (obType != 'hysteria' &&
+            obType != 'hysteria2' &&
+            obType != 'tuic' &&
+            obType != 'hy2') {
           try {
             final socket = await Socket.connect(
               host,
@@ -529,10 +907,13 @@ class SingBoxNativeService {
         }
       }
 
-      // TUIC/Hysteria：尝试 QUIC 握手
+      // TUIC/Hysteria/Hysteria2：尝试 QUIC 握手
       if (host != null &&
           port != null &&
-          (obType == 'tuic' || obType == 'hysteria')) {
+          (obType == 'tuic' ||
+              obType == 'hysteria' ||
+              obType == 'hysteria2' ||
+              obType == 'hy2')) {
         try {
           final tlsCfg = (ob['tls'] as Map?)?.cast<String, dynamic>();
           final sni = (tlsCfg?['server_name']?.toString() ?? host);
@@ -541,6 +922,11 @@ class SingBoxNativeService {
           final rawAlpn = tlsCfg?['alpn'];
           if (rawAlpn is List) {
             alpn = rawAlpn.whereType<String>().toList();
+          }
+          // 针对 Hysteria2/Hy2，若未设置 ALPN，补充常见标识以提高握手成功率
+          if ((alpn == null || alpn.isEmpty) &&
+              (obType == 'hysteria2' || obType == 'hy2')) {
+            alpn = ['hysteria2'];
           }
           final ok = _ffi!.probeQUIC(
             host: host,
@@ -563,13 +949,9 @@ class SingBoxNativeService {
         // 2) 通过 TUN 的 HTTP 出网探测（2~3s 超时）
         httpOk = await _probeHttpConnectivity();
         if (!httpOk) {
-          onLog?.call('检测到远端不可用或 VPS 无服务（本地仅完成启动）。');
-          // 状态提示并自动停止
-          onStatusText?.call('连接但异常');
-          // 再次确认此次探测仍属当前运行批次
-          if (isRunning && runSeq == _runSeq) {
-            await stop();
-          }
+          // 不再自动停止，避免误杀；仅给出温和提示
+          onLog?.call('联网探测暂未通过（可能被劫持/墙内拦截/运营商劫持），将继续保持连接。');
+          onStatusText?.call('已连接（待验证）');
         } else {
           onLog?.call('快速联网探测通过。');
           onStatusText?.call('连接正常');
@@ -586,24 +968,35 @@ class SingBoxNativeService {
   Future<bool> _probeHttpConnectivity() async {
     try {
       final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 2);
-      // 使用微软连接测试，HTTP 明文，避免证书问题
-      final uri = Uri.parse('http://www.msftconnecttest.com/connecttest.txt');
-      final req = await client.getUrl(uri).timeout(const Duration(seconds: 2));
-      req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-probe');
-      final resp = await req.close().timeout(const Duration(seconds: 2));
-      if (resp.statusCode == 200) {
-        // 内容很小，最多读 256 字节检查关键字
-        final bytes = await resp.fold<List<int>>(<int>[], (acc, chunk) {
-          if (acc.length < 256) acc.addAll(chunk);
-          return acc;
-        });
-        final body = utf8.decode(bytes, allowMalformed: true);
-        if (body.contains('Microsoft Connect Test')) {
-          return true;
+      client.connectionTimeout = const Duration(seconds: 3);
+      // 多源明文 HTTP 探测，降低单点被拦截带来的误报
+      final candidates = <Uri>[
+        // 谷歌连通性检测（204）
+        Uri.parse('http://connectivitycheck.gstatic.com/generate_204'),
+        // 微软连通性检测（200 + 文本）
+        Uri.parse('http://www.msftconnecttest.com/connecttest.txt'),
+      ];
+
+      for (final uri in candidates) {
+        try {
+          final req = await client
+              .getUrl(uri)
+              .timeout(const Duration(seconds: 3));
+          req.headers.set(HttpHeaders.userAgentHeader, 'sing-box-vpn-probe');
+          final resp = await req.close().timeout(const Duration(seconds: 3));
+          // 放宽判定：2xx 或 3xx 视为可联网
+          if (resp.statusCode >= 200 && resp.statusCode < 400) {
+            // 不强制读取全量内容，最多读取少量确认返回
+            int total = 0;
+            await for (final chunk in resp) {
+              total += chunk.length;
+              if (total > 256) break;
+            }
+            return true;
+          }
+        } catch (_) {
+          // 忽略单个源失败，继续尝试下一个
         }
-        // 某些网络会返回其它内容，这里放宽：只要 200 就算可联网
-        return true;
       }
       return false;
     } catch (_) {
@@ -686,6 +1079,12 @@ class SingBoxNativeService {
       onLog?.call('停止异常: $e');
       ok = false;
     } finally {
+      if (Platform.isAndroid) {
+        try {
+          await _androidCh.invokeMethod('vpnCloseTun');
+          await _androidCh.invokeMethod('vpnUnbind');
+        } catch (_) {}
+      }
       final toComplete = completer;
       // 确保 _stopFuture 清理
       _stopFuture = null;

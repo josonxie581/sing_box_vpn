@@ -210,24 +210,36 @@ class ConnectionManager {
 
       // 停止流量统计
       _trafficService.stop();
+      print("[DEBUG] 流量统计已停止");
 
-      // 停止服务
-      final success = await _singBoxService.stop();
+      // 停止服务（添加超时保护）
+      final success = await _singBoxService.stop().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print("[DEBUG] stop() 超时，强制返回 false");
+          return false;
+        },
+      );
+      print("[DEBUG] stop() 返回: $success");
 
       if (success) {
         // 关闭系统代理
         if (_proxyManager.isSupported) {
+          print("[DEBUG] 正在关闭系统代理");
           await _proxyManager.disableProxy();
         }
 
         // 注意：_currentConfig 的清空现在在 _updateStatus 中统一处理
         _updateStatus(ConnectionStatus.disconnected, '未连接');
+        print("[DEBUG] 断开成功");
         return true;
       } else {
+        print("[DEBUG] 断开失败：stop() 返回 false");
         _updateStatus(ConnectionStatus.error, '断开失败');
         return false;
       }
     } catch (e) {
+      print("[DEBUG] 断开异常: $e");
       _addLog('断开失败: $e');
       _updateStatus(ConnectionStatus.error, '断开失败');
       return false;

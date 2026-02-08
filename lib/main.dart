@@ -10,20 +10,37 @@ import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 import 'providers/vpn_provider_v2.dart';
 import 'services/improved_traffic_stats_service.dart';
 import 'services/singbox_ffi.dart';
+import 'services/singbox_native_service.dart';
 import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
 import 'utils/privilege_manager.dart';
 import 'utils/simple_single_instance.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await acrylic.Window.initialize();
-  // 设置窗口效果为禁用
-  await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
-
-  await windowManager.ensureInitialized();
+  // Android：在 runApp 之前尽早注册快捷方式处理器并通知原生就绪，避免事件丢失/延迟
+  if (Platform.isAndroid) {
+    try {
+      // 提前注册 Dart 侧处理器（无需等 Provider 初始化）
+      SingBoxNativeService.registerAndroidShortcutHandlers(
+        SingBoxNativeService(),
+      );
+      // 通知原生 Dart 已就绪（提前发一次，Provider 初始化后仍会生效）
+      const channelName = 'singbox/native';
+      final ch = const MethodChannel(channelName);
+      // ignore: unawaited_futures
+      ch.invokeMethod('nativeReady');
+    } catch (_) {}
+  }
+  // 仅桌面平台才初始化窗口/毛玻璃等能力
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await acrylic.Window.initialize();
+    // 设置窗口效果为禁用
+    await acrylic.Window.setEffect(effect: acrylic.WindowEffect.disabled);
+    await windowManager.ensureInitialized();
+  }
 
   // 提前预加载 sing-box FFI 库（异步执行，不阻塞启动流程）
   if (Platform.isWindows) {
@@ -63,55 +80,59 @@ void main() async {
     }
   }
 
-  // 提权逻辑完成后再进行单实例检查，避免重启新进程与旧实例竞争
-  bool isUniqueInstance = true;
-  try {
-    print('开始单实例检查...');
-    isUniqueInstance = await SimpleSingleInstance.isUniqueInstance().timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        print('单实例检查超时，允许启动');
-        return true;
-      },
-    );
-    print('单实例检查结果: $isUniqueInstance');
-  } catch (e) {
-    print('单实例检查异常，允许启动: $e');
-    isUniqueInstance = true;
-  }
-
-  if (!isUniqueInstance) {
-    print('应用已在运行，退出当前实例');
-    exit(0);
-  }
-
-  const windowOptions = WindowOptions(
-    size: Size(450, 680),
-    minimumSize: Size(450, 680),
-    maximumSize: Size(450, 12000),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
-    title: 'Gsou',
-  );
-
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-    await windowManager.setResizable(true);
-    await windowManager.setMaximizable(false);
-    await windowManager.setMinimumSize(const Size(450, 680));
-    await windowManager.setMaximumSize(const Size(450, 12000));
-    await windowManager.setPreventClose(true); // 防止直接关闭
-
-    // 设置窗口图标
+  // 仅桌面平台执行单实例检查；移动端允许系统多实例调度（避免快捷方式前台化被误判退出）
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    bool isUniqueInstance = true;
     try {
-      await windowManager.setIcon('assets/app_icon.ico');
+      print('开始单实例检查...');
+      isUniqueInstance = await SimpleSingleInstance.isUniqueInstance().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print('单实例检查超时，允许启动');
+          return true;
+        },
+      );
+      print('单实例检查结果: $isUniqueInstance');
     } catch (e) {
-      print('设置窗口图标失败: $e');
+      print('单实例检查异常，允许启动: $e');
+      isUniqueInstance = true;
     }
-  });
+
+    if (!isUniqueInstance) {
+      print('应用已在运行，退出当前实例');
+      exit(0);
+    }
+  }
+
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    const windowOptions = WindowOptions(
+      size: Size(450, 680),
+      minimumSize: Size(450, 680),
+      maximumSize: Size(450, 12000),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+      title: 'Gsou',
+    );
+
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+      await windowManager.setResizable(true);
+      await windowManager.setMaximizable(false);
+      await windowManager.setMinimumSize(const Size(450, 680));
+      await windowManager.setMaximumSize(const Size(450, 12000));
+      await windowManager.setPreventClose(true); // 防止直接关闭
+
+      // 设置窗口图标
+      try {
+        await windowManager.setIcon('assets/app_icon.ico');
+      } catch (e) {
+        print('设置窗口图标失败: $e');
+      }
+    });
+  }
 
   runApp(
     MultiProvider(
@@ -119,6 +140,18 @@ void main() async {
       child: const MyApp(),
     ),
   );
+
+  // Android：应用启动后尽早通知原生侧 Dart 已就绪，避免快捷方式事件丢失
+  if (Platform.isAndroid) {
+    try {
+      const channelName = 'singbox/native';
+      final ch = const MethodChannel(channelName);
+      // 忽略返回值/错误，尽量早通知
+      // 不使用 await 以避免阻塞 UI 初始化
+      // ignore: unawaited_futures
+      ch.invokeMethod('nativeReady');
+    } catch (_) {}
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -130,8 +163,12 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> with WindowListener {
   final SystemTray _systemTray = SystemTray();
+  // 仅桌面平台使用 AppWindow，Android/iOS 置空避免插件初始化
   // ignore: unused_field
-  final AppWindow _appWindow = AppWindow();
+  final AppWindow? _appWindow =
+      (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+      ? AppWindow()
+      : null;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   Timer? _taskbarTimer;
@@ -145,19 +182,23 @@ class _MyAppState extends State<MyApp> with WindowListener {
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
-    _initSystemTray();
-    _taskbarTimer?.cancel();
-    _taskbarTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (t) => _updateTaskbarAndTray(),
-    );
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+      _initSystemTray();
+      _taskbarTimer?.cancel();
+      _taskbarTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (t) => _updateTaskbarAndTray(),
+      );
+    }
   }
 
   @override
   void dispose() {
     _taskbarTimer?.cancel();
-    windowManager.removeListener(this);
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
     _cleanupAndExit();
     super.dispose();
   }
@@ -198,6 +239,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _initSystemTray() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return; // Android/iOS 不使用系统托盘
+    }
     final String path = _resolveTrayIconPath();
 
     await _systemTray.initSystemTray(
@@ -260,6 +304,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _enterOverlayMode() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (_isEnteringOverlay || _isMinimized) return;
     _isEnteringOverlay = true;
 
@@ -336,6 +383,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   Future<void> _restoreNormalWindow() async {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (!_isMinimized || _isRestoringWindow) return;
     _isRestoringWindow = true;
 
@@ -440,6 +490,9 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   @override
   void onWindowEvent(String eventName) {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (eventName == 'minimize') {
       // 拦截最小化事件，改为进入悬浮窗模式
       if (!_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
@@ -458,14 +511,19 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   @override
   void onWindowClose() {
-    // 拦截关闭事件，改为隐藏到托盘
-    windowManager.hide();
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // 拦截关闭事件，改为隐藏到托盘
+      windowManager.hide();
+    }
   }
 
   // onWindowDestroy 在当前 window_manager 版本可能不存在，清理已在 dispose 中进行
 
   @override
   void onWindowResize() {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     if (_isMinimized) return;
     // 保持窗口宽度为400
     windowManager.getSize().then((size) {
