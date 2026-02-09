@@ -403,9 +403,14 @@ class NodeDelayTester {
       final host = targetIPv4?.address ?? node.server;
 
       // 对于 UDP-only 协议（hysteria2/hy2/tuic），严格按照 TCP-only：
-      // 直接走标准 TCP 连接测试（_tcpProbePort 会返回 443），不进行 QUIC/ICMP 回退
+      // 优先 QUIC/ICMP 探测，失败后再回退到 TCP 连接测试
       if (_isUdpOnlyNode(node)) {
-        print('[快速测试][UDP-only] TCP-only 策略，端口候选 [443,80,22]，取最小 RTT');
+        final quic = await _tryQuicHandshake(node, timeoutMs: 1200);
+        if (quic != null) return quic;
+        final icmp = await _icmpFallbackNode(node, timeoutMs: 1200);
+        if (icmp != null) return icmp;
+
+        print('[快速测试][UDP-only] QUIC/ICMP 失败，回退 TCP 端口候选 [443,80,22]');
         final candidates = <int>[443, 80, 22];
         int? best;
         int usedPort = 443;
@@ -650,6 +655,15 @@ class NodeDelayTester {
   Future<NodeDelayResult> _bypassTestWithRouteRule(VPNConfig node) async {
     try {
       print('[独立实例延时测试] 开始测试: ${node.name} (${node.server}:${node.port})');
+
+      // UDP-only 节点优先 QUIC/ICMP 探测，避免 TCP 端口被丢弃导致超高 RTT
+      if (_isUdpOnlyNode(node)) {
+        final quic = await _tryQuicHandshake(node, timeoutMs: 1500);
+        if (quic != null) return quic;
+        final icmp = await _icmpFallbackNode(node, timeoutMs: 1500);
+        if (icmp != null) return icmp;
+        print('[独立实例延时测试] UDP-only QUIC/ICMP 失败，回退 TCP 绕过路径');
+      }
 
       // 你的需求：无论协议，绕过路径优先走 TCP（latency-test-in / 源绑定 / 动态直连）
 
@@ -1536,11 +1550,13 @@ class NodeDelayTester {
       throw StateError('未找到可用的物理网卡 IPv4 地址');
     }
 
+    // DNS 解析必须在计时之前完成，否则 DNS 超时会被误计入延迟
+    final candidates = <int>[_tcpProbePort(node), 80, 22];
+    final targetIPv4 = await _resolveIPv4ForTest(node);
+    final host = targetIPv4?.address ?? node.server;
+
     final sw = Stopwatch()..start();
     try {
-      final candidates = <int>[_tcpProbePort(node), 80, 22];
-      final targetIPv4 = await _resolveIPv4ForTest(node);
-      final host = targetIPv4?.address ?? node.server;
       int? best;
       int usedPort = candidates.first;
       for (final p in candidates) {
@@ -1661,12 +1677,14 @@ class NodeDelayTester {
     bool isVpnBypass = true,
     int? overridePort,
   }) async {
+    // DNS 解析必须在计时之前完成，否则 DNS 超时会被误计入延迟
+    final port = overridePort ?? _tcpProbePort(node);
+    final targetIPv4 = await _resolveIPv4ForTest(node);
+    final host = targetIPv4?.address ?? node.server;
+
     final stopwatch = Stopwatch()..start();
 
     try {
-      final port = overridePort ?? _tcpProbePort(node);
-      final targetIPv4 = await _resolveIPv4ForTest(node);
-      final host = targetIPv4?.address ?? node.server;
       final socket = await Socket.connect(
         host,
         port,
@@ -1721,7 +1739,7 @@ class NodeDelayTester {
           nodeId: node.id,
           nodeName: node.name,
           nodeServer: node.server,
-          nodePort: overridePort ?? _tcpProbePort(node),
+          nodePort: port,
           nodeType: node.type,
           delay: ms,
           isSuccess: true,
@@ -1733,8 +1751,6 @@ class NodeDelayTester {
       // 针对 UDP-only 节点的超时等情况，尝试对 443/80/22 端口做一次兜底测量
       final isUdp = _isUdpOnlyNode(node);
       if (overridePort == null && isUdp) {
-        final targetIPv4 = await _resolveIPv4ForTest(node);
-        final host = targetIPv4?.address ?? node.server;
         int? best;
         int usedPort = 443;
         for (final p in [443, 80, 22]) {

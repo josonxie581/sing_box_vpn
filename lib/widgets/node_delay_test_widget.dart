@@ -40,7 +40,7 @@ class _NodeDelayTestWidgetState extends State<NodeDelayTestWidget> {
     _tester = NodeDelayTester(
       timeout: 8000,
       enableIpInfo: false,
-      latencyMode: LatencyTestMode.systemOnly,
+      latencyMode: LatencyTestMode.bypass,
     );
 
     try {
@@ -67,7 +67,7 @@ class _NodeDelayTestWidgetState extends State<NodeDelayTestWidget> {
 
     _tester = NodeDelayTester(
       timeout: 3000,
-      latencyMode: LatencyTestMode.systemOnly,
+      latencyMode: LatencyTestMode.bypass,
     );
 
     try {
@@ -268,7 +268,7 @@ class _BatchDelayTestDialogState extends State<BatchDelayTestDialog> {
       timeout: _useQuickTest ? 3000 : 5000,
       maxConcurrency: 3,
       enableIpInfo: !_useQuickTest,
-      latencyMode: LatencyTestMode.systemOnly,
+      latencyMode: LatencyTestMode.bypass,
       // 不启用逐项实时结果，待全部完成后统一显示
       onProgress: (completed, total) {
         setState(() {

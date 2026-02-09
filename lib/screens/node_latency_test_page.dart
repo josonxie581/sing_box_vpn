@@ -90,7 +90,7 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
       timeout: _timeout,
       maxConcurrency: _maxConcurrency,
       enableIpInfo: _enableIpInfo,
-      latencyMode: LatencyTestMode.systemOnly,
+      latencyMode: LatencyTestMode.bypass,
       onProgress: (completed, total) {
         setState(() {
           _completedTests = completed;
@@ -141,7 +141,7 @@ class _NodeLatencyTestPageState extends State<NodeLatencyTestPage> {
     _delayTester = NodeDelayTester(
       timeout: _timeout,
       enableIpInfo: _enableIpInfo,
-      latencyMode: LatencyTestMode.systemOnly,
+      latencyMode: LatencyTestMode.bypass,
     );
 
     try {

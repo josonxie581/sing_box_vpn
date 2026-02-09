@@ -106,29 +106,18 @@ class PingService {
     VPNConfig? currentConfig,
   }) async {
     try {
-      print('[DEBUG] Windows口径：统一使用“节点握手RTT”测延时 -> ${config.name}');
+      print('[DEBUG] Windows口径：统一使用"节点握手RTT"测延时 -> ${config.name}');
 
-      if (isConnected) {
-        // 已连接：为避免 VPN 路由干扰，使用“绕过”路径进行节点握手测试
-        final tester = NodeDelayTester(
-          timeout: 6000,
-          enableIpInfo: false,
-          latencyMode: LatencyTestMode.bypass,
-        );
-        final result = await tester.realTest(config);
-        if (result.isSuccess) return result.delay;
-        return -1;
-      } else {
-        // 未连接：按你的要求，同样走“独立实例直连路由”的绕过路径，确保与 Windows 口径一致
-        final tester = NodeDelayTester(
-          timeout: 5000,
-          enableIpInfo: false,
-          latencyMode: LatencyTestMode.bypass,
-        );
-        final result = await tester.realTest(config);
-        if (result.isSuccess) return result.delay;
-        return -1;
-      }
+      // 无论是否连接 VPN，统一走系统路由表直接 TCP 连接测延时
+      // 这是最准确的方式：测量的是系统到目标服务器的真实 TCP RTT
+      final tester = NodeDelayTester(
+        timeout: isConnected ? 6000 : 5000,
+        enableIpInfo: false,
+        latencyMode: LatencyTestMode.bypass,
+      );
+      final result = await tester.realTest(config);
+      if (result.isSuccess) return result.delay;
+      return -1;
     } catch (e) {
       print('[DEBUG] 节点 ${config.name} 延时测试异常: $e');
       return -1;
