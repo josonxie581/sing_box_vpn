@@ -780,6 +780,22 @@ class DnsManager {
     }
 
     if (enableFakeIp) {
+      // sing-box 要求 fakeip.enabled 必须配合 address:"fakeip" 的 DNS 服务器使用
+      servers.add({'tag': 'fakeip', 'address': 'fakeip'});
+
+      // 规则模式 + DNS 分流：将境外域名 DNS 查询路由到 fakeip 服务器，
+      // 返回虚拟 IP 让代理出站负责真实解析；
+      // 国内域名仍使用直连 DNS 获取真实 IP，确保国内网站可以正常直连访问
+      if (preferRuleRouting && enableRoutingNow && !forceProxyDns) {
+        for (int i = 0; i < rules.length; i++) {
+          final ruleSet = rules[i]['rule_set'];
+          if (ruleSet is List && ruleSet.contains('geosite-geolocation-!cn')) {
+            rules[i] = {...rules[i], 'server': 'fakeip'};
+            break;
+          }
+        }
+      }
+
       result['fakeip'] = {
         'enabled': true,
         'inet4_range': '198.18.0.0/15',

@@ -436,11 +436,9 @@ class RulesetManager {
           "auto_route": true,
           "strict_route": tunStrictRoute,
 
-          // 保守的嗅探配置
+          // 嗅探配置：提取 TLS SNI / HTTP Host 用于域名路由匹配
           "sniff": true,
-
-          // 添加稳定性配置
-          "domain_strategy": "prefer_ipv4",
+          "sniff_override_destination": false,
           // 默认 system；Windows 下为 Wintun
           "stack": Platform.isWindows ? 'system' : 'system',
 

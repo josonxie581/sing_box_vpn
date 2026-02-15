@@ -174,6 +174,11 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
 
                 const SizedBox(height: 12),
 
+                // DoH/DoT 预设快捷入口
+                _buildDohDotPresetCard(),
+
+                const SizedBox(height: 12),
+
                 // 服务器
                 _buildServerCard(),
 
@@ -475,7 +480,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
       '24h': '24小时',
       '48h': '48小时',
       '72h': '72小时',
-      '1 h': '1小时',  // 兼容旧格式
+      '1 h': '1小时', // 兼容旧格式
       '12 h': '12小时', // 兼容旧格式
     };
 
@@ -1037,7 +1042,8 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                                   style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w500,
-                                    color: _dnsManager.proxyResolver == entry.key
+                                    color:
+                                        _dnsManager.proxyResolver == entry.key
                                         ? AppTheme.primaryNeon
                                         : AppTheme.textPrimary,
                                   ),
@@ -1143,6 +1149,130 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
             Icon(Icons.chevron_right, color: AppTheme.textSecondary, size: 20),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDohDotPresetCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderColor.withAlpha(100)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'DoH / DoT 预设',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '一键添加常用加密DNS（默认走 Proxy）',
+            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildPresetChip('Cloudflare DoH', () {
+                _addDnsPresets([
+                  const DnsServer(
+                    name: 'Cloudflare DoH',
+                    address: 'cloudflare-dns.com',
+                    type: DnsServerType.doh,
+                    detour: 'proxy',
+                    enabled: true,
+                  ),
+                ]);
+              }),
+              _buildPresetChip('Google DoH', () {
+                _addDnsPresets([
+                  const DnsServer(
+                    name: 'Google DoH',
+                    address: 'dns.google',
+                    type: DnsServerType.doh,
+                    detour: 'proxy',
+                    enabled: true,
+                  ),
+                ]);
+              }),
+              _buildPresetChip('Cloudflare DoT', () {
+                _addDnsPresets([
+                  const DnsServer(
+                    name: 'Cloudflare DoT',
+                    address: '1.1.1.1',
+                    type: DnsServerType.dot,
+                    detour: 'proxy',
+                    enabled: true,
+                  ),
+                ]);
+              }),
+              _buildPresetChip('Google DoT', () {
+                _addDnsPresets([
+                  const DnsServer(
+                    name: 'Google DoT',
+                    address: 'dns.google',
+                    type: DnsServerType.dot,
+                    detour: 'proxy',
+                    enabled: true,
+                  ),
+                ]);
+              }),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPresetChip(String label, VoidCallback onTap) {
+    return ActionChip(
+      label: Text(
+        label,
+        style: const TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      backgroundColor: AppTheme.bgDark,
+      side: BorderSide(color: AppTheme.borderColor.withAlpha(100)),
+      onPressed: onTap,
+    );
+  }
+
+  void _addDnsPresets(List<DnsServer> servers) {
+    int added = 0;
+    for (final server in servers) {
+      final exists = _dnsManager.dnsServers.any(
+        (s) =>
+            s.name == server.name &&
+            s.address == server.address &&
+            s.type == server.type &&
+            s.detour == server.detour,
+      );
+      if (!exists) {
+        _dnsManager.addDnsServer(server);
+        added++;
+      }
+    }
+
+    context.read<VPNProviderV2>().onDnsSettingsChanged();
+    final msg = added > 0 ? '已添加 $added 个DNS服务器' : '预设已存在';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: added > 0
+            ? AppTheme.successGreen
+            : AppTheme.textSecondary,
       ),
     );
   }
@@ -1263,7 +1393,8 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             option['label'] as String,
@@ -1283,7 +1414,8 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                                             style: TextStyle(
                                               fontSize: 12,
                                               color: isSelected
-                                                  ? AppTheme.primaryNeon.withAlpha(180)
+                                                  ? AppTheme.primaryNeon
+                                                        .withAlpha(180)
                                                   : AppTheme.textSecondary,
                                             ),
                                           ),
@@ -1325,10 +1457,7 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
                 }
                 Navigator.of(context).pop();
               },
-              child: Text(
-                '确定',
-                style: TextStyle(color: AppTheme.primaryNeon),
-              ),
+              child: Text('确定', style: TextStyle(color: AppTheme.primaryNeon)),
             ),
           ],
         );

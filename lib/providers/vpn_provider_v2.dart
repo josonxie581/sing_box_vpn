@@ -667,11 +667,11 @@ class VPNProviderV2 extends ChangeNotifier {
       // 兜底：全部完成后再次通知一次，确保UI一致
       notifyListeners();
 
-      // 自动选择最佳服务器（仅在启用自动选择功能且启用自动刷新时）
-      if (_autoSelectBestServer && _autoRefreshEnabled && isConnected) {
+      // 自动选择最佳服务器（启用自动选择功能且启用自动刷新时触发）
+      if (_autoSelectBestServer && _autoRefreshEnabled) {
         print('[DEBUG] 自动选择最佳服务器功能已启用且自动刷新已开启，开始选择最佳服务器');
         _selectBestServer();
-      } else if (isConnected) {
+      } else {
         if (!_autoSelectBestServer) {
           print('[DEBUG] 自动选择最佳服务器功能未启用，跳过切换');
         } else if (!_autoRefreshEnabled) {
@@ -732,18 +732,32 @@ class VPNProviderV2 extends ChangeNotifier {
     final currentPing = _configPings[currentConfig?.id ?? ''] ?? 999999;
     print('[DEBUG] 当前服务器 ${currentConfig?.name}: ${currentPing}ms');
     print('[DEBUG] 最佳服务器 ${bestConfig?.name}: ${bestPing}ms');
+    print('[DEBUG] 当前连接状态: ${isConnected ? "已连接" : "未连接"}');
 
-    // 如果找到更好的服务器且不是当前服务器，切换
-    if (bestConfig != null &&
-        bestConfig.id != currentConfig?.id &&
-        bestPing < currentPing - 50) {
-      // 延迟差超过50ms才切换
-      print(
-        '[DEBUG] 发现更好的服务器，延迟差：${currentPing - bestPing}ms，开始切换到 ${bestConfig.name}',
-      );
-      connect(bestConfig);
+    if (bestConfig == null) {
+      print('[DEBUG] 没有可用的最佳服务器');
+      return;
+    }
+
+    if (bestConfig.id == currentConfig?.id) {
+      print('[DEBUG] 最佳服务器就是当前服务器，无需切换');
+      return;
+    }
+
+    if (isConnected) {
+      // 已连接状态：延迟差超过50ms才切换（避免频繁断开重连）
+      if (bestPing < currentPing - 50) {
+        print(
+          '[DEBUG] 发现更好的服务器，延迟差：${currentPing - bestPing}ms，开始切换到 ${bestConfig.name}',
+        );
+        connect(bestConfig);
+      } else {
+        print('[DEBUG] 已连接状态下未发现明显更好的服务器（延迟差需>50ms），保持当前服务器');
+      }
     } else {
-      print('[DEBUG] 未发现明显更好的服务器（延迟差需>50ms），保持当前服务器');
+      // 未连接状态：直接选择最佳节点作为当前配置
+      print('[DEBUG] 未连接状态，自动选择最佳节点: ${bestConfig.name} (${bestPing}ms)');
+      setCurrentConfig(bestConfig);
     }
   }
 
