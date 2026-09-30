@@ -106,6 +106,18 @@ try {
         $env:PATH = "$msys2Path;$env:PATH"
         Write-Info "Added MSYS2/MinGW64 to PATH: $msys2Path"
     }
+
+    # 自动检测 Flutter/Dart SDK 并加入 PATH
+    $flutterBin = "C:\tools\flutter\bin"
+    $dartBin = "C:\tools\dart-sdk\bin"
+    if ((Test-Path $flutterBin) -and -not (Get-Command flutter -ErrorAction SilentlyContinue)) {
+        $env:PATH = "$flutterBin;$env:PATH"
+        Write-Info "Added Flutter SDK to PATH: $flutterBin"
+    }
+    if ((Test-Path $dartBin) -and -not (Get-Command dart -ErrorAction SilentlyContinue)) {
+        $env:PATH = "$dartBin;$env:PATH"
+        Write-Info "Added Dart SDK to PATH: $dartBin"
+    }
     
     # Step 0: 准备上层 sing-box 源码（不创建联结）
     # 仅在需要生成 DLL 时准备 sing-box 源码

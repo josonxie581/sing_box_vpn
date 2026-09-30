@@ -21,6 +21,7 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _priorityController = TextEditingController(text: '650');
+  final _domainSuffixController = TextEditingController();
 
   String? _selectedRuleset;
   RuleType _selectedType = RuleType.geosite;
@@ -75,17 +76,25 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
     }
   }
 
-  bool get _canSave =>
-      _nameController.text.trim().isNotEmpty && _selectedRuleset != null;
+  bool get _canSave {
+    if (_nameController.text.trim().isEmpty) return false;
+    if (_selectedType == RuleType.domainSuffix) {
+      return _domainSuffixController.text.trim().isNotEmpty;
+    }
+    return _selectedRuleset != null;
+  }
 
   void _save() {
     if (!_canSave) return;
     final priority = int.tryParse(_priorityController.text) ?? 650;
+    final rulesetValue = _selectedType == RuleType.domainSuffix
+        ? _domainSuffixController.text.trim()
+        : _selectedRuleset!;
     final rule = RoutingRuleConfig(
       id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
       name: _nameController.text.trim(),
       type: _selectedType,
-      ruleset: _selectedRuleset!,
+      ruleset: rulesetValue,
       outbound: _selectedOutbound,
       priority: priority,
       description: _descriptionController.text.trim().isEmpty
@@ -181,24 +190,43 @@ class _AddRoutingRulePageState extends State<AddRoutingRulePage> {
             ),
             const SizedBox(height: 16),
 
-            // 规则集
-            DropdownButtonFormField<String>(
-              value: _selectedRuleset,
-              dropdownColor: AppTheme.bgCard,
-              style: const TextStyle(color: AppTheme.textPrimary),
-              decoration: const InputDecoration(
-                labelText: '规则集',
-                labelStyle: TextStyle(color: AppTheme.textSecondary),
+            // 规则集 / 域名后缀输入
+            if (_selectedType == RuleType.domainSuffix)
+              TextField(
+                controller: _domainSuffixController,
+                style: const TextStyle(color: AppTheme.textPrimary),
+                decoration: const InputDecoration(
+                  labelText: '域名后缀（多个用逗号分隔）',
+                  labelStyle: TextStyle(color: AppTheme.textSecondary),
+                  hintText: '例如: google.com, youtube.com',
+                  hintStyle: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.borderColor),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.primaryNeon),
+                  ),
+                ),
+                onChanged: (_) => setState(() {}),
+              )
+            else
+              DropdownButtonFormField<String>(
+                value: _selectedRuleset,
+                dropdownColor: AppTheme.bgCard,
+                style: const TextStyle(color: AppTheme.textPrimary),
+                decoration: const InputDecoration(
+                  labelText: '规则集',
+                  labelStyle: TextStyle(color: AppTheme.textSecondary),
+                ),
+                items: availableForType.map((ruleset) {
+                  return DropdownMenuItem(value: ruleset, child: Text(ruleset));
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedRuleset = value;
+                  });
+                },
               ),
-              items: availableForType.map((ruleset) {
-                return DropdownMenuItem(value: ruleset, child: Text(ruleset));
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedRuleset = value;
-                });
-              },
-            ),
             const SizedBox(height: 16),
 
             // 出站动作

@@ -201,9 +201,9 @@ class RoutingConfigService {
 
   /// 获取已配置的规则集
   List<String> getConfiguredRulesets() {
-    // 仅返回启用的规则对应的规则集，避免在连接时加载未启用的规则集
+    // 仅返回启用的、需要规则集文件的规则，domainSuffix 等内联类型不需要 .srs 文件
     return _rules
-        .where((rule) => rule.enabled)
+        .where((rule) => rule.enabled && rule.type.needsRuleset)
         .map((rule) => rule.ruleset)
         .toSet()
         .toList();

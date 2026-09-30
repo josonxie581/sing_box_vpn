@@ -70,6 +70,14 @@ class RoutingRuleConfig {
 
   /// 生成 sing-box 路由规则
   Map<String, dynamic> toSingBoxRule() {
+    if (type == RuleType.domainSuffix) {
+      // DOMAIN-SUFFIX：直接使用 domain_suffix 字段，支持多个值（逗号分隔）
+      final values = ruleset.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      return {
+        'domain_suffix': values,
+        'outbound': outbound.value,
+      };
+    }
     return {
       'rule_set': [ruleset],
       'outbound': outbound.value,
@@ -80,12 +88,16 @@ class RoutingRuleConfig {
 /// 规则类型
 enum RuleType {
   geosite('geosite', 'Geosite 域名规则'),
-  geoip('geoip', 'GeoIP 地址规则');
+  geoip('geoip', 'GeoIP 地址规则'),
+  domainSuffix('domain_suffix', 'DOMAIN-SUFFIX 域名后缀');
 
   const RuleType(this.value, this.displayName);
 
   final String value;
   final String displayName;
+
+  /// 是否需要规则集文件（.srs）
+  bool get needsRuleset => this == geosite || this == geoip;
 
   static RuleType fromString(String value) {
     return RuleType.values.firstWhere(

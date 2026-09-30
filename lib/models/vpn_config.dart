@@ -205,6 +205,7 @@ class VPNConfig {
           "server_port": port,
           "method": settings['method'] ?? "aes-256-gcm",
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
         };
 
       case 'shadowsocks-2022':
@@ -215,10 +216,12 @@ class VPNConfig {
           "server_port": port,
           "method": settings['method'] ?? "2022-blake3-aes-128-gcm",
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
         };
 
       case 'vmess':
         final useTls = (settings['tls']?.toString().toLowerCase() == 'tls');
+        final mux = _generateMultiplex();
         final outbound = <String, dynamic>{
           "type": "vmess",
           "tag": tag,
@@ -237,9 +240,14 @@ class VPNConfig {
               "server_name": settings['host'],
           };
         }
+        if (mux != null) outbound["multiplex"] = mux;
         return outbound;
 
       case 'vless':
+        // VLESS + flow (xtls-rprx-vision) 不兼容 multiplex，仅无 flow 时启用
+        final vlessMux = (settings['flow'] ?? '').toString().isEmpty
+            ? _generateMultiplex()
+            : null;
         return {
           "type": "vless",
           "tag": tag,
@@ -250,6 +258,7 @@ class VPNConfig {
           if ((settings['flow'] ?? '').toString().isNotEmpty)
             "flow": settings['flow'],
           if (_generateTransport() != null) "transport": _generateTransport(),
+          if (vlessMux != null) "multiplex": vlessMux,
           if (settings['tlsEnabled'] == true)
             "tls": {
               "enabled": true,
@@ -282,6 +291,7 @@ class VPNConfig {
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -291,12 +301,21 @@ class VPNConfig {
         };
 
       case 'hysteria2':
+        // Brutal 拥塞控制带宽参数（可选）：
+        //   有值 → 启用 Brutal CC，适合高丢包但 UDP 不限速的网络
+        //   无值 → 使用默认 BBR CC，适合 ISP 对 UDP 做 QoS 限速的场景
         return {
           "type": "hysteria2",
           "tag": tag,
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
+          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
+          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
+          if ((settings['up'] ?? '').toString().isNotEmpty)
+            "up": settings['up'],
+          if ((settings['down'] ?? '').toString().isNotEmpty)
+            "down": settings['down'],
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -480,6 +499,7 @@ class VPNConfig {
           "server_port": port,
           "method": settings['method'] ?? "aes-256-gcm",
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
         };
 
       case 'shadowsocks-2022':
@@ -490,10 +510,12 @@ class VPNConfig {
           "server_port": port,
           "method": settings['method'] ?? "2022-blake3-aes-128-gcm",
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
         };
 
       case 'vmess':
         final useTls = (settings['tls']?.toString().toLowerCase() == 'tls');
+        final mux = _generateMultiplex();
         final outbound = <String, dynamic>{
           "type": "vmess",
           "tag": "proxy",
@@ -512,9 +534,14 @@ class VPNConfig {
               "server_name": settings['host'],
           };
         }
+        if (mux != null) outbound["multiplex"] = mux;
         return outbound;
 
       case 'vless':
+        // VLESS + flow (xtls-rprx-vision) 不兼容 multiplex，仅无 flow 时启用
+        final vlessMux = (settings['flow'] ?? '').toString().isEmpty
+            ? _generateMultiplex()
+            : null;
         return {
           "type": "vless",
           "tag": "proxy",
@@ -526,6 +553,7 @@ class VPNConfig {
           if ((settings['flow'] ?? '').toString().isNotEmpty)
             "flow": settings['flow'],
           if (_generateTransport() != null) "transport": _generateTransport(),
+          if (vlessMux != null) "multiplex": vlessMux,
           if (settings['tlsEnabled'] == true)
             "tls": {
               "enabled": true,
@@ -558,6 +586,7 @@ class VPNConfig {
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
+          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -567,12 +596,21 @@ class VPNConfig {
         };
 
       case 'hysteria2':
+        // Brutal 拥塞控制带宽参数（可选）：
+        //   有值 → 启用 Brutal CC，适合高丢包但 UDP 不限速的网络
+        //   无值 → 使用默认 BBR CC，适合 ISP 对 UDP 做 QoS 限速的场景
         return {
           "type": "hysteria2",
           "tag": "proxy",
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
+          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
+          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
+          if ((settings['up'] ?? '').toString().isNotEmpty)
+            "up": settings['up'],
+          if ((settings['down'] ?? '').toString().isNotEmpty)
+            "down": settings['down'],
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -660,6 +698,29 @@ class VPNConfig {
       default:
         return {"type": "direct", "tag": "proxy"};
     }
+  }
+
+  /// 生成多路复用配置（仅当 settings 中启用时生效）
+  /// 需要服务端同样配置 multiplex 支持
+  Map<String, dynamic>? _generateMultiplex() {
+    if (settings['multiplex'] != true && settings['mux'] != true) return null;
+    final mux = <String, dynamic>{
+      "enabled": true,
+      // h2mux 对高丢包网络效果最好；可选 smux/yamux/h2mux
+      "protocol": settings['muxProtocol'] ?? "h2mux",
+      "max_connections": settings['muxMaxConn'] ?? 4,
+      "min_streams": settings['muxMinStreams'] ?? 4,
+      "padding": settings['muxPadding'] ?? true,
+    };
+    // 可选 TCP Brutal 拥塞控制（需服务端也安装 brutal 模块）
+    if (settings['muxBrutal'] == true) {
+      mux["brutal"] = {
+        "enabled": true,
+        "up_mbps": settings['muxUpMbps'] ?? 500,
+        "down_mbps": settings['muxDownMbps'] ?? 500,
+      };
+    }
+    return mux;
   }
 
   /// 生成传输层配置
@@ -892,6 +953,12 @@ class VPNConfig {
       if (uri.userInfo.isNotEmpty) password = uri.userInfo;
       password = (qp['password'] ?? qp['pwd'] ?? password).trim();
 
+      // 带宽配置（Brutal 拥塞控制需要）
+      int? upMbps = int.tryParse((qp['up_mbps'] ?? '').trim());
+      int? downMbps = int.tryParse((qp['down_mbps'] ?? '').trim());
+      final upStr = (qp['up'] ?? '').trim();
+      final downStr = (qp['down'] ?? '').trim();
+
       // TLS 相关
       final sni = (qp['sni'] ?? qp['serverName'] ?? '').trim();
       final insecure = (qp['insecure'] ?? qp['allowInsecure'] ?? '0').trim();
@@ -916,6 +983,10 @@ class VPNConfig {
         'skipCertVerify': skipCertVerify,
         if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
         if (sni.isNotEmpty) 'sni': sni,
+        if (upMbps != null) 'up_mbps': upMbps,
+        if (downMbps != null) 'down_mbps': downMbps,
+        if (upStr.isNotEmpty) 'up': upStr,
+        if (downStr.isNotEmpty) 'down': downStr,
       };
 
       return VPNConfig(

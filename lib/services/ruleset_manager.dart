@@ -431,16 +431,16 @@ class RulesetManager {
               ? ["172.19.0.1/30", "2001:db8::1/128"]
               : ["172.19.0.1/30"],
 
-          // 使用稳定的MTU设置
-          "mtu": tunMtu ?? 1500,
+          // MTU：VPN 封装有额外开销，默认 1400 避免分片
+          "mtu": tunMtu ?? 1400,
           "auto_route": true,
           "strict_route": tunStrictRoute,
 
           // 嗅探配置：提取 TLS SNI / HTTP Host 用于域名路由匹配
           "sniff": true,
           "sniff_override_destination": false,
-          // 默认 system；Windows 下为 Wintun
-          "stack": Platform.isWindows ? 'system' : 'system',
+          // mixed：TCP 走 system（高效），UDP 走 gVisor（兼容性好）
+          "stack": preferredTunStack ?? 'mixed',
 
           if (Platform.isWindows) "endpoint_independent_nat": false,
 

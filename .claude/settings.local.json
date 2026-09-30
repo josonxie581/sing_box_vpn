@@ -52,7 +52,11 @@
       "Bash(cd:*)",
       "Bash(where:*)",
       "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe\" -DBUILD_TYPE=Release -P \"D:/TEMP/VPN/sing_box_vpn/build/windows/x64/cmake_install.cmake\")",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Command flutter -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; Get-Command dart -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell.exe -NoProfile -Command '[Environment]::GetEnvironmentVariable\\(\"\"PATH\"\", \"\"User\"\"\\) -split \"\";\"\" | Where-Object { $_ -match \"\"flutter|dart|fvm\"\" }')",
+      "Bash(powershell.exe -NoProfile -Command 'Get-ChildItem -Path \"\"C:\\\\\"\",\"\"D:\\\\\"\" -Filter \"\"flutter.exe\"\" -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName')",
+      "Bash(powershell.exe -NoProfile -Command '$paths = @\\(\"\"$env:USERPROFILE\\\\flutter\"\",\"\"$env:USERPROFILE\\\\dev\\\\flutter\"\",\"\"$env:USERPROFILE\\\\.flutter\"\",\"\"$env:LOCALAPPDATA\\\\flutter\"\",\"\"C:\\\\flutter\"\",\"\"D:\\\\flutter\"\",\"\"D:\\\\dev\\\\flutter\"\",\"\"D:\\\\SDK\\\\flutter\"\",\"\"$env:ProgramFiles\\\\flutter\"\"\\); foreach\\($p in $paths\\){ if\\(Test-Path \"\"$p\\\\bin\\\\flutter.exe\"\"\\){ Write-Output $p } }; Get-ChildItem \"\"$env:USERPROFILE\"\" -Directory -Depth 1 -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"\"flutter\"\" } | ForEach-Object { $_.FullName }')"
     ],
     "deny": [],
     "ask": []
