@@ -106,10 +106,10 @@ class PingService {
     VPNConfig? currentConfig,
   }) async {
     try {
-      print('[DEBUG] Windows口径：统一使用"节点握手RTT"测延时 -> ${config.name}');
+      print('[DEBUG] 测量节点服务器 RTT -> ${config.name}');
 
-      // 无论是否连接 VPN，统一走系统路由表直接 TCP 连接测延时
-      // 这是最准确的方式：测量的是系统到目标服务器的真实 TCP RTT
+      // Windows: native sockets bind to the physical interface; TCP uses
+      // connect time and QUIC uses acknowledged packet RTT, excluding DNS/TLS.
       final tester = NodeDelayTester(
         timeout: isConnected ? 6000 : 5000,
         enableIpInfo: false,

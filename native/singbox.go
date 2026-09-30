@@ -14,7 +14,9 @@ import "C"
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"os"
@@ -40,6 +42,157 @@ import (
 	// 使用 sagernet fork 的 quic-go
 	quic "github.com/sagernet/quic-go"
 )
+
+type nodeDelayRequest struct {
+	Type   string `json:"type"`
+	Server string `json:"server"`
+	Port   int    `json:"server_port"`
+	TLS    struct {
+		ServerName string   `json:"server_name"`
+		Insecure   bool     `json:"insecure"`
+		ALPN       []string `json:"alpn"`
+	} `json:"tls"`
+	Obfs json.RawMessage `json:"obfs"`
+}
+
+// ProbeNodeDelay measures the server transport RTT without touching the running
+// Box, its routes, or SOCKS inbounds. It is called on a Dart worker isolate.
+//
+//export ProbeNodeDelay
+func ProbeNodeDelay(requestJSON *C.char, timeoutMs C.int) C.int {
+	var request nodeDelayRequest
+	if json.Unmarshal([]byte(C.GoString(requestJSON)), &request) != nil {
+		return -1
+	}
+	delay, err := probeNodeDelay(request, time.Duration(timeoutMs)*time.Millisecond)
+	if err != nil {
+		return -1
+	}
+	return C.int(delay)
+}
+
+func probeNodeDelay(request nodeDelayRequest, timeout time.Duration) (int, error) {
+	if request.Server == "" || request.Port < 1 || request.Port > 65535 || timeout <= 0 {
+		return -1, fmt.Errorf("invalid latency probe")
+	}
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), timeout)
+	defer probeCancel()
+	address, parseErr := netip.ParseAddr(request.Server)
+	var bind control.Func
+	if parseErr != nil || !address.IsLoopback() {
+		var err error
+		bind, err = physicalProbeControl()
+		if err != nil {
+			return -1, err
+		}
+	}
+	dialer := &net.Dialer{Control: bind}
+	if parseErr != nil {
+		// Bootstrap through the same physical interface, outside the RTT timer.
+		// Never accept FakeIP from the TUN's system DNS resolver.
+		resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, "223.5.5.5:53")
+		}}
+		addresses, err := resolver.LookupNetIP(probeCtx, "ip4", request.Server)
+		if err != nil {
+			return -1, err
+		}
+		if len(addresses) == 0 {
+			return -1, fmt.Errorf("no server address")
+		}
+		address = addresses[0].Unmap()
+	}
+	if netip.MustParsePrefix("198.18.0.0/15").Contains(address) || address.IsUnspecified() || address.IsMulticast() {
+		return -1, fmt.Errorf("not a real server address")
+	}
+	target := net.JoinHostPort(address.String(), fmt.Sprint(request.Port))
+	protocol := strings.ToLower(request.Type)
+	switch protocol {
+	case "tuic", "hysteria2", "hy2", "hysteria":
+		return probeQUICRTT(probeCtx, request, address, target, bind)
+	case "wireguard":
+		return -1, fmt.Errorf("transport RTT probe unsupported")
+	}
+	start := time.Now()
+	conn, err := dialer.DialContext(probeCtx, "tcp", target)
+	if err != nil {
+		return -1, err
+	}
+	elapsed := time.Since(start)
+	conn.Close()
+	return int(math.Ceil(float64(elapsed) / float64(time.Millisecond))), nil
+}
+
+func physicalProbeControl() (control.Func, error) {
+	if runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("physical RTT probe requires Windows")
+	}
+	finder := control.NewDefaultInterfaceFinder()
+	monitor, err := tun.NewNetworkUpdateMonitor(slogger.NOP())
+	if err != nil {
+		return nil, err
+	}
+	defer monitor.Close()
+	interfaces, err := tun.NewDefaultInterfaceMonitor(monitor, slogger.NOP(), tun.DefaultInterfaceMonitorOptions{InterfaceFinder: finder})
+	if err != nil {
+		return nil, err
+	}
+	defer interfaces.Close()
+	if err = interfaces.Start(); err != nil {
+		return nil, err
+	}
+	physical := interfaces.DefaultInterface()
+	if physical == nil {
+		return nil, fmt.Errorf("no physical default interface")
+	}
+	// Windows uses IP_UNICAST_IF/IPV6_UNICAST_IF, not merely a source address.
+	return control.BindToInterface(finder, physical.Name, physical.Index), nil
+}
+
+func probeQUICRTT(ctx context.Context, request nodeDelayRequest, address netip.Addr, target string, bind control.Func) (int, error) {
+	if len(request.Obfs) > 0 && string(request.Obfs) != "null" && string(request.Obfs) != `""` {
+		return -1, fmt.Errorf("obfuscated QUIC RTT probe unsupported")
+	}
+	alpn := request.TLS.ALPN
+	if len(alpn) == 0 {
+		switch strings.ToLower(request.Type) {
+		case "hysteria":
+			alpn = []string{"hysteria"}
+		default:
+			alpn = []string{"h3"}
+		}
+	}
+	serverName := request.TLS.ServerName
+	if serverName == "" {
+		serverName = request.Server
+	}
+	network, localAddress := "udp4", "0.0.0.0:0"
+	if address.Is6() {
+		network, localAddress = "udp6", "[::]:0"
+	}
+	listener := net.ListenConfig{Control: bind}
+	packetConn, err := listener.ListenPacket(ctx, network, localAddress)
+	if err != nil {
+		return -1, err
+	}
+	defer packetConn.Close()
+	remote, err := net.ResolveUDPAddr(network, target)
+	if err != nil {
+		return -1, err
+	}
+	conn, err := quic.Dial(ctx, packetConn, remote, &tls.Config{
+		ServerName: serverName, InsecureSkipVerify: request.TLS.Insecure, NextProtos: alpn,
+	}, &quic.Config{})
+	if err != nil {
+		return -1, err
+	}
+	defer conn.CloseWithError(0, "RTT probe complete")
+	stats := conn.ConnectionStats()
+	if stats.MinRTT <= 0 || stats.SmoothedRTT <= 0 {
+		return -1, fmt.Errorf("no acknowledged QUIC RTT sample")
+	}
+	return int(math.Ceil(float64(stats.SmoothedRTT) / float64(time.Millisecond))), nil
+}
 
 var (
 	instance *box.Box
