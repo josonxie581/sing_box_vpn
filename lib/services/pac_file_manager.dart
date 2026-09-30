@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:path/path.dart' as p;
 import '../models/proxy_mode.dart';
+import 'builtin_proxy_rules.dart';
 
 /// PAC 文件管理器
 class PacFileManager {
@@ -130,27 +132,56 @@ class PacFileManager {
       print(
         'PAC: 使用外部文件 -> ${(mode == ProxyMode.rule || mode == ProxyMode.custom) ? _rulePacFile : _globalPacFile}',
       );
-      return externalContent;
+      return _applyBuiltinProxyRules(externalContent, proxyPort);
     }
 
     // 回退到内置模板
     // 仅首次生成时打印（缓存后不再生成）
     print('PAC: 使用内置模板 mode=$mode port=$proxyPort');
-    switch (mode) {
-      case ProxyMode.rule:
-        return _generateRuleModePac(proxyPort);
-      case ProxyMode.global:
-        return _generateGlobalModePac(proxyPort);
-      case ProxyMode.custom:
-        // 自定义规则模式使用与规则模式相同的PAC逻辑
-        return _generateRuleModePac(proxyPort);
-    }
+    final content = switch (mode) {
+      ProxyMode.rule || ProxyMode.custom => _generateRuleModePac(proxyPort),
+      ProxyMode.global => _generateGlobalModePac(proxyPort),
+    };
+    return _applyBuiltinProxyRules(content, proxyPort);
   }
+
+  /// 在模板和外部 PAC 之上执行内置规则，AI 连接不回退 DIRECT。
+  String _applyBuiltinProxyRules(String content, int proxyPort) =>
+      '''
+$content
+
+FindProxyForURL = (function(original) {
+    var suffixes = ${jsonEncode(BuiltinProxyRules.domainSuffixes)};
+    var domains = ${jsonEncode(BuiltinProxyRules.domains)};
+    var patterns = ${jsonEncode(BuiltinProxyRules.domainRegexes)};
+    var proxy = "PROXY 127.0.0.1:$proxyPort; SOCKS5 127.0.0.1:$proxyPort";
+    return function(url, host) {
+        host = host.toLowerCase();
+        if (host.charAt(host.length - 1) === ".") {
+            host = host.substring(0, host.length - 1);
+        }
+        for (var i = 0; i < suffixes.length; i++) {
+            if (host === suffixes[i] || dnsDomainIs(host, "." + suffixes[i])) {
+                return proxy;
+            }
+        }
+        for (var j = 0; j < domains.length; j++) {
+            if (host === domains[j]) return proxy;
+        }
+        for (var k = 0; k < patterns.length; k++) {
+            if (new RegExp(patterns[k], "i").test(host)) return proxy;
+        }
+        return original(url, host);
+    };
+})(FindProxyForURL);
+''';
 
   /// 从外部文件加载 PAC 内容
   String? _loadExternalPacFile(int proxyPort, ProxyMode mode) {
     try {
-      final pacFile = (mode == ProxyMode.rule || mode == ProxyMode.custom) ? _rulePacFile : _globalPacFile;
+      final pacFile = (mode == ProxyMode.rule || mode == ProxyMode.custom)
+          ? _rulePacFile
+          : _globalPacFile;
       final file = File(pacFile);
 
       if (!file.existsSync()) {
@@ -190,7 +221,7 @@ class PacFileManager {
 function FindProxyForURL(url, host) {
     // Debug log (viewable in browser console)
     // console.log("PAC: " + url + " -> " + host);
-    
+
     // Local addresses direct
     if (isPlainHostName(host) ||
         isInNet(host, "127.0.0.0", "255.0.0.0") ||
@@ -200,22 +231,22 @@ function FindProxyForURL(url, host) {
         isInNet(host, "169.254.0.0", "255.255.0.0")) {
         return "DIRECT";
     }
-    
+
     // Foreign websites requiring proxy (priority match)
     var proxyDomains = [
-        ".google.com", ".google.com.hk", ".googleapis.com", 
+        ".google.com", ".google.com.hk", ".googleapis.com",
         ".googlevideo.com", ".googleusercontent.com", ".gstatic.com",
-        ".youtube.com", ".ytimg.com", ".facebook.com", ".twitter.com", 
-        ".instagram.com", ".github.com", ".openai.com", ".anthropic.com", 
+        ".youtube.com", ".ytimg.com", ".facebook.com", ".twitter.com",
+        ".instagram.com", ".github.com", ".openai.com", ".anthropic.com",
         ".cloudflare.com", ".wikipedia.org", ".reddit.com"
     ];
-    
+
     for (var i = 0; i < proxyDomains.length; i++) {
         if (dnsDomainIs(host, proxyDomains[i])) {
             return "PROXY 127.0.0.1:$proxyPort; SOCKS5 127.0.0.1:$proxyPort; DIRECT";
         }
     }
-    
+
     // Domestic domains and websites direct
     var directDomains = [
         ".cn", ".com.cn", ".net.cn", ".org.cn", ".edu.cn", ".gov.cn",
@@ -224,13 +255,13 @@ function FindProxyForURL(url, host) {
         ".youku.com", ".bilibili.com", ".zhihu.com", ".douban.com",
         ".alipay.com", ".aliyun.com", ".tencent.com", ".wechat.com", ".weixin.qq.com"
     ];
-    
+
     for (var i = 0; i < directDomains.length; i++) {
         if (dnsDomainIs(host, directDomains[i])) {
             return "DIRECT";
         }
     }
-    
+
     // All other websites via proxy (default rule)
     return "PROXY 127.0.0.1:$proxyPort; SOCKS5 127.0.0.1:$proxyPort; DIRECT";
 }
@@ -243,7 +274,7 @@ function FindProxyForURL(url, host) {
 function FindProxyForURL(url, host) {
     // Debug log (viewable in browser console)
     // console.log("PAC Global: " + url + " -> " + host);
-    
+
     // Local addresses direct
     if (isPlainHostName(host) ||
         isInNet(host, "127.0.0.0", "255.0.0.0") ||
@@ -253,7 +284,7 @@ function FindProxyForURL(url, host) {
         isInNet(host, "169.254.0.0", "255.255.0.0")) {
         return "DIRECT";
     }
-    
+
     // Global mode: all external traffic via proxy
     return "PROXY 127.0.0.1:$proxyPort; SOCKS5 127.0.0.1:$proxyPort; DIRECT";
 }
@@ -334,7 +365,7 @@ function FindProxyForURL(url, host) {
       print('已加载自定义PAC文件: $filePath，代理端口: $proxyPort');
       // 自定义文件加载后需失效当前缓存
       _pacCache.removeWhere((k, v) => k.endsWith('@$proxyPort'));
-      return content;
+      return _applyBuiltinProxyRules(content, proxyPort);
     } catch (e) {
       print('加载自定义PAC文件失败: $e');
       return null;
@@ -386,30 +417,30 @@ function FindProxyForURL(url, host) {
         isInNet(host, "169.254.0.0", "255.255.0.0")) {
         return "DIRECT";
     }
-    
+
     // 国外重要网站走代理
     var proxyDomains = [
-        ".google.com", ".youtube.com", ".facebook.com", ".twitter.com", 
+        ".google.com", ".youtube.com", ".facebook.com", ".twitter.com",
         ".github.com", ".openai.com", ".anthropic.com", ".wikipedia.org"
     ];
-    
+
     for (var i = 0; i < proxyDomains.length; i++) {
         if (dnsDomainIs(host, proxyDomains[i])) {
             return "PROXY {{PROXY_HOST}}:{{PROXY_PORT}}; SOCKS5 {{PROXY_HOST}}:{{PROXY_PORT}}; DIRECT";
         }
     }
-    
+
     // 国内网站直连
     var directDomains = [
         ".cn", ".baidu.com", ".qq.com", ".taobao.com", ".bilibili.com"
     ];
-    
+
     for (var i = 0; i < directDomains.length; i++) {
         if (dnsDomainIs(host, directDomains[i])) {
             return "DIRECT";
         }
     }
-    
+
     // 其他网站走代理
     return "PROXY {{PROXY_HOST}}:{{PROXY_PORT}}; SOCKS5 {{PROXY_HOST}}:{{PROXY_PORT}}; DIRECT";
 }
@@ -429,7 +460,7 @@ function FindProxyForURL(url, host) {
         isInNet(host, "169.254.0.0", "255.255.0.0")) {
         return "DIRECT";
     }
-    
+
     // 全局模式：所有外网流量走代理
     return "PROXY {{PROXY_HOST}}:{{PROXY_PORT}}; SOCKS5 {{PROXY_HOST}}:{{PROXY_PORT}}; DIRECT";
 }

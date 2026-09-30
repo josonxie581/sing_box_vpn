@@ -52,6 +52,7 @@ if (-not (Test-Path $toolBin)) {
 
 # 3) Build targets
 $projRoot = (Resolve-Path "$PSScriptRoot\..\").Path
+$coreVersion = (Get-Content -LiteralPath (Join-Path $projRoot 'sing-box-version.txt') -Raw).Trim().TrimStart('v')
 Set-Location $projRoot
 Write-Info "Project: $projRoot"
 
@@ -114,7 +115,7 @@ function BuildAbi {
     $Env:CC = $ccPath
     Write-Info "Building $abiDir with CC=$ccPath"
     Push-Location $nativeDir
-    & go build -tags $GoTags -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') singbox.go
+    & go build -tags $GoTags -ldflags "-X github.com/sagernet/sing-box/constant.Version=$coreVersion" -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') singbox.go
     $code = $LASTEXITCODE
     Pop-Location
     if ($code -ne 0) {

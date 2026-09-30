@@ -72,15 +72,25 @@ class RoutingRuleConfig {
   Map<String, dynamic> toSingBoxRule() {
     if (type == RuleType.domainSuffix) {
       // DOMAIN-SUFFIX：直接使用 domain_suffix 字段，支持多个值（逗号分隔）
-      final values = ruleset.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final values = ruleset
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
       return {
         'domain_suffix': values,
-        'outbound': outbound.value,
+        if (outbound.value == 'block')
+          'action': 'reject'
+        else
+          'outbound': outbound.value,
       };
     }
     return {
       'rule_set': [ruleset],
-      'outbound': outbound.value,
+      if (outbound.value == 'block')
+        'action': 'reject'
+      else
+        'outbound': outbound.value,
     };
   }
 }
@@ -114,7 +124,12 @@ class OutboundAction {
   final String description;
   final bool isDynamic;
 
-  const OutboundAction._(this.value, this.displayName, this.description, {this.isDynamic = false});
+  const OutboundAction._(
+    this.value,
+    this.displayName,
+    this.description, {
+    this.isDynamic = false,
+  });
 
   // 系统保留的出站动作
   static const direct = OutboundAction._('direct', '直连', '流量直接连接目标服务器');
@@ -122,14 +137,14 @@ class OutboundAction {
   static const block = OutboundAction._('block', '阻断', '阻止流量访问');
 
   // 系统预定义的出站动作（不包含动态出站）
-  static const List<OutboundAction> predefinedActions = [
-    direct,
-    proxy,
-    block,
-  ];
+  static const List<OutboundAction> predefinedActions = [direct, proxy, block];
 
   /// 创建动态出站动作
-  static OutboundAction dynamic(String tag, String displayName, {String? description}) {
+  static OutboundAction dynamic(
+    String tag,
+    String displayName, {
+    String? description,
+  }) {
     return OutboundAction._(
       tag,
       displayName,
@@ -148,10 +163,7 @@ class OutboundAction {
     }
 
     // 如果不是预定义的，创建动态出站
-    return OutboundAction.dynamic(
-      value,
-      displayName ?? value.toUpperCase(),
-    );
+    return OutboundAction.dynamic(value, displayName ?? value.toUpperCase());
   }
 
   /// 获取所有可用的出站动作（包括动态的）

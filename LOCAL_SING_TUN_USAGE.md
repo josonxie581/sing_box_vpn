@@ -1,100 +1,32 @@
-# 使用 local-sing-tun 编译 sing-box DLL
+# sing-box 核心版本与本地依赖
 
-本文档说明如何在编译 sing-box DLL 时使用本地的 sing-tun 源码。
+当前客户端使用 `native/` 集成 **sing-box v1.14.2**，版本记录在 `sing-box-version.txt`。构建脚本会将 `../sing-box` 切换到该 tag，并使用上游 go.mod 匹配的 sing-tun 版本。需要 Go 1.25.5 或更新版本；Go 的自动工具链功能也可以满足要求。
 
-## 功能说明
-
-当您运行构建脚本时，系统会自动检测是否存在 `local-sing-tun` 目录，如果存在，会自动使用本地版本替换远程依赖。
-
-## 使用方法
-
-### 1. 确保目录结构正确
-
-确保您的项目目录结构如下：
-```
-D:\TEMP\VPN\
-├── sing-box\                    # sing-box 主项目
-│   ├── local-sing-tun\         # 本地 sing-tun 源码
-│   ├── go.mod
-│   └── ...
-└── sing_box_vpn\               # VPN 项目
-    ├── build_all.ps1           # PowerShell 构建脚本
-    ├── tools\prebuild.dart     # Dart 预构建脚本
-    ├── native\                 # Go native 代码
-    └── ...
-```
-
-### 2. 运行构建脚本
-
-使用 PowerShell 脚本：
 ```powershell
+# 构建 Windows DLL 与发布版应用
 .\build_all.ps1
-```
 
-或者只编译 DLL（跳过 Flutter 编译）：
-```powershell
+# 仅构建 Windows DLL
 .\build_all.ps1 -SkipFlutter
-```
 
-使用 Dart 预构建脚本：
-```powershell
+# 直接构建 DLL
 dart run tools/prebuild.dart --force
 ```
 
-## 自动检测机制
+默认不再根据目录是否存在，自动替换为旧的 `local-sing-tun`。旧版 sing-tun 与新版核心的平台接口不兼容，不能直接复用。原 sing-box `main` 分支保留 v1.12.20 及本地补丁，便于对照迁移。
 
-### Dart 脚本 (tools/prebuild.dart)
-- 检查 `$parentSingBoxPath/local-sing-tun` 目录是否存在
-- 如果存在，自动在 `native/go.mod` 中添加：
-  ```go
-  // 使用本地的 sing-tun 源码
-  replace github.com/sagernet/sing-tun => /path/to/local-sing-tun
-  ```
-- 控制台输出：`✅ 检测到 local-sing-tun，将使用本地版本: /path/to/local-sing-tun`
+若需要自行修改 sing-tun，应先基于当前上游依赖版本迁移补丁，再在 `native/go.mod` 中明确设置 replace 并手动编译。`prebuild.dart` 会重置核心依赖，因此定制构建不能依赖它保留手工 replace。
 
-### PowerShell 脚本 (build_all.ps1)
-- 在 `Reset-GoMod-Minimal` 函数中检查 local-sing-tun 目录
-- 如果存在，自动添加相应的 replace 指令
-- 控制台输出：`检测到 local-sing-tun，将使用本地版本: /path/to/local-sing-tun`
+Windows DLL 在 `build/singbox-core/` 编译成功后复制到 `windows/`；构建失败时保留原 DLL。新版 `GetVersion` 返回实际核心版本，`TestConfig` 同时校验配置解析和核心组件的构造。
 
-## 验证方法
-
-构建完成后，您可以检查 `native/go.mod` 文件，应该包含类似以下内容：
-```go
-// 使用上层目录的 sing-box 源码
-replace github.com/sagernet/sing-box => D:/TEMP/VPN/sing-box
-
-// 使用本地的 sing-tun 源码
-replace github.com/sagernet/sing-tun => D:/TEMP/VPN/sing-box/local-sing-tun
+```powershell
+flutter test --coverage
 ```
 
-## 注意事项
+Windows 上存在 DLL 时，兼容性测试会使用它校验三种路由模式、TUN/混合代理、IPv4/IPv6、静态 DNS 映射和各节点协议。测试不代表真实节点联网成功。
 
-1. **local-sing-tun 必须是有效的 Go 模块**：确保 `local-sing-tun` 目录包含有效的 `go.mod` 文件
-2. **兼容性**：确保您的 local-sing-tun 版本与 sing-box 主项目兼容
-3. **自动清理**：每次构建前，系统会自动删除 `go.sum` 文件以避免校验冲突
-4. **构建标签**：DLL 编译使用标签：`with_utls,with_quic,with_clash_api,with_gvisor,with_wintun`
+Android 源码和构建脚本使用同一依赖版本，重新生成 `libsingbox.so` 还需要 Android NDK：
 
-## 故障排除
-
-如果遇到编译问题：
-
-1. **检查 local-sing-tun 完整性**：
-   ```bash
-   cd D:\TEMP\VPN\sing-box\local-sing-tun
-   go mod tidy
-   ```
-
-2. **手动清理缓存**：
-   ```bash
-   cd D:\TEMP\VPN\sing_box_vpn\native
-   go clean -cache
-   go mod tidy
-   ```
-
-3. **强制重新构建**：
-   ```powershell
-   .\build_all.ps1 -SkipFlutter
-   # 或
-   dart run tools/prebuild.dart --force
-   ```
+```powershell
+.\native\build_android.ps1
+```

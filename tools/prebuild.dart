@@ -27,37 +27,48 @@ void main(List<String> arguments) async {
   if (targetRef != null && targetRef.trim().isEmpty) targetRef = null;
 
   final projectRoot = Directory.current.path;
+  targetRef ??= File(
+    '$projectRoot/sing-box-version.txt',
+  ).readAsStringSync().trim();
   // 按约定：源码位于本项目的上层目录 ../sing-box
   final parentDir = Directory(projectRoot).parent.path;
   final singboxDir = Directory('$parentDir/sing-box');
   final windowsDir = Directory('$projectRoot/windows');
   final dllPath = '$projectRoot/windows/singbox.dll';
+  final versionFile = File('$projectRoot/windows/singbox.version');
 
   try {
     // 1. 检查是否已存在编译好的 DLL
-    if (File(dllPath).existsSync() && !force) {
+    final nativeInputs = Directory('$projectRoot/native')
+        .listSync()
+        .whereType<File>()
+        .where(
+          (file) => file.path.endsWith('.go') || file.path.endsWith('go.mod'),
+        );
+    if (File(dllPath).existsSync() &&
+        !force &&
+        versionFile.existsSync() &&
+        versionFile.readAsStringSync().trim() == targetRef &&
+        nativeInputs.every(
+          (file) => !file.lastModifiedSync().isAfter(
+            File(dllPath).lastModifiedSync(),
+          ),
+        )) {
       print('✅ DLL 已存在，跳过编译（使用 --force 或设置环境变量 FORCE_REBUILD=1 可强制重建）');
       return;
-    } else if (File(dllPath).existsSync() && force) {
-      try {
-        File(dllPath).deleteSync();
-        print('🧹 已删除旧 DLL，准备重新编译');
-      } catch (e) {
-        print('⚠️ 删除旧 DLL 失败: $e');
-      }
     }
 
     // 2. 解析 / 检查 Go 环境
     final goExe = await resolveGoExecutable();
     if (goExe == null) {
       print('❌ 未找到可用的 Go 可执行文件');
-      print('👉 请安装 Go 1.23.x (或设置环境变量 GO_EXE=绝对路径) 然后重试');
+      print('👉 请安装 Go 1.25.5 或更新版本（或启用 GOTOOLCHAIN=auto）');
       exit(1);
     }
     print('✅ 使用 Go: $goExe');
-    final versionOk = await checkGoVersion(goExe);
+    final versionOk = await checkGoVersion(goExe, '$projectRoot/native');
     if (!versionOk) {
-      print('⚠️ 检测到 Go 版本不是 1.23.x，sing-box 可能触发 linkname 符号不兼容。继续尝试构建…');
+      throw Exception('sing-box v1.14.2 需要 Go 1.25.5 或更新版本');
     }
 
     // 3. 检查 sing-box 源码（位于上层目录）
@@ -68,35 +79,31 @@ void main(List<String> arguments) async {
       print('sing-box directory found in parent: ${singboxDir.path}');
     }
 
-    // 3.1 若指定 --ref，则切换版本
-    if (targetRef != null) {
-      print('➡️ 切换 sing-box 到指定 ref: $targetRef');
-      final fetchTags = await Process.run('git', [
-        'fetch',
-        '--all',
-        '--tags',
-      ], workingDirectory: singboxDir.path);
-      if (fetchTags.exitCode != 0) {
-        stderr.writeln('⚠️ fetch tags 失败: ${fetchTags.stderr}');
-      }
-      final checkout = await Process.run('git', [
-        'checkout',
-        targetRef,
-      ], workingDirectory: singboxDir.path);
-      if (checkout.exitCode != 0) {
-        stderr.writeln('❌ git checkout $targetRef 失败: ${checkout.stderr}');
-        exit(1);
-      }
-      final revParse = await Process.run('git', [
-        'rev-parse',
-        '--short',
-        'HEAD',
-      ], workingDirectory: singboxDir.path);
-      if (revParse.exitCode == 0) {
-        print('✅ 当前 sing-box 提交: ${revParse.stdout.toString().trim()}');
-      }
-    } else {
-      print('未指定 --ref，使用当前 sing-box 版本');
+    // 3.1 切换到锁定版本（或用户明确指定的 ref）。
+    print('➡️ 切换 sing-box 到指定 ref: $targetRef');
+    final fetchTags = await Process.run('git', [
+      'fetch',
+      '--all',
+      '--tags',
+    ], workingDirectory: singboxDir.path);
+    if (fetchTags.exitCode != 0) {
+      stderr.writeln('⚠️ fetch tags 失败: ${fetchTags.stderr}');
+    }
+    final checkout = await Process.run('git', [
+      'checkout',
+      targetRef,
+    ], workingDirectory: singboxDir.path);
+    if (checkout.exitCode != 0) {
+      stderr.writeln('❌ git checkout $targetRef 失败: ${checkout.stderr}');
+      exit(1);
+    }
+    final revParse = await Process.run('git', [
+      'rev-parse',
+      '--short',
+      'HEAD',
+    ], workingDirectory: singboxDir.path);
+    if (revParse.exitCode == 0) {
+      print('✅ 当前 sing-box 提交: ${revParse.stdout.toString().trim()}');
     }
 
     // 4. 确保 windows 目录存在
@@ -107,11 +114,12 @@ void main(List<String> arguments) async {
     // 5. 编译 sing-box DLL
     print('Building sing-box integrated DLL...');
     // 在编译前，重写 native/go.mod 为最小依赖，并强制 replace 指向上层 sing-box 的绝对路径
-    await rewriteMinimalGoMod(projectRoot, singboxDir.path);
-    await compileSingBox(projectRoot, goExe);
+    await rewriteMinimalGoMod(projectRoot);
+    await compileSingBox(projectRoot, goExe, targetRef);
 
     // 6. 验证编译结果
     if (File(dllPath).existsSync()) {
+      await versionFile.writeAsString('$targetRef\n');
       print('Build success. Output: ${File(dllPath).absolute.path}');
     } else {
       print('❌ 编译失败，DLL 文件不存在');
@@ -123,14 +131,22 @@ void main(List<String> arguments) async {
   }
 }
 
-/// 检测 Go 版本是否形如 go1.23.*
-Future<bool> checkGoVersion(String goExe) async {
+/// 在 native 模块中检测实际工具链（包括 Go 自动下载的工具链）。
+Future<bool> checkGoVersion(String goExe, String nativeDir) async {
   try {
-    final result = await Process.run(goExe, ['version']);
+    final result = await Process.run(goExe, [
+      'version',
+    ], workingDirectory: nativeDir);
     if (result.exitCode == 0) {
       final out = (result.stdout as String).trim();
       print('Go version: $out');
-      return out.contains('go1.23');
+      final match = RegExp(r'go(\d+)\.(\d+)\.(\d+)').firstMatch(out);
+      if (match == null) return false;
+      final major = int.parse(match[1]!);
+      final minor = int.parse(match[2]!);
+      final patch = int.parse(match[3]!);
+      return major > 1 ||
+          (major == 1 && (minor > 25 || (minor == 25 && patch >= 5)));
     }
   } catch (_) {}
   return false;
@@ -200,7 +216,11 @@ Future<void> cloneSingBoxToParent(String parentDir) async {
 // removed updateSingBox; submodule update is preferred
 
 /// 编译 sing-box DLL
-Future<void> compileSingBox(String projectRoot, String goExe) async {
+Future<void> compileSingBox(
+  String projectRoot,
+  String goExe,
+  String targetRef,
+) async {
   final nativeDir = '$projectRoot/native';
 
   // 1. 确保 native 目录和文件存在
@@ -299,14 +319,6 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
     }
   }
 
-  // 3. 清理 go.sum 以确保根据本地 sing-box 重新解析依赖
-  final goSumFile = File('$nativeDir/go.sum');
-  if (goSumFile.existsSync()) {
-    try {
-      goSumFile.deleteSync();
-    } catch (_) {}
-  }
-
   // 4. 下载依赖
   print('📦 下载 Go 模块依赖...');
   var result = await Process.run(
@@ -342,7 +354,10 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
   );
   // 统一构建标签（需包含 gVisor 与 Wintun 支持以满足双向回退）
   const buildTags =
-      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_gvisor';
+      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_gvisor,with_grpc';
+  final version = targetRef.replaceFirst(RegExp(r'^v'), '');
+  final outputDir = Directory('$projectRoot/build/singbox-core');
+  await outputDir.create(recursive: true);
   stdout.writeln('使用构建标签: ' + buildTags);
   result = await Process.run(
     goExe,
@@ -352,10 +367,10 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
       buildTags,
       '-trimpath',
       '-ldflags',
-      '-s -w -buildid= -checklinkname=0',
+      '-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=$version',
       '-buildmode=c-shared',
       '-o',
-      '../windows/singbox.dll',
+      '${outputDir.path}/singbox.dll',
       'singbox.go',
     ],
     workingDirectory: nativeDir,
@@ -377,6 +392,12 @@ Future<void> compileSingBox(String projectRoot, String goExe) async {
     throw Exception('编译 DLL 失败');
   }
 
+  await File(
+    '${outputDir.path}/singbox.dll',
+  ).copy('$projectRoot/windows/singbox.dll');
+  await File(
+    '${outputDir.path}/singbox.h',
+  ).copy('$projectRoot/windows/singbox.h');
   print('✅ DLL 编译完成');
 }
 
@@ -393,10 +414,10 @@ Future<void> ensureNativeFiles(String projectRoot) async {
   if (!goModFile.existsSync()) {
     await goModFile.writeAsString('''module singbox_native
 
-go 1.23.1
+go 1.25.5
 
 require (
-    github.com/sagernet/sing-box v0.0.0
+    github.com/sagernet/sing-box v1.14.2
 )
 ''');
   }
@@ -408,80 +429,24 @@ require (
   }
 }
 
-/// 将 replace 指向上层 sing-box 的绝对路径，避免依赖项目根联结
-Future<void> patchGoModReplaceToPath(
-  String projectRoot,
-  String parentSingBoxPath,
-) async {
-  final goModFile = File('$projectRoot/native/go.mod');
-  if (!goModFile.existsSync()) return;
-  final content = await goModFile.readAsString();
-  final absPath = Directory(
-    parentSingBoxPath,
-  ).absolute.path.replaceAll('\\', '/');
-  final replaceLine =
-      'replace github.com/sagernet/sing-box => ' + absPath + '\n';
-  String updated;
-  final regex = RegExp(
-    r'^replace\s+github.com/sagernet/sing-box\s*=>.*$',
-    multiLine: true,
-  );
-  if (regex.hasMatch(content)) {
-    updated = content.replaceAll(
-      regex,
-      'replace github.com/sagernet/sing-box => ' + absPath,
-    );
-  } else {
-    updated =
-        content.trimRight() + '\n\n// 使用上层目录的 sing-box 源码\n' + replaceLine;
-  }
-  await goModFile.writeAsString(updated);
-}
-
 /// 用一个最小的 go.mod 覆盖 native/go.mod，并指向上层 sing-box
-Future<void> rewriteMinimalGoMod(
-  String projectRoot,
-  String parentSingBoxPath,
-) async {
+Future<void> rewriteMinimalGoMod(String projectRoot) async {
   final dir = Directory('$projectRoot/native');
   if (!dir.existsSync()) {
     await dir.create(recursive: true);
   }
-  final absPath = Directory(
-    parentSingBoxPath,
-  ).absolute.path.replaceAll('\\', '/');
-
-  // 检查是否使用local-sing-tun
-  final localSingTunPath = Directory('$parentSingBoxPath/local-sing-tun');
-  final useLocalSingTun = localSingTunPath.existsSync();
-
   final goMod = File('$projectRoot/native/go.mod');
-  var content =
-      '''module singbox_native
+  final content = '''module singbox_native
 
-go 1.23.1
+go 1.25.5
 
 require (
-    github.com/sagernet/sing-box v0.0.0
+    github.com/sagernet/sing-box v1.14.2
 )
 
 // 使用上层目录的 sing-box 源码
-replace github.com/sagernet/sing-box => ${absPath}
+replace github.com/sagernet/sing-box => ../../sing-box
 ''';
-
-  // 如果local-sing-tun存在，则添加对应的replace指令
-  if (useLocalSingTun) {
-    final localSingTunAbsPath = localSingTunPath.absolute.path.replaceAll(
-      '\\',
-      '/',
-    );
-    content +=
-        '''
-// 使用本地的 sing-tun 源码
-replace github.com/sagernet/sing-tun => ${localSingTunAbsPath}
-''';
-    print('✅ 检测到 local-sing-tun，将使用本地版本: $localSingTunAbsPath');
-  }
 
   await goMod.writeAsString(content);
 }

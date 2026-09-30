@@ -13,6 +13,7 @@ import 'config_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dns_manager.dart';
 import '../services/connection_manager.dart';
+import '../utils/log_policy.dart';
 
 /// sing-box 原生服务管理类（使用 FFI）
 class SingBoxNativeService {
@@ -1188,10 +1189,11 @@ class SingBoxNativeService {
       if (!await logDir.exists()) {
         await logDir.create(recursive: true);
       }
-      final file = File(path.join(logDir.path, 'early_start.log'));
-      final sink = file.openWrite(mode: FileMode.append);
-      _earlyFileLogSink = sink;
-      _earlyFileLog('=== Session ${DateTime.now().toIso8601String()} ===');
+      if (LogPolicy.debugEnabled) {
+        final file = File(path.join(logDir.path, 'early_start.log'));
+        _earlyFileLogSink = file.openWrite(mode: FileMode.append);
+        _earlyFileLog('=== Session ${DateTime.now().toIso8601String()} ===');
+      }
       // 加载首选栈
       try {
         final prefFile = File(path.join(logDir.path, 'preferred_stack.txt'));

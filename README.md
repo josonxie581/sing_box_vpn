@@ -29,6 +29,9 @@ Gsou 是一个简单的客户端应用，基于 sing-box 核心构建。
 - **多协议支持**: 支持多种代理协议和配置格式
 - **灵活配置**: 支持导入配置文件和二维码扫描
 - **高性能**: 基于 sing-box 核心
+- **AI 服务默认代理**: OpenAI / ChatGPT / Sora 与 Anthropic / Claude 的服务域名及所有子域名、登录、静态资源、附件、语音和已知服务依赖内置走当前代理节点，无需设置；规则、全局和自定义模式都生效。
+
+内置 AI 规则优先于自定义直连、拦截及默认出站；对应 DNS 使用代理解析，TUN 下使用 FakeIP 保留域名关联，PAC 匹配后也不会回退直连。启用 IPv6 时，TUN 同时接管 IPv6 路由。清单按 [OpenAI 网络要求](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps) 和 [Claude 网络要求](https://code.claude.com/docs/en/network-config) 核对；新增服务域名需要随客户端清单更新。此规则适用于进入本客户端的流量。
 
 ## 系统要求
 
@@ -181,7 +184,9 @@ flutter build windows --release
 
 ### 编译 sing-box DLL
 
-项目支持使用本地 sing-tun 源码编译 sing-box DLL：
+当前核心锁定为 **sing-box v1.14.2**（`sing-box-version.txt`），构建使用上层 `../sing-box` 的对应官方 tag。需要 Go 1.25.5 或更新版本，也可以通过 `GOTOOLCHAIN=auto` 自动选择工具链。
+
+活动原生模块为 `native/`；`go/` 是历史封装，不参与当前客户端构建。默认使用上游匹配的 sing-tun 依赖，不自动加载旧的 `local-sing-tun`。
 
 1. **自动编译**（推荐）
 
@@ -199,7 +204,9 @@ flutter build windows --release
 dart run tools/prebuild.dart --force
 ```
 
-详细说明请参考：[LOCAL_SING_TUN_USAGE.md](LOCAL_SING_TUN_USAGE.md)
+DLL 构建成功后才替换旧文件，`windows/singbox.version` 用于避免复用其他版本的 DLL。
+
+升级说明请参考：[官方 v1.14.2 发布](https://github.com/SagerNet/sing-box/releases/tag/v1.14.2) 和 [本地核心依赖说明](LOCAL_SING_TUN_USAGE.md)。DNS、FakeIP、嗅探和阻断规则已迁移为新版格式；WireGuard 节点使用 endpoints。
 
 ## 项目结构
 
