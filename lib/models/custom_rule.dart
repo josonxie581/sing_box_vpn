@@ -79,7 +79,11 @@ class CustomRule {
         break;
     }
 
-    rule['outbound'] = outbound;
+    if (outbound == 'block') {
+      rule['action'] = 'reject';
+    } else {
+      rule['outbound'] = outbound;
+    }
     return rule;
   }
 

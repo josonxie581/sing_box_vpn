@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:path/path.dart' as path;
+import '../utils/log_policy.dart';
 // import 'package:win32/win32.dart' as win32; // Not required; use Directory.current instead
 
 // C 原型: typedef void (*LogCallback)(const char* msg);
@@ -599,6 +600,7 @@ class SingBoxFFI {
 // ================== 低层诊断辅助 ==================
 
 void _ffiDiag(String msg) {
+  if (!LogPolicy.debugEnabled) return;
   final line = '[FFI] $msg';
   // 控制台
   // ignore: avoid_print

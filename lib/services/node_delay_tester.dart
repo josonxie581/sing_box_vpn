@@ -1136,12 +1136,10 @@ class NodeDelayTester {
           "type": "mixed",
           "listen": "127.0.0.1",
           "listen_port": 0, // 让系统自动分配端口
-          "sniff": false,
         },
       ],
       "outbounds": [
         {"tag": "direct", "type": "direct"},
-        {"tag": "block", "type": "block"},
       ],
       "route": {
         "rules": [

@@ -19,6 +19,7 @@ import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
 import 'utils/privilege_manager.dart';
 import 'utils/simple_single_instance.dart';
+import 'utils/log_policy.dart';
 import 'package:flutter/services.dart';
 
 void main() async {
@@ -52,6 +53,7 @@ void main() async {
     (error, stack) {
       _CrashLogger.log('zone', error, stack);
     },
+    zoneSpecification: LogPolicy.consoleZone,
   );
 }
 

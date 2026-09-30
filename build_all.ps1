@@ -5,9 +5,9 @@ param(
     [string]$Mode = "release",
     [switch]$SkipDLL,
     [switch]$SkipFlutter,
-    [switch]$UpdateSingBox,     # 若本地已有上层 sing-box 目录则执行 git pull
+    [switch]$UpdateSingBox,     # 获取上游更新后切换到 SingBoxRef
     [string]$SingBoxRepo = "https://github.com/SagerNet/sing-box.git", # 自定义仓库地址
-    [string]$SingBoxRef = "",   # 指定分支/Tag/Commit
+    [string]$SingBoxRef = (Get-Content -LiteralPath "$PSScriptRoot\sing-box-version.txt" -Raw).Trim(),
     [switch]$NoUtf8,             # 不强制 UTF-8 控制台输出
     [switch]$Help
 )
@@ -54,10 +54,10 @@ function Ensure-SingBoxSource {
         git clone $Repo $targetDir | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "git clone failed ($Repo)" }
     } elseif ($UpdateSingBox) {
-        Write-Step "Updating existing sing-box repo (git pull)"
+        Write-Step "Fetching sing-box versions"
         Push-Location $targetDir
         git fetch --all --tags | Out-Host
-        git pull --ff-only | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
         Pop-Location
     } else {
         Write-Info "Found existing sing-box source: $targetDir"
@@ -84,7 +84,7 @@ if ($Help) {
     Write-Host "  -SkipDLL      Skip sing-box DLL compilation" -ForegroundColor White
     Write-Host "  -SkipDaemon   Skip daemon compilation" -ForegroundColor White
     Write-Host "  -SkipFlutter  Skip Flutter app compilation" -ForegroundColor White
-    Write-Host "  -UpdateSingBox Update existing ..\\sing-box via git pull" -ForegroundColor White
+    Write-Host "  -UpdateSingBox Fetch upstream versions before checkout" -ForegroundColor White
     Write-Host "  -SingBoxRepo   Specify sing-box git repo (default official)" -ForegroundColor White
     Write-Host "  -SingBoxRef    Checkout to specific ref (tag/branch/commit)" -ForegroundColor White
     Write-Host "  -NoUtf8        Do NOT force UTF-8 console (avoid if terminal already configured)" -ForegroundColor White
@@ -123,80 +123,6 @@ try {
     # 仅在需要生成 DLL 时准备 sing-box 源码
     if (-not $SkipDLL) { Ensure-SingBoxSource -Repo $SingBoxRepo -Ref $SingBoxRef }
 
-    function Set-GoModReplaceToParent {
-        param(
-            [Parameter(Mandatory=$true)][string]$GoModPath,
-            [Parameter(Mandatory=$true)][string]$ParentSingBoxDir
-        )
-        if (-not (Test-Path $GoModPath)) { return }
-        if (-not (Test-Path $ParentSingBoxDir)) { return }
-        try {
-            $content = Get-Content -LiteralPath $GoModPath -Raw
-            $absPath = (Resolve-Path $ParentSingBoxDir).Path -replace '\\','/'
-            # 1) 删除任何已存在的 sing-box replace（单行形式）
-            $content = [Regex]::Replace($content, '(?m)^\s*replace\s+github\.com/sagernet/sing-box\s*=>.*\r?\n?', '')
-            # 2) 删除 replace 块内针对 sing-box 的行
-            $content = [Regex]::Replace($content, '(?m)^\s*github\.com/sagernet/sing-box\s*=>.*\r?\n?', '')
-            # 3) 清理可能出现的空的 replace() 块
-            $content = [Regex]::Replace($content, '(?ms)^\s*replace\s*\(\s*\)\s*\r?\n?', '')
-            # 4) 追加唯一的 replace 到文件末尾
-            if (-not $content.TrimEnd().EndsWith("`n")) { $content += "`n" }
-            $content += "`n// 使用上层目录的 sing-box 源码`nreplace github.com/sagernet/sing-box => $absPath`n"
-            # 使用无 BOM 的 UTF-8 写入，避免 go 工具报 \ufeff 错误
-            if (-not $content.TrimEnd().EndsWith("`n")) { $content += "`n" }
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($GoModPath, $content, $utf8NoBom)
-            Write-Info "Patched replace in $(Split-Path -Leaf $GoModPath) -> $absPath"
-        } catch {
-            Write-Host "[WARNING] Failed to patch ${GoModPath}: $_" -ForegroundColor Yellow
-        }
-    }
-
-    function Reset-GoMod-Minimal {
-        param(
-            [Parameter(Mandatory=$true)][string]$ModuleDir,
-            [Parameter(Mandatory=$true)][string]$ParentSingBoxDir
-        )
-        $goMod = Join-Path $ModuleDir 'go.mod'
-        if (-not (Test-Path $ParentSingBoxDir)) { return }
-        $moduleName = 'daemon'
-        if (Test-Path $goMod) {
-            try {
-                $raw = Get-Content -LiteralPath $goMod -Raw
-                $m = [Regex]::Match($raw, '(?m)^\s*module\s+([^\r\n]+)')
-                if ($m.Success) { $moduleName = $m.Groups[1].Value.Trim() }
-            } catch {}
-        }
-        $absPath = (Resolve-Path $ParentSingBoxDir).Path -replace '\\','/'
-        $content = @()
-        $content += "module $moduleName"
-        $content += ""
-        $content += "go 1.23.1"
-        $content += ""
-        $content += "require github.com/sagernet/sing-box v0.0.0"
-        $content += ""
-        $content += "// 使用上层目录的 sing-box 源码"
-        $content += "replace github.com/sagernet/sing-box => $absPath"
-
-        # 检查是否存在 local-sing-tun 目录
-        $localSingTunDir = Join-Path $ParentSingBoxDir 'local-sing-tun'
-        if (Test-Path $localSingTunDir) {
-            $localSingTunPath = (Resolve-Path $localSingTunDir).Path -replace '\\','/'
-            $content += ""
-            $content += "// 使用本地的 sing-tun 源码"
-            $content += "replace github.com/sagernet/sing-tun => $localSingTunPath"
-            Write-Info "检测到 local-sing-tun，将使用本地版本: $localSingTunPath"
-        }
-
-        $text = ($content -join "`n") + "`n"
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($goMod, $text, $utf8NoBom)
-        # 删除 go.sum，避免旧校验干扰
-        $goSum = Join-Path $ModuleDir 'go.sum'
-        if (Test-Path $goSum) { Remove-Item -LiteralPath $goSum -Force -ErrorAction SilentlyContinue }
-        Write-Info "Rewrote minimal go.mod for module '$moduleName' and removed go.sum"
-    }
-    
     # Step 1: Compile sing-box DLL
     if (-not $SkipDLL) {
         Write-Step "[1/3] Compiling sing-box DLL with gVisor..."

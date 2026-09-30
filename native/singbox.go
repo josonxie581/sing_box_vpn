@@ -26,8 +26,7 @@ import (
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/process"
-	plat "github.com/sagernet/sing-box/experimental/libbox/platform"
+	sbconstant "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -60,6 +59,7 @@ var lastError string
 var lastRestartAt time.Time
 
 const logBufMax = 2000
+const nativeDebugLogs = false
 
 // 记录当前运行配置与动态插入的路由规则（JSON 文本形式）
 // pristineConfigJSON 记录“无临时规则”的基线配置
@@ -81,6 +81,9 @@ func diagFilePath() string {
 }
 
 func dbg(msg string) {
+	if !nativeDebugLogs {
+		return
+	}
 	line := "[NATIVE] " + msg
 	pushLog(line)
 	if logCB != nil && runtime.GOOS != "android" {
@@ -135,24 +138,148 @@ func setLastError(err error) {
 	}
 }
 
-// --- Android 平台接口：让 sing-box 使用 VpnService 提供的 TUN FD，而不是自行配置内核 ---
-// 满足 experimental/libbox/platform.Interface 要求的最小实现。
+// Android VpnService transfers ownership of its TUN FD to sing-tun.
+var _ adapter.PlatformInterface = (*androidPlatformInterface)(nil)
+
 type androidPlatformInterface struct{}
 
-func (p *androidPlatformInterface) Initialize(networkManager adapter.NetworkManager) error {
+func (s *androidPlatformInterface) Initialize(networkManager adapter.NetworkManager) error {
 	return nil
 }
-func (p *androidPlatformInterface) UsePlatformAutoDetectInterfaceControl() bool { return false }
-func (p *androidPlatformInterface) AutoDetectInterfaceControl(fd int) error     { return nil }
-func (p *androidPlatformInterface) OpenTun(options *tun.Options, _ option.TunPlatformOptions) (tun.Tun, error) {
-	dbg("platform.OpenTun called")
+
+func (s *androidPlatformInterface) UsePlatformAutoDetectInterfaceControl() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) AutoDetectInterfaceControl(fd int) error {
+	return nil
+}
+
+func (s *androidPlatformInterface) UsePlatformInterface() bool {
+	return true
+}
+
+func (s *androidPlatformInterface) OpenInterface(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
 	if tunFD < 0 {
 		return nil, fmt.Errorf("no tun fd available")
 	}
-	// 不复制 FD，直接移交给 sing-tun 持有；确保 Java 侧使用 detachFd() 交出所有权
 	options.FileDescriptor = tunFD
-	// 使用用户态 gVisor 栈时不会触发内核/SELinux 的路由/接口配置
 	return tun.New(*options)
+}
+
+func (s *androidPlatformInterface) ProcessPlatformOptions(options option.TunPlatformOptions) error {
+	return nil
+}
+
+func (s *androidPlatformInterface) UsePlatformDefaultInterfaceMonitor() bool {
+	return true
+}
+
+func (s *androidPlatformInterface) CreateDefaultInterfaceMonitor(logger slogger.Logger) tun.DefaultInterfaceMonitor {
+	return &dummyDefaultInterfaceMonitor{}
+}
+
+func (s *androidPlatformInterface) UsePlatformNetworkInterfaces() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) NetworkInterfaces() ([]adapter.NetworkInterface, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) UnderNetworkExtension() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) NetworkExtensionIncludeAllNetworks() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) ClearDNSCache() {
+}
+
+func (s *androidPlatformInterface) RequestPermissionForWIFIState() error {
+	return nil
+}
+
+func (s *androidPlatformInterface) UsePlatformWIFIMonitor() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) ReadWIFIState(ctx context.Context) adapter.WIFIState {
+	return adapter.WIFIState{}
+}
+
+func (s *androidPlatformInterface) UsePlatformConnectionOwnerFinder() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) FindConnectionOwner(request *adapter.FindConnectionOwnerRequest) (*adapter.ConnectionOwner, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) UsePlatformNotification() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) SendNotification(notification *adapter.Notification) error {
+	return nil
+}
+
+func (s *androidPlatformInterface) CancelNotification(identifier string, typeID int32) error {
+	return nil
+}
+
+func (s *androidPlatformInterface) MyInterfaceAddress() []netip.Addr {
+	return nil
+}
+
+func (s *androidPlatformInterface) UsePlatformNeighborResolver() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) StartNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) CloseNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return nil
+}
+
+func (s *androidPlatformInterface) UsePlatformShell() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) CheckPlatformShell() error {
+	return nil
+}
+
+func (s *androidPlatformInterface) OpenShellSession(user *adapter.PlatformUser, command string, env []string, term string, rows int32, cols int32) (adapter.ShellSession, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) LookupSFTPServer() (string, error) {
+	return "", os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) ReadSystemSSHHostKey() ([]byte, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) TailscaleHostname() string {
+	return ""
+}
+
+func (s *androidPlatformInterface) UsePlatformBridge() bool {
+	return false
+}
+
+func (s *androidPlatformInterface) CreateBridge(options adapter.BridgeOptions) (adapter.BridgeSession, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *androidPlatformInterface) LookupUser(username string) (*adapter.PlatformUser, error) {
+	return nil, os.ErrInvalid
 }
 
 // 一个安全的空实现，避免上层对 interfaceMonitor 的空指针解引用
@@ -169,26 +296,7 @@ func (m *dummyDefaultInterfaceMonitor) RegisterCallback(_ tun.DefaultInterfaceUp
 func (m *dummyDefaultInterfaceMonitor) UnregisterCallback(_ *xlist.Element[tun.DefaultInterfaceUpdateCallback]) {
 }
 func (m *dummyDefaultInterfaceMonitor) RegisterMyInterface(_ string) {}
-func (m *dummyDefaultInterfaceMonitor) MyInterface() string          { return "" }
-
-func (p *androidPlatformInterface) CreateDefaultInterfaceMonitor(_ slogger.Logger) tun.DefaultInterfaceMonitor {
-	dbg("platform.CreateDefaultInterfaceMonitor -> dummy")
-	return &dummyDefaultInterfaceMonitor{}
-}
-func (p *androidPlatformInterface) Interfaces() ([]adapter.NetworkInterface, error) {
-	return []adapter.NetworkInterface{}, nil
-}
-func (p *androidPlatformInterface) UnderNetworkExtension() bool                 { return false }
-func (p *androidPlatformInterface) IncludeAllNetworks() bool                    { return false }
-func (p *androidPlatformInterface) ClearDNSCache()                              {}
-func (p *androidPlatformInterface) ReadWIFIState() adapter.WIFIState            { return adapter.WIFIState{} }
-func (p *androidPlatformInterface) SystemCertificates() []string                { return nil }
-func (p *androidPlatformInterface) SendNotification(_ *plat.Notification) error { return nil }
-
-// process.Searcher
-func (p *androidPlatformInterface) FindProcessInfo(_ context.Context, _ string, _ netip.AddrPort, _ netip.AddrPort) (*process.Info, error) {
-	return nil, os.ErrInvalid
-}
+func (m *dummyDefaultInterfaceMonitor) MyInterfaces() []string       { return nil }
 
 // 按需设置 route 中的 auto_detect_interface 与 auto_detect_interface_ipv6（均置为 false）。
 // 通过 setV4/setV6 控制是否写入对应的键，便于针对不同 sing-box 版本进行自适应。
@@ -232,6 +340,9 @@ type ffiPlatformWriter struct{}
 
 func (w *ffiPlatformWriter) DisableColors() bool { return true }
 func (w *ffiPlatformWriter) WriteMessage(level log.Level, message string) {
+	if level >= log.LevelDebug {
+		return
+	}
 	pushLog(message)
 	if logCB != nil && runtime.GOOS != "android" {
 		cmsg := C.CString(message)
@@ -280,24 +391,26 @@ func StartSingBox(configJSON *C.char) int {
 		return -1 // 已经在运行
 	}
 
-	// Watchdog: 每 1s 输出一次阶段进度，帮助定位卡住点
-	startTS := time.Now()
 	stage := "init"
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case t := <-ticker.C:
-				elapsed := t.Sub(startTS).Milliseconds()
-				dbg(fmt.Sprintf("StartSingBox watchdog elapsed=%dms stage=%s", elapsed, stage))
+	if nativeDebugLogs {
+		// 调试时才启动诊断定时器，正常运行不写阶段进度。
+		startTS := time.Now()
+		done := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case t := <-ticker.C:
+					elapsed := t.Sub(startTS).Milliseconds()
+					dbg(fmt.Sprintf("StartSingBox watchdog elapsed=%dms stage=%s", elapsed, stage))
+				}
 			}
-		}
-	}()
-	defer close(done)
+		}()
+		defer close(done)
+	}
 
 	// 解析配置（必须使用带上下文的解析以启用各注册表与 typed DNS 等选项）
 	var options option.Options
@@ -452,7 +565,7 @@ func StartSingBox(configJSON *C.char) int {
 	if runtime.GOOS == "android" && tunFD >= 0 {
 		dbg(fmt.Sprintf("[Start] Android registering platform interface with TUN FD=%d", tunFD))
 		platformIface := &androidPlatformInterface{}
-		ctxWithRegistry = service.ContextWith[plat.Interface](ctxWithRegistry, platformIface)
+		ctxWithRegistry = service.ContextWith[adapter.PlatformInterface](ctxWithRegistry, platformIface)
 	}
 
 	instance, err = box.New(box.Options{
@@ -730,7 +843,14 @@ func TestConfig(configJSON *C.char) int {
 		return -1
 	}
 
-	// TODO: 可以添加更详细的配置验证
+	validationCtx, validationCancel := context.WithCancel(service.ExtendContext(ctxWithRegistry))
+	defer validationCancel()
+	validated, err := box.New(box.Options{Context: validationCtx, Options: options})
+	if err != nil {
+		setLastError(fmt.Errorf("validate config: %w", err))
+		return -1
+	}
+	_ = validated.Close()
 
 	emitLog("=配置验证通过")
 	return 0
@@ -739,7 +859,7 @@ func TestConfig(configJSON *C.char) int {
 //export GetVersion
 func GetVersion() *C.char {
 	// 返回版本信息
-	version := "sing-box integrated v1.0.0"
+	version := "sing-box " + sbconstant.Version
 	return C.CString(version)
 }
 

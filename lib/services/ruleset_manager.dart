@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../models/proxy_mode.dart';
@@ -8,16 +8,17 @@ import 'routing_config_service.dart';
 import 'geosite_manager.dart';
 import 'outbound_binding_service.dart';
 import 'config_manager.dart';
+import 'builtin_proxy_rules.dart';
 
-/// 规则与配置组装（兼容 sing-box v1.8.0 及以上）
+/// 规则与配置组装（sing-box v1.14）
 /// 符合官方迁移指南：https://sing-box.sagernet.org/zh/migration/#geoip
 class RulesetManager {
   /// 路由规则（规则模式）
   static Future<List<Map<String, dynamic>>> getRuleModeRoutes() async {
     final rules = <Map<String, dynamic>>[
       // 系统 DNS 给内网 DNS 处理，避免被导入代理
-      {"network": "udp", "port": 53, "outbound": "dns-out"},
-      {"network": "tcp", "port": 53, "outbound": "dns-out"},
+      {"network": "udp", "port": 53, "action": "hijack-dns"},
+      {"network": "tcp", "port": 53, "action": "hijack-dns"},
 
       // 私有地址直连（硬编码，无需规则集文件）
       {
@@ -71,7 +72,7 @@ class RulesetManager {
         },
         {
           "rule_set": ["geosite-ads"],
-          "outbound": "block",
+          "action": "reject",
         },
       ]);
     }
@@ -83,8 +84,8 @@ class RulesetManager {
   /// 路由规则（全局模式）
   static List<Map<String, dynamic>> getGlobalModeRoutes() {
     final rules = <Map<String, dynamic>>[
-      {"network": "udp", "port": 53, "outbound": "dns-out"},
-      {"network": "tcp", "port": 53, "outbound": "dns-out"},
+      {"network": "udp", "port": 53, "action": "hijack-dns"},
+      {"network": "tcp", "port": 53, "action": "hijack-dns"},
 
       // 私有地址直连（硬编码，无需规则集文件）
       {
@@ -109,7 +110,7 @@ class RulesetManager {
     // 添加广告拦截（即使全局模式也保留广告拦截）
     rules.add({
       "rule_set": ["geosite-ads"],
-      "outbound": "block",
+      "action": "reject",
     });
 
     // 其余流量走 route.final（proxy）
@@ -120,8 +121,8 @@ class RulesetManager {
   static List<Map<String, dynamic>> getCustomModeRoutes() {
     final rules = <Map<String, dynamic>>[
       // 系统 DNS 给内网 DNS 处理，避免被导入代理
-      {"network": "udp", "port": 53, "outbound": "dns-out"},
-      {"network": "tcp", "port": 53, "outbound": "dns-out"},
+      {"network": "udp", "port": 53, "action": "hijack-dns"},
+      {"network": "tcp", "port": 53, "action": "hijack-dns"},
 
       // 私有地址直连（硬编码，无需规则集文件）
       {
@@ -347,8 +348,6 @@ class RulesetManager {
     return [
       proxyConfig,
       {"tag": "direct", "type": "direct"},
-      {"tag": "block", "type": "block"},
-      {"tag": "dns-out", "type": "dns"},
     ];
   }
 
@@ -436,16 +435,16 @@ class RulesetManager {
           "auto_route": true,
           "strict_route": tunStrictRoute,
 
-          // 嗅探配置：提取 TLS SNI / HTTP Host 用于域名路由匹配
-          "sniff": true,
-          "sniff_override_destination": false,
           // mixed：TCP 走 system（高效），UDP 走 gVisor（兼容性好）
           "stack": preferredTunStack ?? 'mixed',
 
-          if (Platform.isWindows) "endpoint_independent_nat": false,
-
           // 路由表配置
-          "inet4_route_address": ["0.0.0.0/1", "128.0.0.0/1"],
+          "route_address": [
+            "0.0.0.0/1",
+            "128.0.0.0/1",
+            if (enableIpv6) "::/1",
+            if (enableIpv6) "8000::/1",
+          ],
         });
       }
     }
@@ -455,7 +454,6 @@ class RulesetManager {
       "type": "mixed",
       "listen": "::",
       "listen_port": (localPort == null || localPort <= 0) ? 7890 : localPort,
-      "sniff": true,
       "users": [],
     });
 
@@ -465,7 +463,6 @@ class RulesetManager {
       "type": "socks",
       "listen": "127.0.0.1",
       "listen_port": 17890,
-      "sniff": false,
       "users": [],
     });
 
@@ -485,11 +482,20 @@ class RulesetManager {
       print('[WARN] 生成额外出站失败: $e');
     }
 
+    // WireGuard 节点在 1.13 起属于 endpoint，仍以原 tag 参与路由。
+    final nodeEndpoints = <Map<String, dynamic>>[];
+    baseOutbounds.removeWhere((outbound) {
+      if (outbound['type'] != 'wireguard') return false;
+      nodeEndpoints.add(outbound);
+      return true;
+    });
+    final routableNodes = [...baseOutbounds, ...nodeEndpoints];
+
     // 计算最终出站标签（场景），若目标不存在则回退 proxy
     var finalTag = 'proxy';
     try {
       finalTag = outboundBinding.finalOutboundTag;
-      final available = baseOutbounds
+      final available = routableNodes
           .map((e) => (e['tag'] ?? '').toString())
           .where((t) => t.isNotEmpty)
           .toSet();
@@ -499,7 +505,7 @@ class RulesetManager {
     } catch (_) {}
 
     // 可用出站标签集合，用于校验规则引用
-    final availableTags = baseOutbounds
+    final availableTags = routableNodes
         .map((e) => (e['tag'] ?? '').toString())
         .where((t) => t.isNotEmpty)
         .toSet();
@@ -530,14 +536,23 @@ class RulesetManager {
     final androidTunDnsHijackRule = (useTun && Platform.isAndroid)
         ? <String, dynamic>{
             "protocol": ["dns"], // sing-box 支持的速记：等价于 dst port 53/udp
-            "outbound": "dns-out",
+            "action": "hijack-dns",
           }
         : null;
 
+    final modeRules = (routeConfig['rules'] as List)
+        .cast<Map<String, dynamic>>();
     final mergedRules = <Map<String, dynamic>>[
-      inboundBypassRule,
+      {
+        "inbound": ["tun-in", "mixed-in", "latency-test-in"],
+        "action": "sniff",
+      },
+      ...modeRules.where((rule) => rule['action'] == 'hijack-dns'),
       if (androidTunDnsHijackRule != null) androidTunDnsHijackRule,
-      ...?(routeConfig)["rules"] as List?,
+      // 内置 AI 规则先于直连、用户规则和延时入站例外，所有模式都生效。
+      ...BuiltinProxyRules.routeRules(),
+      inboundBypassRule,
+      ...modeRules.where((rule) => rule['action'] != 'hijack-dns'),
     ];
     final sanitizedRules = _sanitizeRules(mergedRules);
 
@@ -546,8 +561,10 @@ class RulesetManager {
       "dns": getDnsConfig(mode, useTun: useTun),
       "inbounds": inbounds,
       "outbounds": baseOutbounds,
+      if (nodeEndpoints.isNotEmpty) "endpoints": nodeEndpoints,
       "route": {
         ...routeConfig,
+        "default_domain_resolver": "local",
         // 覆盖最终出站标签
         "final": finalTag,
         "rules": sanitizedRules,
@@ -558,7 +575,7 @@ class RulesetManager {
     try {
       final eps = DnsManager().generateEndpointsConfig();
       if (eps.isNotEmpty) {
-        config['endpoints'] = eps;
+        config['endpoints'] = [...nodeEndpoints, ...eps];
       }
     } catch (e) {
       print('[WARN] 生成 endpoints 失败: $e');
@@ -570,9 +587,13 @@ class RulesetManager {
         final dns = config['dns'] as Map<String, dynamic>?;
         if (dns != null) {
           dns['strategy'] = 'ipv4_only';
-          final fakeip = dns['fakeip'];
-          if (fakeip is Map<String, dynamic>) {
-            fakeip.remove('inet6_range');
+          final servers = dns['servers'];
+          if (servers is List) {
+            for (final server in servers) {
+              if (server is Map && server['type'] == 'fakeip') {
+                server.remove('inet6_range');
+              }
+            }
           }
         }
       } catch (e) {

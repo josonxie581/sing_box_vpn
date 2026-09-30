@@ -67,6 +67,7 @@ sing-box
 gsou_daemon.exe
 wintun.dll
 singbox.dll
+windows/singbox.version
 # Symbolication related
 app.*.symbols
 

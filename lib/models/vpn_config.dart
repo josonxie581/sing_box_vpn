@@ -310,12 +310,10 @@ class VPNConfig {
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
-          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
-          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
-          if ((settings['up'] ?? '').toString().isNotEmpty)
-            "up": settings['up'],
-          if ((settings['down'] ?? '').toString().isNotEmpty)
-            "down": settings['down'],
+          if (_hysteria2Bandwidth('up') != null)
+            "up_mbps": _hysteria2Bandwidth('up'),
+          if (_hysteria2Bandwidth('down') != null)
+            "down_mbps": _hysteria2Bandwidth('down'),
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -385,20 +383,7 @@ class VPNConfig {
         };
 
       case 'wireguard':
-        return {
-          "type": "wireguard",
-          "tag": tag,
-          "server": server,
-          "server_port": port,
-          "private_key": settings['privateKey'] ?? "",
-          "peer_public_key": settings['peerPublicKey'] ?? "",
-          if (settings['localAddress'] is List)
-            "local_address": settings['localAddress'],
-          if (settings['dns'] is List) "dns": settings['dns'],
-          if ((settings['reserved'] ?? '').toString().isNotEmpty)
-            "reserved": settings['reserved'],
-          if (settings['mtu'] != null) "mtu": settings['mtu'],
-        };
+        return _generateWireGuardEndpoint(tag);
 
       default:
         return {"type": "direct", "tag": tag};
@@ -605,12 +590,10 @@ class VPNConfig {
           "server": server,
           "server_port": port,
           "password": settings['password'] ?? "",
-          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
-          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
-          if ((settings['up'] ?? '').toString().isNotEmpty)
-            "up": settings['up'],
-          if ((settings['down'] ?? '').toString().isNotEmpty)
-            "down": settings['down'],
+          if (_hysteria2Bandwidth('up') != null)
+            "up_mbps": _hysteria2Bandwidth('up'),
+          if (_hysteria2Bandwidth('down') != null)
+            "down_mbps": _hysteria2Bandwidth('down'),
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -680,24 +663,58 @@ class VPNConfig {
         };
 
       case 'wireguard':
-        return {
-          "type": "wireguard",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "private_key": settings['privateKey'] ?? "",
-          "peer_public_key": settings['peerPublicKey'] ?? "",
-          if (settings['localAddress'] is List)
-            "local_address": settings['localAddress'],
-          if (settings['dns'] is List) "dns": settings['dns'],
-          if ((settings['reserved'] ?? '').toString().isNotEmpty)
-            "reserved": settings['reserved'],
-          if (settings['mtu'] != null) "mtu": settings['mtu'],
-        };
+        return _generateWireGuardEndpoint("proxy");
 
       default:
         return {"type": "direct", "tag": "proxy"};
     }
+  }
+
+  /// Convert subscription bandwidth strings to the integer Mbps fields of Hysteria2.
+  int? _hysteria2Bandwidth(String direction) {
+    final explicit = settings['${direction}_mbps'];
+    if (explicit != null) return int.tryParse(explicit.toString());
+    final value = (settings[direction] ?? '').toString().trim();
+    if (value.isEmpty) return null;
+    final match = RegExp(
+      r'^(\d+(?:\.\d+)?)\s*([kmg]?)(?:b(?:it)?ps)?$',
+      caseSensitive: false,
+    ).firstMatch(value);
+    if (match == null) {
+      throw FormatException('Invalid $direction bandwidth: $value');
+    }
+    final amount = double.parse(match[1]!);
+    final multiplier = switch (match[2]!.toLowerCase()) {
+      'k' => 0.001,
+      'g' => 1000.0,
+      _ => 1.0,
+    };
+    return (amount * multiplier).ceil();
+  }
+
+  Map<String, dynamic> _generateWireGuardEndpoint(String tag) {
+    final reserved = settings['reserved'];
+    final reservedBytes = reserved is List
+        ? reserved
+        : reserved is String && reserved.isNotEmpty
+        ? base64Decode(reserved)
+        : null;
+    return {
+      'type': 'wireguard',
+      'tag': tag,
+      'private_key': settings['privateKey'] ?? '',
+      if (settings['localAddress'] is List) 'address': settings['localAddress'],
+      if (settings['mtu'] != null) 'mtu': settings['mtu'],
+      'peers': [
+        {
+          'address': server,
+          'port': port,
+          'public_key': settings['peerPublicKey'] ?? '',
+          'allowed_ips': settings['allowedIps'] ?? ['0.0.0.0/0', '::/0'],
+          if (reservedBytes != null) 'reserved': reservedBytes,
+        },
+      ],
+    };
   }
 
   /// 生成多路复用配置（仅当 settings 中启用时生效）

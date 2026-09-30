@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'builtin_proxy_rules.dart';
 
 /// DNS 配置管理器
 class DnsManager {
@@ -520,6 +521,11 @@ class DnsManager {
     final enableRoutingNow = _enableDnsRouting || preferRuleRouting;
 
     final servers = <Map<String, dynamic>>[];
+    // 新版直连 DNS 不输出 detour，分流仍按用户保存的直连选择判断。
+    final directDnsTags = _dnsServers
+        .where((server) => server.enabled && server.detour == 'direct')
+        .map((server) => server.name.toLowerCase())
+        .toSet();
 
     // 添加启用的 DNS 服务器
     for (final server in _dnsServers.where((s) => s.enabled)) {
@@ -528,36 +534,29 @@ class DnsManager {
         continue; // 跳过非代理DNS
       }
 
-      final serverConfig = {
-        'tag': server.name.toLowerCase(),
-        'address': _buildServerAddress(server),
-        'detour': server.detour,
-      };
-
-      // 对于代理DNS服务器，添加额外的稳定性配置
-      if (server.detour == 'proxy') {
-        serverConfig['address_resolver'] = 'local'; // 使用本地解析器解析DNS服务器地址
-        serverConfig['strategy'] = 'prefer_ipv4'; // 优先IPv4提高稳定性
-      }
-
-      servers.add(serverConfig);
+      servers.add(_buildDnsServerConfig(server));
     }
 
-    // 添加拦截（空响应）服务器（用于广告或无效域）
-    servers.add({'tag': 'block', 'address': 'rcode://success'});
     // 提供本地系统解析器（某些规则需要引用 'local' 时使用）
-    servers.add({'tag': 'local', 'address': 'local'});
+    servers.add({'tag': 'local', 'type': 'local'});
 
     final rules = <Map<String, dynamic>>[];
 
     // 添加静态IP映射规则
     final enabledMappings = _staticIpMappings.where((m) => m.enabled).toList();
     if (enabledMappings.isNotEmpty) {
+      servers.add({
+        'tag': 'static-hosts',
+        'type': 'hosts',
+        'predefined': {
+          for (final mapping in enabledMappings)
+            mapping.domain: [mapping.ipAddress],
+        },
+      });
       for (final mapping in enabledMappings) {
         rules.add({
           'domain': [mapping.domain],
-          'server': 'local',
-          'address': mapping.ipAddress,
+          'server': 'static-hosts',
         });
       }
     }
@@ -573,15 +572,35 @@ class DnsManager {
       }
     }
 
+    // 即使用户只保留直连 DNS，AI 域名也必须通过代理解析。
+    var aiProxyDnsTag = proxyDNSTag;
+    if (aiProxyDnsTag == null) {
+      var tag = 'builtin-ai-proxy-dns';
+      while (servers.any((server) => server['tag'] == tag)) {
+        tag = '$tag-1';
+      }
+      servers.add({
+        'tag': tag,
+        'type': 'udp',
+        'server': '8.8.8.8',
+        'detour': 'proxy',
+      });
+      aiProxyDnsTag = tag;
+    }
+    // 优先于静态映射、广告规则、国内分流和其他 DNS 设置。
+    rules.insert(0, {
+      ...BuiltinProxyRules.domainMatcher(),
+      'server': aiProxyDnsTag,
+    });
+
     // v1.8.0 兼容：添加基于 rule_set 的 DNS 路由，实现中国域名使用本地DNS
     // 全局模式下不使用DNS分流，所有查询都通过代理DNS
     if (preferRuleRouting && enableRoutingNow && !forceProxyDns) {
       // 找到一个国内DNS服务器（detour=direct的服务器）
       String? directDNSTag;
       for (final s in servers) {
-        final detour = (s['detour'] as String?) ?? '';
         final tag = (s['tag'] as String?) ?? '';
-        if (detour == 'direct' &&
+        if (directDnsTags.contains(tag) &&
             tag.isNotEmpty &&
             tag != 'block' &&
             tag != 'local') {
@@ -601,7 +620,8 @@ class DnsManager {
       // 广告域名拦截
       rules.add({
         'rule_set': ['geosite-ads'],
-        'server': 'block',
+        'action': 'predefined',
+        'rcode': 'NOERROR',
       });
 
       // 境外域名使用代理DNS - 这是正确的做法
@@ -617,11 +637,7 @@ class DnsManager {
           if (server.detour == 'proxy' && !server.enabled) {
             fallbackProxyDNS = server.name.toLowerCase();
             // 临时添加这个备选服务器到servers列表
-            servers.add({
-              'tag': fallbackProxyDNS,
-              'address': _buildServerAddress(server),
-              'detour': server.detour,
-            });
+            servers.add(_buildDnsServerConfig(server));
             break;
           }
         }
@@ -644,15 +660,14 @@ class DnsManager {
 
     if (forceProxyDns) {
       // 全局模式：必须使用代理DNS
-      defaultServerTag = proxyDNSTag ?? 'google'; // 优先选择已配置的代理DNS
+      defaultServerTag = proxyDNSTag ?? aiProxyDnsTag; // 优先选择已配置的代理DNS
     } else if (useTun) {
       if (enableRoutingNow) {
         // 开启DNS分流时，优先使用国内DNS作为默认
         String? directDNSTag;
         for (final s in servers) {
-          final detour = (s['detour'] as String?) ?? '';
           final tag = (s['tag'] as String?) ?? '';
-          if (detour == 'direct' &&
+          if (directDnsTags.contains(tag) &&
               tag.isNotEmpty &&
               tag != 'block' &&
               tag != 'local') {
@@ -673,11 +688,10 @@ class DnsManager {
           // 若无代理 DNS，尝试选择任一非本地非 block 且非 direct 的服务器
           for (final s in servers) {
             final tag = (s['tag'] as String?) ?? '';
-            final detour = (s['detour'] as String?) ?? '';
             if (tag.isNotEmpty &&
                 tag != 'block' &&
                 tag != 'local' &&
-                detour != 'direct') {
+                !directDnsTags.contains(tag)) {
               defaultServerTag = tag;
               break;
             }
@@ -688,8 +702,7 @@ class DnsManager {
       // 非 TUN：优先 direct，若没有则选第一个可用的非本地服务器
       for (final s in servers) {
         final tag = (s['tag'] as String?) ?? '';
-        final detour = (s['detour'] as String?) ?? '';
-        if (tag.isNotEmpty && tag != 'block' && detour == 'direct') {
+        if (tag.isNotEmpty && tag != 'block' && directDnsTags.contains(tag)) {
           defaultServerTag = tag;
           break;
         }
@@ -717,13 +730,11 @@ class DnsManager {
         'ytimg.com',
         'gvt1.com',
         'gvt2.com',
-        'openai.com',
-        'anthropic.com',
         'cloudflare.com',
       };
 
-      // 为这些关键域名添加DNS规则（插入到系统域名规则之后）
-      rules.insert(1, {
+      // 静态映射优先；没有静态规则时也能正常添加。
+      rules.add({
         'domain_suffix': alwaysProxyDomains.toList(),
         'server': proxyDNSTag,
       });
@@ -753,7 +764,6 @@ class DnsManager {
       'servers': servers,
       'rules': rules,
       'final': defaultServerTag,
-      'independent_cache': true,
       'strategy': (useTun
           ? 'prefer_ipv4'
           : _getResolverStrategy()), // 改为prefer_ipv4提高稳定性
@@ -780,8 +790,19 @@ class DnsManager {
     }
 
     if (enableFakeIp) {
-      // sing-box 要求 fakeip.enabled 必须配合 address:"fakeip" 的 DNS 服务器使用
-      servers.add({'tag': 'fakeip', 'address': 'fakeip'});
+      servers.add({
+        'tag': 'fakeip',
+        'type': 'fakeip',
+        'inet4_range': '198.18.0.0/15',
+        'inet6_range': 'fc00::/18',
+      });
+
+      // TUN / FakeIP 下保持域名与连接的关联；其余记录仍由代理 DNS 解析。
+      rules.insert(0, {
+        ...BuiltinProxyRules.domainMatcher(),
+        'query_type': ['A', 'AAAA'],
+        'server': 'fakeip',
+      });
 
       // 规则模式 + DNS 分流：将境外域名 DNS 查询路由到 fakeip 服务器，
       // 返回虚拟 IP 让代理出站负责真实解析；
@@ -790,17 +811,15 @@ class DnsManager {
         for (int i = 0; i < rules.length; i++) {
           final ruleSet = rules[i]['rule_set'];
           if (ruleSet is List && ruleSet.contains('geosite-geolocation-!cn')) {
-            rules[i] = {...rules[i], 'server': 'fakeip'};
+            rules[i] = {
+              ...rules[i],
+              'query_type': ['A', 'AAAA'],
+              'server': 'fakeip',
+            };
             break;
           }
         }
       }
-
-      result['fakeip'] = {
-        'enabled': true,
-        'inet4_range': '198.18.0.0/15',
-        'inet6_range': 'fc00::/18',
-      };
     }
 
     // 注意：部分 sing-box 版本不支持在 dns 中设置 hijack，已通过路由规则劫持 53 端口
@@ -808,20 +827,33 @@ class DnsManager {
     return result;
   }
 
-  /// 构建服务器地址字符串
-  String _buildServerAddress(DnsServer server) {
-    switch (server.type) {
-      case DnsServerType.udp:
-        return server.address;
-      case DnsServerType.tcp:
-        return 'tcp://${server.address}';
-      case DnsServerType.doh:
-        return 'https://${server.address}/dns-query';
-      case DnsServerType.dot:
-        return 'tls://${server.address}';
-      case DnsServerType.doq:
-        return 'quic://${server.address}';
-    }
+  /// sing-box 1.14 使用有明确 type 的 DNS 服务器。
+  Map<String, dynamic> _buildDnsServerConfig(DnsServer server) {
+    final type = switch (server.type) {
+      DnsServerType.udp => 'udp',
+      DnsServerType.tcp => 'tcp',
+      DnsServerType.doh => 'https',
+      DnsServerType.dot => 'tls',
+      DnsServerType.doq => 'quic',
+    };
+    final address = server.address.trim();
+    final uri = Uri.parse(
+      address.contains('://') ? address : '$type://$address',
+    );
+    final host = uri.host.replaceAll('[', '').replaceAll(']', '');
+    return {
+      'tag': server.name.toLowerCase(),
+      'type': type,
+      'server': host,
+      if (uri.hasPort) 'server_port': uri.port,
+      // 1.14 的 DNS 传输默认直连；显式指向空 direct 出站会在 Start 时失败。
+      if (server.detour.isNotEmpty && server.detour != 'direct')
+        'detour': server.detour,
+      if (InternetAddress.tryParse(host) == null)
+        'domain_resolver': {'server': 'local', 'strategy': 'prefer_ipv4'},
+      if (server.type == DnsServerType.doh)
+        'path': uri.path.isEmpty || uri.path == '/' ? '/dns-query' : uri.path,
+    };
   }
 
   /// 获取解析策略

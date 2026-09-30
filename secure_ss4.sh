@@ -61,6 +61,8 @@ export UPLOAD_URL=${UPLOAD_URL:-''}
 OFFICIAL_REPO="SagerNet/sing-box"
 GITHUB_API="https://api.github.com/repos/$OFFICIAL_REPO"
 GITHUB_RELEASES="https://github.com/$OFFICIAL_REPO/releases/download"
+# 与客户端验证过的稳定版本；GitHub API 不可用时也不回退到旧配置格式。
+FALLBACK_SINGBOX_VERSION="v1.14.2"
 
 
 # 设置路径
@@ -68,22 +70,101 @@ setup_paths() {
     # VPS环境
     CURRENT_DOMAIN="localhost"
     # 使用当前目录避免权限问题
-    WORKDIR="$(pwd)/sing-box"
-    FILE_PATH="$(pwd)/sing-box/web"
+    WORKDIR="$(pwd -P)/sing-box"
+    FILE_PATH="$WORKDIR/web"
 }
 
 # 调用路径设置
 setup_paths
 
+# 获取进程所属目录，兼容 Linux / FreeBSD。
+installation_process_dir() {
+    local pid="$1"
+    if [[ -d /proc ]]; then
+        readlink "/proc/$pid/cwd" 2>/dev/null && return 0
+    fi
+    if command -v procstat &>/dev/null; then
+        procstat -h -f "$pid" 2>/dev/null | awk '$3 == "cwd" {sub(/^[^/]*\//, "/"); print; exit}'
+    else
+        return 1
+    fi
+}
+
+# 重装前先停止拉起服务的脚本，再停止旧程序。
+stop_existing_installation() {
+    local service_dir pid process_dir pattern attempt
+    local -a pids remaining
+    if ! command -v pgrep &>/dev/null; then
+        red "缺少 pgrep，无法停止原安装；已保留原文件。"
+        exit 1
+    fi
+
+    if command -v systemctl &>/dev/null; then
+        service_dir=$(systemctl show sing-box-auto -p WorkingDirectory --value 2>/dev/null) || service_dir=""
+        if [[ "$service_dir" == "$WORKDIR" ]]; then
+            if ! systemctl stop sing-box-auto; then
+                red "无法停止原自启动服务；已保留原文件。"
+                exit 1
+            fi
+        fi
+    fi
+
+    for pattern in \
+        '(^|/)(keepalive\.sh|auto-start\.sh|cron-start\.sh)([[:space:]]|$)' \
+        '(^|/)(sing-box|cloudflared|nezha|nezha-agent)([[:space:]]|$)'; do
+        pids=()
+        while read -r pid; do
+            [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" && "$pid" != "$PPID" ]] || continue
+            process_dir=$(installation_process_dir "$pid") || process_dir=""
+            if [[ -z "$process_dir" ]] && kill -0 "$pid" 2>/dev/null; then
+                red "无法确认进程 $pid 的安装目录；已保留原文件。"
+                exit 1
+            fi
+            if [[ "$process_dir" == "$WORKDIR" ]]; then
+                pids+=("$pid")
+            fi
+        done < <(pgrep -u "$USERNAME" -f "$pattern" || true)
+        [[ ${#pids[@]} -gt 0 ]] || continue
+
+        kill -TERM "${pids[@]}" 2>/dev/null || true
+        # 等待保活脚本真正退出，避免它稍后删除新安装的 PID 文件。
+        for attempt in 1 2 3 4 5; do
+            remaining=()
+            for pid in "${pids[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    remaining+=("$pid")
+                fi
+            done
+            pids=("${remaining[@]}")
+            [[ ${#pids[@]} -gt 0 ]] || break
+            sleep 1
+        done
+        if [[ ${#pids[@]} -gt 0 ]]; then
+            if ! kill -KILL "${pids[@]}" 2>/dev/null; then
+                red "无法停止原安装进程；已保留原文件。"
+                exit 1
+            fi
+        fi
+    done
+}
+
 # 安全初始化
 secure_init() {
-    # 创建工作目录
-    rm -rf "$WORKDIR" "$FILE_PATH"
-    mkdir -p "$WORKDIR" "$FILE_PATH"
-    chmod 755 "$WORKDIR" "$FILE_PATH"
-
-    # 安全清理进程（只清理自己的进程）
-    pkill -u "$USERNAME" -f "sing-box\|cloudflared\|nezha" 2>/dev/null || true
+    local reinstall=false install_choice
+    if [[ -f "$WORKDIR/config.json" || -f "$WORKDIR/sing-box" || -f "$WORKDIR/keepalive.sh" ]]; then
+        yellow "检测到现有安装：$WORKDIR"
+        echo "1) 删除原安装并重新安装"
+        echo "2) 返回，保留现有安装（默认）"
+        yellow "重装会删除原配置、证书和节点文件，并重新配置节点。"
+        while true; do
+            read -r -p "请选择 [1/2，默认 2]: " install_choice || install_choice=2
+            case "$install_choice" in
+                1) reinstall=true; break ;;
+                2|"") green "已返回，现有安装保持不变。"; exit 0 ;;
+                *) yellow "无效选项，请输入 1 或 2。" ;;
+            esac
+        done
+    fi
 
     # 检查必要的命令
     if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
@@ -92,6 +173,21 @@ secure_init() {
     fi
 
     command -v curl &>/dev/null && COMMAND="curl -fsSL -o" || COMMAND="wget -qO"
+
+    if [[ "$reinstall" == true ]]; then
+        # 只允许清理当前目录下的安装目录，不跟随目录符号链接。
+        if [[ "$WORKDIR" != "$(pwd -P)/sing-box" || -L "$WORKDIR" ]]; then
+            red "安装目录异常，已取消重装：$WORKDIR"
+            exit 1
+        fi
+        purple "正在停止原安装并清理文件..."
+        stop_existing_installation
+        rm -rf -- "$WORKDIR"
+        green "原安装已清理，开始重新安装。"
+    fi
+
+    mkdir -p "$WORKDIR" "$FILE_PATH"
+    chmod 755 "$WORKDIR" "$FILE_PATH"
 }
 
 # BBR检测和启用功能
@@ -425,11 +521,11 @@ detect_os() {
 get_latest_version() {
     yellow "正在获取官方最新版本..." >&2
     local version
-    version=$(curl -s --max-time 10 "$GITHUB_API/releases/latest" | grep -o '"tag_name": "[^"]*' | grep -o '[^"]*$')
+    version=$(curl -fsSL --max-time 10 "$GITHUB_API/releases/latest" | grep -o '"tag_name": "[^"]*' | grep -o '[^"]*$') || version=""
 
-    if [[ -z "$version" ]]; then
-        red "无法获取最新版本，使用备用版本" >&2
-        echo "v1.8.0"  # 备用版本
+    if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        yellow "无法获取最新稳定版，使用已验证版本 $FALLBACK_SINGBOX_VERSION" >&2
+        echo "$FALLBACK_SINGBOX_VERSION"
     else
         green "最新版本: $version" >&2
         echo "$version"
@@ -1077,7 +1173,7 @@ generate_config() {
 {
   "log": {
     "disabled": false,
-    "level": "info",
+    "level": "warn",
     "timestamp": true,
     "output": "./sing-box.log"
   },
@@ -1161,10 +1257,6 @@ generate_config() {
     {
       "type": "direct",
       "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
     }
   ],
   "route": {
@@ -1426,8 +1518,8 @@ start_services() {
         pkill -f "./sing-box" 2>/dev/null || true
         sleep 1
 
-        # 启动新进程 (添加环境变量以兼容旧版本)
-        ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true nohup ./sing-box run -c config.json >sing-box.log 2>&1 &
+        # 配置已使用新版格式，不再依赖已移除功能的兼容环境变量。
+        nohup ./sing-box run -c config.json >sing-box.log 2>&1 &
         local sing_box_pid=$!
 
         # 等待启动
@@ -1765,7 +1857,7 @@ restart_service() {
             sleep 2
 
             if [[ -f "./sing-box" && -f "config.json" ]]; then
-                ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true nohup ./sing-box run -c config.json >sing-box.log 2>&1 &
+                nohup ./sing-box run -c config.json >sing-box.log 2>&1 &
                 sleep 3
 
                 if check_process "sing-box" "./sing-box"; then
@@ -2037,7 +2129,7 @@ cd "${WORKDIR}"
 
 case "\$1" in
     start)
-        ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true ./sing-box run -c config.json &
+        ./sing-box run -c config.json &
         [[ -f "./cloudflared" ]] && ./cloudflared tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile boot.log --url http://localhost:${VMESS_PORT} &
         echo "服务已启动"
         # 自动启动保活服务
@@ -2364,7 +2456,7 @@ start_singbox() {
 
     # 启动sing-box
     if [[ -f "./sing-box" && -f "config.json" ]]; then
-        ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true nohup ./sing-box run -c config.json >/dev/null 2>&1 &
+        nohup ./sing-box run -c config.json >/dev/null 2>&1 &
         sleep 3
 
         if pgrep -f "./sing-box" >/dev/null; then
@@ -2562,7 +2654,7 @@ cd "\$WORKDIR" || exit 1
 
 # 检查服务状态并启动
 if ! pgrep -f "./sing-box" >/dev/null; then
-    ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS=true nohup ./sing-box run -c config.json >/dev/null 2>&1 &
+    nohup ./sing-box run -c config.json >/dev/null 2>&1 &
 fi
 
 if ! pgrep -f "./cloudflared" >/dev/null && [[ -f "./cloudflared" ]]; then
