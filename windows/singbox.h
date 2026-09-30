@@ -93,6 +93,11 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
+
+// ProbeNodeDelay measures the server transport RTT without touching the running
+// Box, its routes, or SOCKS inbounds. It is called on a Dart worker isolate.
+//
+extern __declspec(dllexport) int ProbeNodeDelay(char* requestJSON, int timeoutMs);
 extern __declspec(dllexport) GoInt InitSingBox(void);
 extern __declspec(dllexport) GoInt StartSingBox(char* configJSON);
 extern __declspec(dllexport) char* SbDrainLogs(void);

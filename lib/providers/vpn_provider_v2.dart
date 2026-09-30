@@ -1009,6 +1009,9 @@ class VPNProviderV2 extends ChangeNotifier {
   static const int _suspiciousLatencyThresholdMs = 5;
 
   int _sanitizeLatency(VPNConfig config, int latency) {
+    // The Windows probe now verifies the physical transport. Low RTT alone
+    // cannot establish an error (nearby servers can legitimately be fast).
+    if (Platform.isWindows) return latency;
     if (latency < 0) {
       return latency;
     }

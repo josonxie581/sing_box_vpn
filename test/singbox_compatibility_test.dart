@@ -155,6 +155,24 @@ void main() {
     await dns.init();
   });
 
+  test(
+    'latency inbound bypasses sniff before the remote TCP handshake',
+    () async {
+      final config = await RulesetManager.generateSingBoxConfig(
+        proxyConfig: {'type': 'socks', 'server': '127.0.0.1', 'server_port': 9},
+        mode: ProxyMode.rule,
+        useTun: true,
+      );
+      final rules = (config['route'] as Map)['rules'] as List;
+      final first = rules.first as Map;
+      expect(first['inbound'], ['latency-test-in']);
+      expect(first['outbound'], 'direct');
+      for (final rule in rules.where((r) => r['action'] == 'sniff')) {
+        expect(rule['inbound'], isNot(contains('latency-test-in')));
+      }
+    },
+  );
+
   test('startup errors remain visible without native debug logs', () {
     takeNativeLogs();
     final library = DynamicLibrary.open(dllFile.path);
@@ -590,7 +608,11 @@ void main() {
             expect(aiRule['domain'], containsAll(BuiltinProxyRules.domains));
             final conflictingIndex = routeRules.indexWhere(
               (rule) =>
-                  rule['outbound'] == 'direct' || rule['action'] == 'reject',
+                  // The local diagnostic inbound is deliberately isolated.
+                  // AI traffic from mixed/TUN must still precede direct rules.
+                  !((rule['inbound'] as List?)?.contains('latency-test-in') ??
+                      false) &&
+                  (rule['outbound'] == 'direct' || rule['action'] == 'reject'),
             );
             expect(aiRuleIndex, lessThan(conflictingIndex));
             final voiceRule = routeRules.firstWhere(

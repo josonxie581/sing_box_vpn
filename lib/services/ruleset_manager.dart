@@ -543,15 +543,17 @@ class RulesetManager {
     final modeRules = (routeConfig['rules'] as List)
         .cast<Map<String, dynamic>>();
     final mergedRules = <Map<String, dynamic>>[
+      // Sniff reads the SOCKS LazyConn and acknowledges CONNECT before dialing.
+      // Keep the diagnostic inbound direct and outside all payload sniffing.
+      inboundBypassRule,
       {
-        "inbound": ["tun-in", "mixed-in", "latency-test-in"],
+        "inbound": ["tun-in", "mixed-in"],
         "action": "sniff",
       },
       ...modeRules.where((rule) => rule['action'] == 'hijack-dns'),
       if (androidTunDnsHijackRule != null) androidTunDnsHijackRule,
-      // 内置 AI 规则先于直连、用户规则和延时入站例外，所有模式都生效。
+      // 内置 AI 规则先于普通流量的直连和用户规则，所有模式都生效。
       ...BuiltinProxyRules.routeRules(),
-      inboundBypassRule,
       ...modeRules.where((rule) => rule['action'] != 'hijack-dns'),
     ];
     final sanitizedRules = _sanitizeRules(mergedRules);

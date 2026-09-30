@@ -6,6 +6,7 @@ import 'dart:typed_data' show BytesBuilder;
 import '../models/vpn_config.dart';
 import 'singbox_ffi.dart';
 import 'connection_manager.dart';
+import 'native_node_delay.dart';
 
 /// 延时测试模式
 enum LatencyTestMode {
@@ -324,6 +325,7 @@ class NodeDelayTester {
 
   /// 智能延时测试 - 基于分流规则绕过VPN路由
   Future<NodeDelayResult> realTest(VPNConfig node) async {
+    if (Platform.isWindows) return _testWindowsServerRtt(node);
     try {
       print('[分流延时测试] 开始测试: ${node.name} (${node.server}:${node.port})');
 
@@ -396,6 +398,7 @@ class NodeDelayTester {
 
   /// 快速测试（TCP连接测试）
   Future<NodeDelayResult> quickTest(VPNConfig node) async {
+    if (Platform.isWindows) return _testWindowsServerRtt(node);
     print('⚡ 开始快速测试: ${node.name} (${node.server}:${node.port})');
     try {
       // 统一解析为真实 IPv4，避免 FakeIP/IPv6 带来的抖动
@@ -973,10 +976,8 @@ class NodeDelayTester {
         throw StateError('SOCKS5 应答版本错误: ${head[0]}');
       }
       final rep = head[1];
-      // 日志：即便连接被拒绝（rep!=0），我们也把耗时当作 RTT
       if (rep != 0x00) {
-        // 记录一次，但不抛错
-        // print('[latency-test-in] REP=$rep (非0表示目标拒绝/失败)，仍返回握手耗时');
+        throw SocketException('SOCKS CONNECT failed: REP=$rep');
       }
       final atyp = head[3];
       int remain;
@@ -995,7 +996,6 @@ class NodeDelayTester {
           throw StateError('未知 ATYP: $atyp');
       }
       // 读取剩余的 BND.ADDR/BND.PORT 字段（不关心具体值，这里仅为完成握手）；
-      // 即便 rep != 0（连接失败/被拒绝），我们也把耗时作为 RTT 返回
       await waitBytes(remain);
 
       sw.stop();
@@ -1014,6 +1014,30 @@ class NodeDelayTester {
       );
     } catch (e) {
       throw Exception('通过 latency-test-in 入站测试失败: $e');
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  Future<NodeDelayResult> _testWindowsServerRtt(VPNConfig node) async {
+    try {
+      final delay = await NativeNodeDelay.measure(node, timeoutMs: timeout);
+      if (delay < 0) {
+        return _createFailedResult(node, '未收到节点服务器的有效 RTT 响应');
+      }
+      return NodeDelayResult(
+        nodeId: node.id,
+        nodeName: node.name,
+        nodeServer: node.server,
+        nodePort: node.port,
+        nodeType: node.type,
+        delay: delay,
+        isSuccess: true,
+        testTime: DateTime.now(),
+      );
+    } catch (e) {
+      // In particular, an old DLL must not fall back to TUN-intercepted sockets.
+      return _createFailedResult(node, '节点 RTT 测试不可用，请检查内核版本: $e');
     }
   }
 

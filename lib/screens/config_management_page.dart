@@ -1476,8 +1476,8 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
                 const SizedBox(height: 4),
                 Text(
                   provider.autoRefreshEnabled
-                      ? '开启后将定期刷新所有节点延时'
-                      : '手动刷新延时，不自动更新',
+                      ? '定期测量节点服务器 RTT'
+                      : '手动测量节点服务器 RTT，不自动更新',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppTheme.textSecondary,
