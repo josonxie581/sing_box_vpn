@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/dmit_billing_info.dart';
 import '../models/dmit_ssh_monitor.dart';
@@ -40,6 +41,7 @@ class _DmitStatusCardState extends State<DmitStatusCard> {
   void initState() {
     super.initState();
     _listenables = Listenable.merge([_service, _billingService]);
+    if (defaultTargetPlatform != TargetPlatform.windows) return;
     if (!_service.initialized) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_service.initialized) {
@@ -66,6 +68,9 @@ class _DmitStatusCardState extends State<DmitStatusCard> {
 
   @override
   Widget build(BuildContext context) {
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      return const SizedBox.shrink();
+    }
     return ListenableBuilder(
       listenable: _listenables,
       builder: (context, _) {

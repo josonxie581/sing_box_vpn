@@ -1155,10 +1155,14 @@ class VPNConfig {
         // 忽略，尝试未编码形态
       }
 
-      // 未编码形态（B）
+      // SIP002 encodes method:password in userInfo; plain userInfo also works.
       if (uri.userInfo.isNotEmpty && uri.host.isNotEmpty && uri.port > 0) {
-        final auth = uri.userInfo.split(':');
-        if (auth.length == 2) {
+        var userInfo = Uri.decodeComponent(uri.userInfo);
+        if (!userInfo.contains(':')) {
+          userInfo = utf8.decode(base64.decode(base64.normalize(userInfo)));
+        }
+        final separator = userInfo.indexOf(':');
+        if (separator > 0 && separator < userInfo.length - 1) {
           return VPNConfig(
             name: uri.fragment.isNotEmpty
                 ? Uri.decodeComponent(uri.fragment)
@@ -1166,7 +1170,10 @@ class VPNConfig {
             type: 'shadowsocks',
             server: uri.host,
             port: uri.port,
-            settings: {'method': auth[0], 'password': auth[1]},
+            settings: {
+              'method': userInfo.substring(0, separator),
+              'password': userInfo.substring(separator + 1),
+            },
           );
         }
       }

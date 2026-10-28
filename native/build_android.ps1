@@ -115,7 +115,8 @@ function BuildAbi {
     $Env:CC = $ccPath
     Write-Info "Building $abiDir with CC=$ccPath"
     Push-Location $nativeDir
-    & go build -tags $GoTags -ldflags "-X github.com/sagernet/sing-box/constant.Version=$coreVersion" -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') singbox.go
+    # NDK r27 defaults to 4 KB; align ELF segments for Android 16 KB devices too.
+    & go build -tags $GoTags -ldflags "-X github.com/sagernet/sing-box/constant.Version=$coreVersion -extldflags=-Wl,-z,max-page-size=16384" -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') singbox.go
     $code = $LASTEXITCODE
     Pop-Location
     if ($code -ne 0) {

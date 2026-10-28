@@ -1,10 +1,11 @@
-# Android Release 构建脚本
-# 用法：.\build_android_release.ps1 [-SplitAbi] [-Bundle] [-Clean]
+﻿# Android Release 构建脚本
+# 用法：.\build_android_release.ps1 [-SplitAbi] [-Bundle] [-Clean] [-Arm64]
 
 param(
     [switch]$SplitAbi,    # 按架构分别构建
     [switch]$Bundle,      # 构建 App Bundle（AAB）
-    [switch]$Clean        # 构建前清理
+    [switch]$Clean,       # 构建前清理
+    [switch]$Arm64        # 只打包 ARM64，匹配默认的 Android 原生库构建
 )
 
 # 设置 UTF-8 编码
@@ -39,19 +40,21 @@ Write-Host "✅ 依赖获取完成" -ForegroundColor Green
 Write-Host ""
 
 # 构建
+$targetArgs = @()
+if ($Arm64) { $targetArgs = @('--target-platform', 'android-arm64') }
 Write-Host "$(if ($Clean) { '[3/3]' } else { '[2/2]' }) 开始构建..." -ForegroundColor Yellow
 
 if ($Bundle) {
     Write-Host "构建类型：App Bundle (AAB)" -ForegroundColor Cyan
-    flutter build appbundle --release
+    flutter build appbundle --release @targetArgs
     $outputPath = "build\app\outputs\bundle\release\app-release.aab"
 } elseif ($SplitAbi) {
     Write-Host "构建类型：分架构 APK" -ForegroundColor Cyan
-    flutter build apk --release --split-per-abi
+    flutter build apk --release --split-per-abi @targetArgs
     $outputPath = "build\app\outputs\flutter-apk\"
 } else {
-    Write-Host "构建类型：通用 APK" -ForegroundColor Cyan
-    flutter build apk --release
+    Write-Host "构建类型：$(if ($Arm64) { 'ARM64 APK' } else { '通用 APK' })" -ForegroundColor Cyan
+    flutter build apk --release @targetArgs
     $outputPath = "build\app\outputs\flutter-apk\app-release.apk"
 }
 
@@ -66,10 +69,6 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "输出文件位置：" -ForegroundColor Cyan
     
     if ($SplitAbi) {
-        Write-Host "  📱 ARM 32位：$outputPath\app-armeabi-v7a-release.apk" -ForegroundColor White
-        Write-Host "  📱 ARM 64位：$outputPath\app-arm64-v8a-release.apk" -ForegroundColor White
-        Write-Host "  💻 x86 64位：$outputPath\app-x86_64-release.apk" -ForegroundColor White
-        
         # 显示文件大小
         Get-ChildItem "$outputPath\app-*-release.apk" | ForEach-Object {
             $sizeMB = [math]::Round($_.Length / 1MB, 2)
