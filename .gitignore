@@ -34,6 +34,10 @@ Thumbs.db
 cache.db
 shared_preferences.json
 
+# Local residential-proxy diagnostics and downloaded helper runtime
+/.residential-*
+/.ssh-audit-plink.exe
+
 # Logs
 *.log
 
@@ -62,6 +66,7 @@ windows/runner/Debug/
 /build/
 /dist/
 /coverage/
+/assets/vps_exit/__pycache__/
 nul
 sing-box
 gsou_daemon.exe

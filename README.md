@@ -1,6 +1,6 @@
 # Gsou - Sing-box VPN 客户端
 
-### 一个免费，没广告的代理客户端 - windows 
+### 一个免费，没广告的代理客户端 - windows
 ###### 无需安装(运行需要管员权限，为了使用TUN模式)，不需要设置，打开设置好服务节点就能使用
 -    支持ymal节点配置文件导入
 -    支持机场远程订阅链接导入
@@ -32,6 +32,17 @@ Gsou 是一个简单的客户端应用，基于 sing-box 核心构建。
 - **AI 服务默认代理**: OpenAI / ChatGPT / Sora 与 Anthropic / Claude 的服务域名及所有子域名、登录、静态资源、附件、语音和已知服务依赖内置走当前代理节点，无需设置；规则、全局和自定义模式都生效。
 
 内置 AI 规则优先于自定义直连、拦截及默认出站；对应 DNS 使用代理解析，TUN 下使用 FakeIP 保留域名关联，PAC 匹配后也不会回退直连。启用 IPv6 时，TUN 同时接管 IPv6 路由。清单按 [OpenAI 网络要求](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps) 和 [Claude 网络要求](https://code.claude.com/docs/en/network-config) 核对；新增服务域名需要随客户端清单更新。此规则适用于进入本客户端的流量。
+
+### DMIT 实时监控与月度流量（Windows）
+
+主界面最底部使用两条严格分离的数据链：受限 SSH 长连接每 5 秒显示 CPU、Load、内存、磁盘、运行时间及默认网卡实时收发速率；后台 DMIT 扩展只读取供应商账单中的月度已用/总量、剩余流量和重置日期。应用界面不再提供网页登录、登录或扩展设置按钮。
+
+- 一次性设置：使用一把已有的服务器管理员密钥运行 `tools/setup_dmit_ssh_monitor.ps1 -AdminIdentityFile <管理员私钥> -AdminKnownHostsFile <known_hosts>`。脚本在服务器创建无 sudo 权限的 `gsou-monitor` 用户、安装 root 所有的固定只读命令，并在 `%LOCALAPPDATA%\Gsou\dmit\ssh` 生成独立 Ed25519 密钥；应用只保存密钥路径，不读取、复制或缓存私钥内容。
+- `gsou-monitor` 的 `authorized_keys` 使用 `restrict` 和强制命令，客户端即使请求执行其它命令也只能收到白名单运行指标。连接强制使用 `BatchMode`、`IdentitiesOnly`、`StrictHostKeyChecking` 和独立 `known_hosts`，断线后自动重连。
+- 监控只在当前节点主机与 SSH 配置精确匹配时显示；配置尚未载入时仅用节点名中的 `DMIT` 标识显示初始化状态，避免把一台服务器的数据显示到另一台节点。
+- SSH 指标来自 Linux 操作系统，不能推算供应商剩余额度。准确的月度剩余量由已登录 DMIT 客户区的后台扩展通过 Native Messaging 写入本机白名单快照；Cookie、密码、验证码和原始响应不会进入应用。
+- 发布目录仍包含 `GsouDmitBridge.exe` 与 `dmit-extension`。扩展无需在 Gsou 中操作，但浏览器中必须保留已加载扩展及一个已登录的 DMIT 客户区标签页；同步失败时保留并标记上次有效账单数据。
+- 移动发布目录或首次安装时运行 `tools/register_dmit_billing_bridge.ps1 -ReleaseDirectory <Release目录>`，再在 Edge/Chrome 扩展页加载发布目录中的 `dmit-extension`。注册只写入当前用户的 Native Messaging 配置，不要求管理员权限。
 
 ## 系统要求
 
@@ -109,7 +120,7 @@ Gsou 是一个简单的客户端应用，基于 sing-box 核心构建。
 - **节点数量不限**：想创建多少个通道就创建多少个，比如专门的"购物通道"、"学习通道"等
 - **优先级数字越大越靠前**：自己的规则建议设置 650 以上，这样能覆盖系统默认规则
 - **从简单开始**：刚开始不用写太复杂，先设置几个常用的，慢慢完善
- 
+
 ### 状态管理与存储
 
 - `provider`: ^6.1.2 - 状态管理
@@ -230,6 +241,14 @@ sing_box_vpn/
 ```
 
 ## 开发指南
+
+### VPS 出口管控
+
+主页新增“VPS 出口管控”：通过管理用 SSH 密钥连接服务器，与网站后台共用出口规则，
+支持 Claude/OpenAI/默认出口、自定义域名、校验、应用、回滚以及控制服务部署/升级。
+私钥保留在本机，规则与安装包通过 SSH 标准输入发送。
+当前部署包适用于已配置住宅 SOCKS5 出口和 VMess WS 验证入口的 `/root/sing-box` 环境。
+详见 [VPS 出口管控说明](Doc/VPS_EXIT_CONTROL.md)。
 
 ### 代码规范
 

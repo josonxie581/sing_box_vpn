@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gsou DMIT 同步</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Gsou DMIT 同步</h1>
+    <p id="connection">正在检查本机连接…</p>
+    <p id="status" role="status" aria-live="polite">正在读取状态…</p>
+    <dl>
+      <div><dt>上次成功同步</dt><dd id="updated">尚未同步</dd></div>
+      <div><dt>服务器数量</dt><dd id="count">--</dd></div>
+    </dl>
+    <div class="actions">
+      <button id="connect" type="button">连接本机应用</button>
+      <button id="refresh" type="button" disabled>立即同步</button>
+      <button id="open" type="button">打开 DMIT 客户中心</button>
+    </div>
+    <p class="help">保持一个 DMIT 客户中心页面打开；登录和真人验证只在浏览器中手动完成。本机连接由发布目录的注册脚本一次性配置。</p>
+    <p class="privacy">只同步服务器配置和流量字段到本机 Gsou。不导出密码、Cookie 或验证 Token，不重载验证页。</p>
+  </main>
+</body>
+</html>
+

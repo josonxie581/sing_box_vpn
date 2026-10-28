@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Gsou DMIT 同步",
+  "short_name": "Gsou DMIT",
+  "version": "1.0.0",
+  "description": "在您已登录的 DMIT 客户中心页面中读取服务器名称、IP、流量与到期信息，并通过本机原生连接同步给 Gsou 应用。不读取密码、Cookie 或验证令牌。",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnu32V2ALOYic5fRmFpI1GkoWHuLvE59/3ZtjoKP23X6rOV3kWVeNEl/FkOaEHGUbHad8jNnxP3GG/V0N2RpQa0lv7J67AnMwc6+g9aUWy0TbIhroj8hwaChNNnnQAD1If7UvngX9O5mEWU0A9AQhgLD4nRmRXAMw4VVGKN1igwdPdWy8sA0pNgmQ+Elid5UYUQ1cImhJohq4ifya0lsgrig4OI2k5ujfkdjIwtIbMbkEdZPu0qcOUMTVeD6Hn7gX7x/7xWWrkB6dj2TJQz+u3c4z1dSI0yC6nZb7suoI2QvDpIZTwRevCp4mHzW6i3qo6VNdD/Fa7YjYtF6GXjug3QIDAQAB",
+  "permissions": ["nativeMessaging", "scripting", "storage", "alarms", "tabs"],
+  "host_permissions": ["https://www.dmit.io/*"],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_title": "Gsou DMIT 同步",
+    "default_popup": "popup/popup.html"
+  }
+}
+

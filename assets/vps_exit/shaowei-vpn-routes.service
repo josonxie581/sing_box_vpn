@@ -1,0 +1,31 @@
+[Unit]
+Description=Shaowei private VPS routing controller
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=sitepub
+ExecStart=/usr/bin/python3 /usr/local/lib/shaowei-vpn/vpn_routes_service.py
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=shaowei-vpn
+RuntimeDirectoryMode=0750
+StateDirectory=shaowei-vpn
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/sing-box /var/lib/shaowei-vpn /run/shaowei-vpn
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Preserve the independently supervised VPN process when this controller restarts.
+KillMode=process
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

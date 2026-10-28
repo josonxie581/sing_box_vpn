@@ -111,6 +111,7 @@ flutter:
   # 璧勬簮鏂囦欢
   assets:
     - assets/app_icon.ico
+    - assets/vps_exit/
     - assets/rulesets/geo/geoip/
     - assets/rulesets/geo/geosite/
 

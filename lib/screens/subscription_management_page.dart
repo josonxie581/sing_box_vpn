@@ -9,10 +9,12 @@ class SubscriptionManagementPage extends StatefulWidget {
   const SubscriptionManagementPage({super.key});
 
   @override
-  State<SubscriptionManagementPage> createState() => _SubscriptionManagementPageState();
+  State<SubscriptionManagementPage> createState() =>
+      _SubscriptionManagementPageState();
 }
 
-class _SubscriptionManagementPageState extends State<SubscriptionManagementPage> {
+class _SubscriptionManagementPageState
+    extends State<SubscriptionManagementPage> {
   final _addUrlController = TextEditingController();
   bool _isLoading = false;
   String? _loadingUrl;
@@ -94,18 +96,27 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                       decoration: InputDecoration(
                         hintText: '输入订阅链接 (https://...)',
                         hintStyle: const TextStyle(color: AppTheme.textHint),
-                        prefixIcon: const Icon(Icons.link, color: AppTheme.primaryNeon),
+                        prefixIcon: const Icon(
+                          Icons.link,
+                          color: AppTheme.primaryNeon,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: AppTheme.borderColor.withAlpha(100)),
+                          borderSide: BorderSide(
+                            color: AppTheme.borderColor.withAlpha(100),
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: AppTheme.borderColor.withAlpha(100)),
+                          borderSide: BorderSide(
+                            color: AppTheme.borderColor.withAlpha(100),
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppTheme.primaryNeon),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primaryNeon,
+                          ),
                         ),
                       ),
                     ),
@@ -127,7 +138,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                                 width: 20,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.bgDark),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppTheme.bgDark,
+                                  ),
                                 ),
                               )
                             : const Text('添加订阅'),
@@ -179,7 +192,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                   return Column(
                     children: subscriptionUrls.map((url) {
                       final info = subscriptionInfos[url] as SubscriptionInfo?;
-                      final configCount = provider.getSubscriptionConfigCount(url);
+                      final configCount = provider.getSubscriptionConfigCount(
+                        url,
+                      );
                       final isUpdating = _isLoading && _loadingUrl == url;
 
                       return _buildSubscriptionCard(
@@ -283,7 +298,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                         // 操作按钮
                         _buildActionButton(
                           icon: isUpdating ? null : Icons.refresh,
-                          onTap: isUpdating ? null : () => _updateSubscription(url),
+                          onTap: isUpdating
+                              ? null
+                              : () => _updateSubscription(url),
                           tooltip: '更新订阅',
                           isLoading: isUpdating,
                         ),
@@ -319,7 +336,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                     Row(
                       children: [
                         Text(
-                          info != null ? '${info.formattedUsed} / ${info.formattedTotal}' : '流量信息未提供',
+                          info != null
+                              ? '${info.formattedUsed} / ${info.formattedTotal}'
+                              : '流量信息未提供',
                           style: const TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 12,
@@ -328,7 +347,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                         ),
                         const SizedBox(width: 16),
                         Text(
-                          info?.formattedExpireDate ?? '到期时间未提供',
+                          info?.formattedExpireDate != null
+                              ? '到期 ${info!.formattedExpireDate}'
+                              : '到期时间未提供',
                           style: const TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 12,
@@ -337,16 +358,49 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                       ],
                     ),
 
+                    if (info != null) ...[
+                      const SizedBox(height: 4),
+                      // 流量进度条
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (info.usagePercentage / 100).clamp(0.0, 1.0),
+                          minHeight: 6,
+                          backgroundColor: AppTheme.borderColor.withAlpha(80),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            _getStatusColor(info),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            '剩余 ${info.formattedRemaining}',
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${info.usagePercentage.toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              color: _getStatusColor(info),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+
                     const SizedBox(height: 4),
 
                     // 第四行：刷新时间
                     Row(
                       children: [
-                        Icon(
-                          Icons.update,
-                          size: 12,
-                          color: AppTheme.textHint,
-                        ),
+                        Icon(Icons.update, size: 12, color: AppTheme.textHint),
                         const SizedBox(width: 4),
                         Text(
                           '上次更新：$updateTimeText',
@@ -381,7 +435,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
         margin: const EdgeInsets.only(left: 4),
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: (onTap != null) ? AppTheme.bgDark.withAlpha(30) : Colors.transparent,
+          color: (onTap != null)
+              ? AppTheme.bgDark.withAlpha(30)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         child: isLoading
@@ -390,22 +446,26 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
                 height: 12,
                 child: CircularProgressIndicator(
                   strokeWidth: 1.5,
-                  valueColor: AlwaysStoppedAnimation<Color>(color ?? AppTheme.primaryNeon),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    color ?? AppTheme.primaryNeon,
+                  ),
                 ),
               )
             : Icon(
                 icon,
                 size: 14,
-                color: (onTap != null) ? (color ?? AppTheme.textSecondary) : AppTheme.textSecondary.withAlpha(100),
+                color: (onTap != null)
+                    ? (color ?? AppTheme.textSecondary)
+                    : AppTheme.textSecondary.withAlpha(100),
               ),
       ),
     );
   }
 
-
   Color _getStatusColor(SubscriptionInfo info) {
     if (info.isExpired || info.usagePercentage >= 95) return AppTheme.errorRed;
-    if (info.usagePercentage >= 80 || (info.remainingDays != null && info.remainingDays! <= 7)) {
+    if (info.usagePercentage >= 80 ||
+        (info.remainingDays != null && info.remainingDays! <= 7)) {
       return Colors.orange;
     }
     return AppTheme.successGreen;
@@ -414,16 +474,16 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
   Future<void> _addSubscription() async {
     final url = _addUrlController.text.trim();
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入订阅链接')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入订阅链接')));
       return;
     }
 
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入有效的HTTP/HTTPS链接')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入有效的HTTP/HTTPS链接')));
       return;
     }
 
@@ -436,32 +496,33 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
       final provider = context.read<VPNProviderV2>();
 
       // 使用异步执行避免阻塞UI
-      final success = await Future.microtask(() async {
-        return await provider.importFromRemoteSubscription(url);
-      }).timeout(
-        const Duration(seconds: 60),
-        onTimeout: () {
-          throw Exception('请求超时，请检查网络连接或稍后重试');
-        },
-      );
+      final success =
+          await Future.microtask(() async {
+            return await provider.importFromRemoteSubscription(url);
+          }).timeout(
+            const Duration(seconds: 60),
+            onTimeout: () {
+              throw Exception('请求超时，请检查网络连接或稍后重试');
+            },
+          );
 
       if (mounted) {
         if (success) {
           _addUrlController.clear();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅添加成功')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅添加成功')));
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅添加失败，请检查链接')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅添加失败，请检查链接')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('添加失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('添加失败: $e')));
       }
     } finally {
       if (mounted) {
@@ -483,31 +544,32 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
       final provider = context.read<VPNProviderV2>();
 
       // 使用异步执行避免阻塞UI
-      final success = await Future.microtask(() async {
-        return await provider.updateSubscription(url);
-      }).timeout(
-        const Duration(seconds: 60),
-        onTimeout: () {
-          throw Exception('请求超时，请检查网络连接或稍后重试');
-        },
-      );
+      final success =
+          await Future.microtask(() async {
+            return await provider.updateSubscription(url);
+          }).timeout(
+            const Duration(seconds: 60),
+            onTimeout: () {
+              throw Exception('请求超时，请检查网络连接或稍后重试');
+            },
+          );
 
       if (mounted) {
         if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅更新成功')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅更新成功')));
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅更新失败')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅更新失败')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('更新失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('更新失败: $e')));
       }
     } finally {
       if (mounted) {
@@ -521,9 +583,9 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
 
   Future<void> _copyUrl(String url) async {
     await Clipboard.setData(ClipboardData(text: url));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('链接已复制到剪贴板')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('链接已复制到剪贴板')));
   }
 
   Future<void> _deleteSubscription(String url) async {
@@ -559,18 +621,18 @@ class _SubscriptionManagementPageState extends State<SubscriptionManagementPage>
         final success = await provider.deleteSubscription(url);
 
         if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅删除成功')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅删除成功')));
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('订阅删除失败')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('订阅删除失败')));
         }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('删除失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
       }
     }
   }

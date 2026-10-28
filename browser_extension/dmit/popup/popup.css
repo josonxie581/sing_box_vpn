@@ -1,0 +1,19 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; color: #ecedf2; background: #141720; }
+body { margin: 0; width: 360px; }
+main { padding: 18px; }
+h1 { font-size: 19px; margin: 0 0 12px; }
+p { line-height: 1.5; margin: 10px 0; }
+#connection { color: #00c8e8; font-size: 14px; }
+#status { min-height: 3em; font-size: 14px; overflow-wrap: anywhere; }
+dl { font-size: 13px; border-block: 1px solid #353b49; padding-block: 10px; }
+dl div { display: flex; justify-content: space-between; gap: 12px; margin-block: 6px; }
+dt { color: #b7bdca; }
+dd { margin: 0; text-align: end; }
+.actions { display: grid; gap: 8px; }
+button { min-height: 44px; padding: 10px; border: 1px solid #00b5ce; border-radius: 6px; color: #e9fcff; background: #18343d; font: inherit; font-size: 14px; cursor: pointer; }
+button:hover:not(:disabled) { background: #204854; }
+button:focus-visible { outline: 2px solid #00d5f4; outline-offset: 3px; }
+button:disabled { opacity: .5; cursor: default; }
+.help, .privacy { color: #b7bdca; font-size: 12px; }
+.privacy { border-top: 1px solid #353b49; padding-top: 10px; }
+
