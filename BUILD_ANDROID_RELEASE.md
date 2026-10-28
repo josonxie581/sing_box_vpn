@@ -1,5 +1,23 @@
 # Android Release 构建指南
 
+## ARM64 内核与手机扫码
+
+当前手机测试包使用 ARM64 原生内核。先安装 Go、Android SDK、NDK r27 和 JDK 17，并在 `PATH` 中配置 Flutter、Go；`ANDROID_NDK_ROOT` 可指定 NDK 路径。`native/go.mod` 依赖相邻目录的 `../sing-box` 源码，需与 `sing-box-version.txt` 保持一致。
+
+```powershell
+# 重新编译 ARM64 内核（包含 16 KB ELF 段对齐）
+powershell -NoProfile -ExecutionPolicy Bypass -File native/build_android.ps1
+
+# 打包匹配的 ARM64 APK，避免打入未更新的其他架构内核
+powershell -NoProfile -ExecutionPolicy Bypass -File build_android_release.ps1 -Arm64
+```
+
+如果 Flutter 自动选择了不兼容的 JDK，可用 `flutter config --jdk-dir <JDK17目录>` 指定。该命令会修改本机 Flutter 配置。默认 APK 使用 debug 签名，仅用于测试和个人安装。
+
+安卓首页及“订阅/分享链接”页提供“扫码添加节点”。首次使用需要相机权限；识别节点分享二维码后，确认节点名称、协议及地址再添加。支持现有节点解析器中的 SS、VMess、VLESS、Trojan、Hysteria2 等协议；普通网址、订阅网址和非节点文本不作为单个节点导入。拒绝相机权限后可到系统设置授权，再回到扫码页重试。
+
+验证时检查：取消不保存、连续识别只添加一次、退出扫码页释放相机、切后台后返回可继续扫码，以及手机实际 VPN 连通性。单元测试和 APK 构建成功不能替代这些真机检查。
+
 ## 快速构建（使用 Debug 签名）
 
 最简单的方式，适合测试和个人使用：

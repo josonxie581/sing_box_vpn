@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider_v2.dart';
 import '../services/improved_traffic_stats_service.dart';
@@ -13,6 +14,7 @@ import 'routing_config_page.dart';
 import 'dns_settings_page.dart';
 import 'config_management_page.dart';
 import 'logs_page.dart';
+import 'node_qr_scanner_page.dart';
 import '../widgets/vps_exit_entry.dart';
 // import 'geosite_manager_page.dart';
 import '../widgets/animated_connection_button.dart';
@@ -33,8 +35,11 @@ class SimpleModernHome extends StatelessWidget {
             child: SafeArea(
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final isMobile =
+                      defaultTargetPlatform == TargetPlatform.android ||
+                      defaultTargetPlatform == TargetPlatform.iOS;
                   // Handle small window size during transition
-                  if (constraints.maxWidth < 400) {
+                  if (!isMobile && constraints.maxWidth < 400) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
@@ -516,16 +521,23 @@ class SimpleModernHome extends StatelessWidget {
                         const SizedBox(height: 6),
 
                         const VpsExitEntry(),
+                        if (defaultTargetPlatform == TargetPlatform.android)
+                          OutlinedButton.icon(
+                            onPressed: () => scanAndAddNode(context),
+                            icon: const Icon(Icons.qr_code_scanner),
+                            label: const Text('扫码添加节点'),
+                          ),
 
                         // TUN / 守护进程 卡片（这里用 TUN 模式卡片）
                         _buildDaemonCard(context, provider),
 
                         const SizedBox(height: 6),
 
-                        // 系统代理开关
-                        _buildSystemProxyToggle(provider),
-
-                        const SizedBox(height: 6),
+                        // Mobile VPN traffic is handled by VpnService/TUN.
+                        if (!isMobile) ...[
+                          _buildSystemProxyToggle(provider),
+                          const SizedBox(height: 6),
+                        ],
 
                         // 当前 DMIT 节点的 SSH 实时状态与月度计费
                         DmitStatusCard(
@@ -618,6 +630,8 @@ class SimpleModernHome extends StatelessWidget {
                 const SizedBox(height: 1),
                 Text(
                   title == '节点配置' ? '服务器管理' : '选择节点/订阅管理',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
               ],
@@ -667,6 +681,8 @@ class SimpleModernHome extends StatelessWidget {
                 const SizedBox(height: 1),
                 Text(
                   'DNS设置/域名解析',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                 ),
               ],

@@ -10,6 +10,7 @@ import '../services/qr_decoder.dart';
 import '../services/simple_qr_functions.dart';
 import '../services/smart_screenshot_service.dart';
 import '../services/official_screen_capture.dart';
+import 'node_qr_scanner_page.dart';
 
 class AddConfigPage extends StatefulWidget {
   final VPNConfig? config;
@@ -233,7 +234,6 @@ class _AddConfigPageState extends State<AddConfigPage>
         break;
     }
   }
-
 
   @override
   void dispose() {
@@ -1275,6 +1275,17 @@ class _AddConfigPageState extends State<AddConfigPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (Platform.isAndroid) ...[
+          FilledButton.icon(
+            onPressed: () async {
+              final added = await scanAndAddNode(context);
+              if (added && mounted) Navigator.pop(context);
+            },
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('扫码添加节点'),
+          ),
+          const SizedBox(height: 16),
+        ],
         _buildTextFormField(
           controller: _subscribeUrlController,
           label: '订阅/分享链接',
@@ -1311,13 +1322,15 @@ class _AddConfigPageState extends State<AddConfigPage>
             try {
               // 首先尝试作为远程订阅URL下载
               if (link.startsWith('http://') || link.startsWith('https://')) {
-                final success = await provider.importFromRemoteSubscription(link);
+                final success = await provider.importFromRemoteSubscription(
+                  link,
+                );
                 Navigator.pop(context); // 关闭加载对话框
 
                 if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('远程订阅导入成功')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('远程订阅导入成功')));
                   Navigator.pop(context); // 关闭当前页面
                   return;
                 } else {
@@ -1336,14 +1349,14 @@ class _AddConfigPageState extends State<AddConfigPage>
                 // 或按订阅内容解析（多条）
                 final count = await provider.importFromSubscription(link);
                 if (count <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('导入失败，请检查链接内容')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('导入失败，请检查链接内容')));
                   return;
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('成功导入 $count 个配置')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('成功导入 $count 个配置')));
                 }
               } else {
                 ScaffoldMessenger.of(
@@ -1352,9 +1365,9 @@ class _AddConfigPageState extends State<AddConfigPage>
               }
             } catch (e) {
               Navigator.pop(context); // 确保关闭加载对话框
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('导入失败: $e')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
             }
           },
           child: const Text('导入/订阅'),
@@ -1423,7 +1436,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                       final provider = context.read<VPNProviderV2>();
                       final ok = await provider.importFromLink(textLink.trim());
                       if (!ok) {
-                        final count = await provider.importFromSubscription(textLink.trim());
+                        final count = await provider.importFromSubscription(
+                          textLink.trim(),
+                        );
                         if (count <= 0) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('剪贴板链接无法导入')),
@@ -1444,9 +1459,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                       );
                     }
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('剪贴板导入失败: $e')),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('剪贴板导入失败: $e')));
                   }
                 },
                 icon: const Icon(Icons.content_paste),
@@ -1473,18 +1488,22 @@ class _AddConfigPageState extends State<AddConfigPage>
                     );
 
                     // 检查截图权限
-                    final hasAccess = await OfficialScreenCapture.isAccessAllowed();
+                    final hasAccess =
+                        await OfficialScreenCapture.isAccessAllowed();
                     if (!hasAccess) {
                       await OfficialScreenCapture.requestAccess();
                     }
 
                     // 使用screen_capturer进行区域截图
-                    final qrText = await OfficialScreenCapture.captureRegionAndScanQR();
+                    final qrText =
+                        await OfficialScreenCapture.captureRegionAndScanQR();
 
                     if (qrText == null || qrText.trim().isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('未识别到二维码，请确保：\n1. 二维码清晰完整\n2. 选择区域包含整个二维码'),
+                          content: Text(
+                            '未识别到二维码，请确保：\n1. 二维码清晰完整\n2. 选择区域包含整个二维码',
+                          ),
                           duration: Duration(seconds: 4),
                         ),
                       );
@@ -1496,7 +1515,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                     final ok = await provider.importFromLink(qrText.trim());
                     if (!ok) {
                       // 尝试作为订阅链接导入
-                      final count = await provider.importFromSubscription(qrText);
+                      final count = await provider.importFromSubscription(
+                        qrText,
+                      );
                       if (count <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(

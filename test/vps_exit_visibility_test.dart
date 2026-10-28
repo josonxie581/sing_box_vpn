@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gsou/models/vpn_config.dart';
 import 'package:gsou/providers/vpn_provider_v2.dart';
@@ -36,7 +37,20 @@ Widget home(NodeList nodes) => ChangeNotifierProvider<VPNProviderV2>.value(
 );
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets(
+    'Android hides Windows-only VPS management even with DMIT nodes',
+    (tester) async {
+      final nodes = NodeList()..replace([node('DMIT JP', '192.0.2.2')]);
+      addTearDown(nodes.dispose);
+      await tester.pumpWidget(home(nodes));
+      expect(find.text('VPS 出口管控'), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 
   test(
     'recognizes explicit DMIT names without confusing admit with the provider',
@@ -82,6 +96,7 @@ void main() {
       await tester.pump();
       expect(find.text('VPS 出口管控'), findsOneWidget);
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
   testWidgets(
@@ -107,5 +122,6 @@ void main() {
       expect(find.text('VPS 出口管控'), findsNothing);
       expect(tester.takeException(), isNull);
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 }

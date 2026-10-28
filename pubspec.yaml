@@ -72,6 +72,7 @@ dependencies:
   # 图像处理与二维码解析
   image: ^4.2.0
   zxing2: ^0.2.4
+  mobile_scanner: ^7.4.2
 
 
   # 截图支持

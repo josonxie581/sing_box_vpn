@@ -12,6 +12,8 @@
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
 typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+extern size_t _GoStringLen(_GoString_ s);
+extern const char *_GoStringPtr(_GoString_ s);
 #endif
 
 #endif
@@ -55,9 +57,15 @@ typedef size_t GoUintptr;
 typedef float GoFloat32;
 typedef double GoFloat64;
 #ifdef _MSC_VER
+#if !defined(__cplusplus) || _MSVC_LANG <= 201402L
 #include <complex.h>
 typedef _Fcomplex GoComplex64;
 typedef _Dcomplex GoComplex128;
+#else
+#include <complex>
+typedef std::complex<float> GoComplex64;
+typedef std::complex<double> GoComplex128;
+#endif
 #else
 typedef float _Complex GoComplex64;
 typedef double _Complex GoComplex128;
@@ -85,22 +93,28 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern GoInt InitSingBox();
+
+// ProbeNodeDelay measures the server transport RTT without touching the running
+// Box, its routes, or SOCKS inbounds. It is called on a Dart worker isolate.
+//
+extern int ProbeNodeDelay(char* requestJSON, int timeoutMs);
+extern GoInt InitSingBox(void);
 extern GoInt StartSingBox(char* configJSON);
+extern char* SbDrainLogs(void);
 extern GoInt StartSingBoxWithTunFd(char* configJSON, int fd);
-extern GoInt StopSingBox();
-extern GoInt IsRunning();
+extern GoInt StopSingBox(void);
+extern GoInt IsRunning(void);
 extern GoInt TestConfig(char* configJSON);
-extern char* GetVersion();
-extern void Cleanup();
-extern char* SbGetLastError();
+extern char* GetVersion(void);
+extern void Cleanup(void);
+extern char* SbGetLastError(void);
 extern void FreeCString(char* p);
 extern void RegisterLogCallback(LogCallback cb);
 extern GoInt AddRouteRule(char* ruleJSON);
 extern GoInt RemoveRouteRule(char* ruleJSON);
-extern GoInt ReloadConfig();
+extern GoInt ReloadConfig(void);
 extern GoInt ReplaceConfig(char* configJSON);
-extern GoInt ClearRouteRules();
+extern GoInt ClearRouteRules(void);
 extern int ProbeTLS(char* host, int port, char* sni, int insecure, char* alpnCsv, int timeoutMs);
 extern int ProbeQUIC(char* host, int port, char* sni, int insecure, char* alpnCsv, int timeoutMs);
 
