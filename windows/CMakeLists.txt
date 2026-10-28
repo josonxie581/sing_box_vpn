@@ -71,6 +71,23 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Background DMIT billing sync uses a dedicated Native Messaging process.
+get_directory_property(DMIT_FLUTTER_ROOT
+  DIRECTORY "${FLUTTER_MANAGED_DIR}" DEFINITION FLUTTER_ROOT)
+set(DMIT_BRIDGE_EXE "${CMAKE_CURRENT_BINARY_DIR}/GsouDmitBridge.exe")
+add_custom_command(
+  OUTPUT "${DMIT_BRIDGE_EXE}"
+  COMMAND "${DMIT_FLUTTER_ROOT}/bin/cache/dart-sdk/bin/dart.exe" compile exe
+    "${PROJECT_ROOT_DIR}/tools/dmit_browser_bridge.dart" -o "${DMIT_BRIDGE_EXE}"
+  DEPENDS
+    "${PROJECT_ROOT_DIR}/tools/dmit_browser_bridge.dart"
+    "${PROJECT_ROOT_DIR}/lib/services/dmit_bridge_protocol.dart"
+    "${PROJECT_ROOT_DIR}/lib/models/dmit_billing_info.dart"
+    "${PROJECT_ROOT_DIR}/pubspec.lock"
+  WORKING_DIRECTORY "${PROJECT_ROOT_DIR}"
+  VERBATIM
+)
+add_custom_target(dmit_browser_bridge ALL DEPENDS "${DMIT_BRIDGE_EXE}")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
@@ -93,6 +110,11 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
+
+install(PROGRAMS "${DMIT_BRIDGE_EXE}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+install(DIRECTORY "${PROJECT_ROOT_DIR}/browser_extension/dmit/"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/dmit-extension" COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)

@@ -13,8 +13,10 @@ import 'routing_config_page.dart';
 import 'dns_settings_page.dart';
 import 'config_management_page.dart';
 import 'logs_page.dart';
+import '../widgets/vps_exit_entry.dart';
 // import 'geosite_manager_page.dart';
 import '../widgets/animated_connection_button.dart';
+import '../widgets/dmit_status_card.dart';
 import '../widgets/hover_scale.dart';
 import 'package:gsou/utils/privilege_manager.dart';
 
@@ -513,6 +515,8 @@ class SimpleModernHome extends StatelessWidget {
 
                         const SizedBox(height: 6),
 
+                        const VpsExitEntry(),
+
                         // TUN / 守护进程 卡片（这里用 TUN 模式卡片）
                         _buildDaemonCard(context, provider),
 
@@ -521,6 +525,13 @@ class SimpleModernHome extends StatelessWidget {
                         // 系统代理开关
                         _buildSystemProxyToggle(provider),
 
+                        const SizedBox(height: 6),
+
+                        // 当前 DMIT 节点的 SSH 实时状态与月度计费
+                        DmitStatusCard(
+                          nodeName: provider.currentConfig?.name,
+                          serverHost: provider.currentConfig?.server,
+                        ),
                         const SizedBox(height: 10),
                       ],
                     ),
