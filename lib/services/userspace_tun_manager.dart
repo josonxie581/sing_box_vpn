@@ -17,7 +17,7 @@ class UserspaceTunManager {
     int localPort = 7890,
   }) {
     return {
-      "log": {"level": "info", "timestamp": true},
+      "log": {"disabled": true},
       "dns": _getDnsConfig(),
       "inbounds": [
         {

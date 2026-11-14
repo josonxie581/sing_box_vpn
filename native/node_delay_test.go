@@ -7,12 +7,15 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"fmt"
 	"math/big"
 	"net"
 	"testing"
 	"time"
 
 	quic "github.com/sagernet/quic-go"
+	hy2 "github.com/sagernet/sing-quic/hysteria2"
 )
 
 func TestProbeTCPRequiresRemoteConnect(t *testing.T) {
@@ -75,6 +78,16 @@ func (c delayedPackets) WriteTo(p []byte, addr net.Addr) (int, error) {
 }
 
 func TestQUICUsesAcknowledgedRTT(t *testing.T) {
+	testQUICRTT(t, "")
+}
+
+func TestObfuscatedQUICUsesAcknowledgedRTT(t *testing.T) {
+	for _, kind := range []string{"salamander", "gecko"} {
+		t.Run(kind, func(t *testing.T) { testQUICRTT(t, kind) })
+	}
+}
+
+func testQUICRTT(t *testing.T, obfsType string) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +102,14 @@ func TestQUICUsesAcknowledgedRTT(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer udp.Close()
-	server, err := quic.Listen(delayedPackets{udp}, &tls.Config{
+	var packets net.PacketConn = delayedPackets{udp}
+	switch obfsType {
+	case "salamander":
+		packets = hy2.NewSalamanderConn(packets, []byte("test-obfs-password"))
+	case "gecko":
+		packets = hy2.NewGeckoConn(packets, []byte("test-obfs-password"), 512, 1200)
+	}
+	server, err := quic.Listen(packets, &tls.Config{
 		Certificates: []tls.Certificate{{Certificate: [][]byte{cert}, PrivateKey: key}}, NextProtos: []string{"h3"},
 	}, &quic.Config{})
 	if err != nil {
@@ -106,7 +126,13 @@ func TestQUICUsesAcknowledgedRTT(t *testing.T) {
 		}
 	}()
 	for _, protocol := range []string{"hysteria2", "tuic"} {
+		if obfsType != "" && protocol == "tuic" {
+			continue
+		}
 		request := nodeDelayRequest{Type: protocol, Server: "127.0.0.1", Port: udp.LocalAddr().(*net.UDPAddr).Port}
+		if obfsType != "" {
+			request.Obfs = json.RawMessage(fmt.Sprintf(`{"type":%q,"password":"test-obfs-password"}`, obfsType))
+		}
 		request.TLS.Insecure = true
 		started := time.Now()
 		delay, err := probeNodeDelay(request, 3*time.Second)
@@ -118,5 +144,11 @@ func TestQUICUsesAcknowledgedRTT(t *testing.T) {
 			t.Fatalf("%s RTT=%d handshake=%d", protocol, delay, elapsed)
 		}
 		t.Logf("%s measured RTT=%dms; handshake elapsed=%dms", protocol, delay, elapsed)
+		if obfsType != "" {
+			request.Obfs = json.RawMessage(fmt.Sprintf(`{"type":%q,"password":"wrong-password"}`, obfsType))
+			if delay, err := probeNodeDelay(request, 150*time.Millisecond); err == nil || delay != -1 {
+				t.Fatalf("wrong obfs password must fail, delay=%d err=%v", delay, err)
+			}
+		}
 	}
 }

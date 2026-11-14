@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ffi' as ffi;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'linux_tun_permissions.dart';
 
 /// Windows 权限管理工具类
 /// 用于检查和处理管理员权限
@@ -129,6 +130,15 @@ class PrivilegeManager {
 
   /// 检查当前进程是否以管理员权限运行
   bool isElevated() {
+    if (Platform.isLinux) {
+      try {
+        return hasLinuxTunCapabilities(
+          File('/proc/self/status').readAsStringSync(),
+        );
+      } on FileSystemException {
+        return false;
+      }
+    }
     if (!Platform.isWindows) return false;
 
     try {
@@ -183,13 +193,16 @@ class PrivilegeManager {
   /// 请求管理员权限重启应用
   /// [reason] 提权原因，用于显示给用户
   /// 返回 true 表示重启成功，false 表示用户取消或失败
-  Future<bool> requestElevation({String reason = '启用 TUN 模式需要管理员权限'}) async {
+  Future<bool> requestElevation({
+    String reason = '启用 TUN 模式需要管理员权限',
+    bool autoStart = false,
+  }) async {
     if (!Platform.isWindows) return false;
 
     try {
       // 首先尝试直接通过 ShellExecuteW 以管理员身份重新启动自身
       // 这样可避免依赖外部脚本，并减少 PowerShell 被阻止的概率
-      final bool shellExecStarted = await _restartWithShellExecute();
+      final bool shellExecStarted = await _restartWithShellExecute(autoStart);
       if (shellExecStarted) {
         // 给新进程时间启动后退出当前进程
         await Future.delayed(const Duration(milliseconds: 300));
@@ -215,11 +228,11 @@ class PrivilegeManager {
       if (scriptPath != null) {
         // 使用静默提权脚本
         if (kDebugMode) print('使用静默提权脚本: $scriptPath');
-        await _restartWithElevation(scriptPath, exePath);
+        await _restartWithElevation(scriptPath, exePath, autoStart);
       } else {
         // 直接使用 PowerShell 提权
         if (kDebugMode) print('使用 PowerShell 提权');
-        await _restartWithPowerShell(exePath);
+        await _restartWithPowerShell(exePath, autoStart);
       }
 
       // 如果到这里说明重启成功，应用即将退出
@@ -232,15 +245,15 @@ class PrivilegeManager {
 
   /// 使用 ShellExecuteW 以 runas 模式重新启动当前进程
   /// 返回是否成功发起（不代表新进程业务已完全就绪）
-  Future<bool> _restartWithShellExecute() async {
+  Future<bool> _restartWithShellExecute(bool autoStart) async {
     if (!Platform.isWindows) return false;
     try {
       final String exePath = Platform.resolvedExecutable;
       // operation = 'runas'
       final opPtr = 'runas'.toNativeUtf16();
       final filePtr = exePath.toNativeUtf16();
-      // 可根据需要传递参数，这里保持与当前参数一致（忽略 dart vm 参数差异）
-      final paramsPtr = ''.toNativeUtf16();
+      // 提权重启后保留开机启动来源。
+      final paramsPtr = (autoStart ? '--autostart' : '').toNativeUtf16();
       final dirPtr = ''.toNativeUtf16();
       try {
         final int hInstance = _shellExecute(
@@ -272,9 +285,14 @@ class PrivilegeManager {
   }
 
   /// 使用静默提权脚本重启
-  Future<void> _restartWithElevation(String scriptPath, String exePath) async {
+  Future<void> _restartWithElevation(
+    String scriptPath,
+    String exePath,
+    bool autoStart,
+  ) async {
     final ProcessResult result = await Process.run(scriptPath, [
       exePath,
+      if (autoStart) '--autostart',
     ], runInShell: true);
 
     if (kDebugMode) {
@@ -290,10 +308,10 @@ class PrivilegeManager {
   }
 
   /// 使用 PowerShell 提权重启
-  Future<void> _restartWithPowerShell(String exePath) async {
+  Future<void> _restartWithPowerShell(String exePath, bool autoStart) async {
     final String powershellCmd =
         '''
-Start-Process -FilePath "$exePath" -Verb RunAs -WindowStyle Normal
+Start-Process -FilePath "$exePath" ${autoStart ? "-ArgumentList '--autostart'" : ''} -Verb RunAs -WindowStyle Hidden
 ''';
 
     final ProcessResult result = await Process.run('powershell.exe', [
@@ -321,6 +339,11 @@ Start-Process -FilePath "$exePath" -Verb RunAs -WindowStyle Normal
     // Android 使用 VpnService，应用内可用
     if (Platform.isAndroid) {
       return TunAvailability.available;
+    }
+    if (Platform.isLinux) {
+      return isElevated()
+          ? TunAvailability.available
+          : TunAvailability.needElevation;
     }
     if (!Platform.isWindows) {
       return TunAvailability.notSupported;
@@ -370,7 +393,7 @@ extension TunAvailabilityExtension on TunAvailability {
       case TunAvailability.available:
         return 'TUN 模式可用';
       case TunAvailability.needElevation:
-        return '需要管理员权限';
+        return Platform.isLinux ? '需要安装 TUN 网络权限' : '需要管理员权限';
       case TunAvailability.missingWintun:
         return '缺少 wintun.dll';
       case TunAvailability.notSupported:

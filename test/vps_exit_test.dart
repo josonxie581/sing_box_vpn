@@ -12,6 +12,151 @@ import 'vps_exit_fakes.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('selected missing exit is reported instead of silently hidden', () {
+    final data = exitStatus(
+      singapore: true,
+      policy: const VpsExitPolicy(claude: VpsExitTarget.australia),
+    );
+    (data['exits'] as Map).remove('au');
+    expect(
+      () => VpsExitStatus.fromJson(data),
+      throwsA(
+        isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('au'),
+        ),
+      ),
+    );
+  });
+  test('empty optional job message does not block status parsing', () {
+    final data = exitStatus(jobState: 'failed');
+    (data['job'] as Map)['message'] = '';
+    final status = VpsExitStatus.fromJson(data);
+    expect(status.job!.message, isEmpty);
+    expect(status.job!.state, 'failed');
+    for (final invalid in [42, repeat('x', 1001)]) {
+      data['job'] = <String, dynamic>{
+        ...data['job'] as Map,
+        'message': invalid,
+      };
+      expect(() => VpsExitStatus.fromJson(data), throwsFormatException);
+    }
+  });
+  test('reads the three-exit server policy without losing Singapore rules', () {
+    final status = VpsExitStatus.fromJson({
+      ...exitStatus(singapore: true),
+      'policy': {
+        'default': 'direct',
+        'claude': 'sg',
+        'openai': 'sg',
+        'direct_domains': <String>[],
+        'australia_domains': <String>[],
+        'singapore_domains': [' *.Example.COM. '],
+      },
+    });
+    expect(status.policy.claude, VpsExitTarget.singapore);
+    expect(status.policy.openai, VpsExitTarget.singapore);
+    expect(status.policy.singaporeDomains, ['example.com']);
+    expect(status.policy.toJson()['singapore_domains'], ['example.com']);
+    expect(status.availableTargets, contains(VpsExitTarget.singapore));
+    expect(status.label(VpsExitTarget.singapore), '新加坡');
+    expect(status.availableTargets, [
+      VpsExitTarget.direct,
+      VpsExitTarget.australia,
+      VpsExitTarget.singapore,
+    ]);
+    expect(status.address(VpsExitTarget.australia), '198.51.100.1');
+    expect(status.address(VpsExitTarget.singapore), '203.0.113.1');
+  });
+  test('legacy two-exit servers remain compatible', () {
+    final status = VpsExitStatus.fromJson(exitStatus());
+    expect(status.policy.singaporeDomains, isEmpty);
+    expect(status.availableTargets, [
+      VpsExitTarget.direct,
+      VpsExitTarget.australia,
+    ]);
+    expect(status.policy.toJson().containsKey('singapore_domains'), isFalse);
+    expect(
+      () => VpsExitStatus.fromJson({
+        ...exitStatus(),
+        'policy': {...const VpsExitPolicy().toJson(), 'claude': 'sg'},
+      }),
+      throwsFormatException,
+    );
+  });
+  test(
+    'legacy requests omit new fields and cannot select unavailable exits',
+    () async {
+      final fake = FakeVpsTransport();
+      final controller = VpsExitController(fake);
+      addTearDown(controller.dispose);
+      await controller.connect(exitProfile);
+      await controller.validate(const VpsExitPolicy());
+      expect(
+        fake.calls.last['data']['policy'].containsKey('singapore_domains'),
+        isFalse,
+      );
+      final count = fake.calls.length;
+      await controller.apply(
+        const VpsExitPolicy(claude: VpsExitTarget.singapore),
+      );
+      expect(controller.error, contains('出口不可用'));
+      expect(fake.calls.length, count);
+    },
+  );
+  test(
+    'Singapore rules reject invalid domains and overlaps with both exits',
+    () {
+      for (final policy in [
+        const VpsExitPolicy(singaporeDomains: ['https://example.com']),
+        const VpsExitPolicy(
+          singaporeDomains: ['example.com'],
+          directDomains: ['a.example.com'],
+        ),
+        const VpsExitPolicy(
+          singaporeDomains: ['a.example.com'],
+          australiaDomains: ['example.com'],
+        ),
+      ]) {
+        expect(policy.normalized, throwsFormatException);
+      }
+      expect(
+        () => VpsExitPolicy.fromJson({
+          ...const VpsExitPolicy().toJson(),
+          'singapore_domains': null,
+        }),
+        throwsFormatException,
+      );
+    },
+  );
+  test(
+    'checking and applying preserves Singapore selections and domains',
+    () async {
+      final fake = FakeVpsTransport()
+        ..singapore = true
+        ..policy = const VpsExitPolicy(
+          claude: VpsExitTarget.singapore,
+          openai: VpsExitTarget.singapore,
+          singaporeDomains: ['example.com'],
+        );
+      final controller = VpsExitController(fake, pollInterval: Duration.zero);
+      addTearDown(controller.dispose);
+      await controller.connect(exitProfile);
+      expect(controller.error, isNull);
+      final policy = controller.status!.policy;
+      await controller.validate(policy);
+      await controller.apply(policy);
+      for (final call in fake.calls.where((c) => c['action'] != 'status')) {
+        expect(call['data']['policy']['claude'], 'sg');
+        expect(call['data']['policy']['singapore_domains'], ['example.com']);
+      }
+      expect(controller.error, isNull);
+      // Explicitly clearing rules must send an empty list to the newer server.
+      await controller.validate(const VpsExitPolicy());
+      expect(fake.calls.last['data']['policy']['singapore_domains'], isEmpty);
+    },
+  );
   test(
     'polling timeout leaves an unknown result and never replays apply',
     () async {

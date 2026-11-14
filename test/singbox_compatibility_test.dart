@@ -32,8 +32,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final dns = DnsManager();
   final fixtureDir = Directory('build/singbox-core/config-checks').absolute;
-  final dllFile = File('windows/singbox.dll').absolute;
-  final canCheckCore = Platform.isWindows && dllFile.existsSync();
+  final dllFile = File(
+    Platform.isLinux ? 'build/linux-core/libsingbox.so' : 'windows/singbox.dll',
+  ).absolute;
+  final canCheckCore =
+      (Platform.isWindows || Platform.isLinux) && dllFile.existsSync();
   String takeNativeLogs() {
     final library = DynamicLibrary.open(dllFile.path);
     final drain = library
@@ -281,6 +284,8 @@ void main() {
       'password': 'test',
     },
     'anytls': {'password': 'test'},
+    'naive': {'username': 'test', 'password': 'test'},
+    'snell': {'version': 6, 'psk': 'test-key-123456789', 'mode': 'default'},
     'shadowtls': {'password': 'test', 'version': 3},
     'socks': {},
     'http': {},
@@ -337,6 +342,20 @@ void main() {
             aiRules.first['domain_suffix'],
             contains('claudeusercontent.com'),
           );
+          expect(
+            aiRules.first['domain_suffix'],
+            contains('antigravity.google'),
+          );
+          for (final rule in aiRules) {
+            expect(
+              rule['domain'],
+              containsAll([
+                'cloudcode-pa.googleapis.com',
+                'daily-cloudcode-pa.googleapis.com',
+                'oauth2.googleapis.com',
+              ]),
+            );
+          }
         }
       }
     },
@@ -435,6 +454,9 @@ void main() {
             port,
             timeout: const Duration(seconds: 5),
           );
+          // A reset reports on both the read stream and the write-side done
+          // future. Validate the read result below without an unhandled copy.
+          socket.done.ignore();
           try {
             socket.write(
               'GET http://$host/ HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n',
@@ -458,6 +480,9 @@ void main() {
               'claude.ai',
               'files.oaiusercontent.com',
               'bridge.claudeusercontent.com',
+              'antigravity.google',
+              'cloudcode-pa.googleapis.com',
+              'oauth2.googleapis.com',
               'challenges.cloudflare.com',
               'chatgpt-async-webps-prod-eastus-1.webpubsub.azure.com',
             ]) {
@@ -465,10 +490,17 @@ void main() {
               expect(destinations.last, host);
             }
             final count = destinations.length;
-            expect(
-              await requestThroughMixed('unrelated.example'),
-              isNot(contains('proxied')),
-            );
+            try {
+              expect(
+                await requestThroughMixed('unrelated.example'),
+                isNot(contains('proxied')),
+              );
+            } on SocketException catch (error) {
+              // Linux can return ECONNRESET for a rejected HTTP inbound.
+              // Other socket failures still fail the test.
+              expect(Platform.isLinux, isTrue);
+              expect(error.osError?.errorCode, 104);
+            }
             expect(destinations.length, count);
           },
         );
@@ -517,7 +549,7 @@ void main() {
             enableClashApi: false,
           );
           // Exercise instance.Start without changing the host's TUN or routes.
-          // Loopback port 0 lets Windows choose unused listener ports.
+          // Loopback port 0 lets the OS choose unused listener ports.
           config['inbounds'] = (config['inbounds'] as List)
               .where((inbound) => inbound['type'] != 'tun')
               .map(
@@ -547,6 +579,32 @@ void main() {
       final config = await node.toSingBoxConfig(mode: ProxyMode.global);
       validateNativeConfig(config);
     }, skip: !canCheckCore);
+  }
+
+  for (final obfsType in ['salamander', 'gecko']) {
+    test(
+      'v1.14 core accepts HY2 $obfsType and random port hopping',
+      () async {
+        final node = VPNConfig(
+          name: 'HY2',
+          type: 'hysteria2',
+          server: '192.0.2.2',
+          port: 443,
+          settings: {
+            'password': 'test',
+            'obfs': {'type': obfsType, 'password': 'test-obfs'},
+            'server_ports': ['20000:30000'],
+            'hop_interval': '30s',
+            'hop_interval_max': '60s',
+            'bbr_profile': 'conservative',
+          },
+        );
+        validateNativeConfig(
+          await node.toSingBoxConfig(mode: ProxyMode.global),
+        );
+      },
+      skip: !canCheckCore,
+    );
   }
 
   for (final mode in ProxyMode.values) {
@@ -646,7 +704,10 @@ void main() {
                   void Function(Pointer<Utf8>)
                 >('FreeCString');
             final versionString = version();
-            expect(versionString.toDartString(), 'sing-box 1.14.2');
+            final pinnedVersion = File(
+              'sing-box-version.txt',
+            ).readAsStringSync().trim().replaceFirst('v', '');
+            expect(versionString.toDartString(), 'sing-box $pinnedVersion');
             free(versionString);
             final check = library
                 .lookupFunction<

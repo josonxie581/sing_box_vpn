@@ -18,7 +18,7 @@ import uuid
 from contextlib import contextmanager
 
 import vpn_runtime
-from vpn_policy import build, infer, normalize
+from vpn_policy import build, infer, normalize, DOMAIN_TARGETS, domain_groups
 
 CONFIG = Path('/root/sing-box/config.json')
 STATE = Path('/var/lib/shaowei-vpn')
@@ -73,7 +73,7 @@ class Manager:
         config = json.loads(raw)
         saved = read_json(self.state / 'active.json')
         if saved and saved.get('revision') == revision(raw):
-            return raw, config, saved['policy'], False
+            return raw, config, normalize(saved['policy']), False
         policy, unknown = infer(config)
         return raw, config, policy, unknown
 
@@ -91,19 +91,29 @@ class Manager:
         raw, config, policy, unknown = self.current()
         history = read_json(self.state / 'history.json', [])
         return {
-            'revision': revision(raw), 'policy': policy, 'external_rules': unknown,
+            'policy_schema': 2, 'revision': revision(raw), 'policy': policy, 'external_rules': unknown,
             'job': self.latest_job(), 'can_rollback': bool(read_json(self.state / 'previous.json')),
             'history': history[-8:][::-1],
-            'exits': self.runtime.exit_metadata(),
+            'exits': self.runtime.exit_metadata(config),
         }
 
     def validate(self, payload, expected):
-        raw, config, _, unknown = self.current()
+        raw, config, current_policy, unknown = self.current()
         if expected != revision(raw):
             raise ValueError('配置已更新，请先刷新当前规则后再保存')
         if unknown:
             raise ValueError('检测到后台不支持的外部规则，已阻止覆盖；请先通过 SSH 核对')
+        canonical = isinstance(payload, dict) and set(payload) == {'default', 'claude', 'openai', 'domain_rules'}
+        if isinstance(payload, dict) and not canonical and 'singapore_domains' not in payload and current_policy.get('singapore_domains'):
+            raise ValueError('请更新客户端后再保存，以保留新加坡域名规则')
+        if isinstance(payload, dict) and not canonical and 'australia_exit_domains' not in payload and current_policy.get('australia_exit_domains'):
+            raise ValueError('请更新客户端后再保存，以保留澳大利亚域名规则')
+        if isinstance(payload, dict) and 'domain_rules' not in payload and current_policy.get('domain_rules'):
+            raise ValueError('请更新客户端后再保存，以保留动态域名规则')
         policy = normalize(payload)
+        available = self.runtime.exit_metadata(config)
+        if any(policy[key] not in available for key in ('default', 'claude', 'openai')) or any(domains and target not in available for target, domains in domain_groups(policy)):
+            raise ValueError('所选出口已移除，请刷新后重新选择')
         candidate = build(config, policy)
         self.runtime.validate(candidate)
         return {'valid': True, 'policy': policy, 'revision': expected, 'unchanged': candidate == config}

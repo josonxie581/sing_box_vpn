@@ -115,6 +115,15 @@ install(PROGRAMS "${DMIT_BRIDGE_EXE}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_ROOT_DIR}/browser_extension/dmit/"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/dmit-extension" COMPONENT Runtime)
+install(FILES
+  "${PROJECT_ROOT_DIR}/tools/restore_dmit.ps1"
+  "${PROJECT_ROOT_DIR}/tools/register_dmit_billing_bridge.ps1"
+  "${PROJECT_ROOT_DIR}/tools/setup_dmit_ssh_monitor.ps1"
+  "${PROJECT_ROOT_DIR}/tools/gsou_monitor_status.py"
+  "${PROJECT_ROOT_DIR}/tools/install_gsou_monitor.sh"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/tools" COMPONENT Runtime)
+install(FILES "${PROJECT_ROOT_DIR}/tools/restore_dmit.cmd"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
@@ -155,3 +164,11 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# NaiveProxy's Chromium network runtime, staged by tools/fetch_cronet.py.
+set(CRONET_DLL "${PROJECT_ROOT_DIR}/windows/libcronet.dll")
+if(EXISTS "${CRONET_DLL}")
+  install(FILES "${CRONET_DLL}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+else()
+  message(FATAL_ERROR "NaiveProxy requires windows/libcronet.dll. Run python tools/fetch_cronet.py")
+endif()

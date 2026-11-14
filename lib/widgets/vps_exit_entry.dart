@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/vpn_provider_v2.dart';
@@ -13,7 +14,8 @@ class VpsExitEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Consumer<VPNProviderV2>(
     builder: (context, provider, _) {
-      if (findDmitNode(provider.configs) == null) {
+      if (defaultTargetPlatform != TargetPlatform.windows ||
+          findDmitNode(provider.configs) == null) {
         return const SizedBox.shrink();
       }
       return Padding(

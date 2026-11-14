@@ -56,7 +56,8 @@ def run(args, **kwargs):
 def trace(config, residential):
     args = ['url = "https://www.cloudflare.com/cdn-cgi/trace"', 'silent', 'show-error', 'ipv4', 'connect-timeout = 8', 'max-time = 15']
     if residential:
-        upstream = next(o for o in config['outbounds'] if o.get('tag') == 'au-residential-ai')
+        tag = 'au-residential-ai' if residential is True else residential
+        upstream = next(o for o in config['outbounds'] if o.get('tag') == tag)
         if upstream.get('type') != 'socks':
             raise ValueError('住宅出口必须是已配置的 SOCKS5 代理')
         args.append('proxy = '+json.dumps('socks5h://'+upstream['server']+':'+str(upstream['server_port'])))
@@ -77,10 +78,14 @@ def trace(config, residential):
 
 def check_target(config):
     tags = {item.get('tag') for item in config.get('outbounds', [])}
-    if not {'direct', 'au-residential-ai'}.issubset(tags):
-        raise ValueError('请先在 VPS 配置 direct 与 au-residential-ai 两个出口，再部署控制服务')
-    if next(item for item in config['outbounds'] if item.get('tag') == 'direct').get('type') != 'direct':
-        raise ValueError('direct 出口必须配置为 VPS 直连')
+    supported = [o for o in config.get('outbounds', []) if o.get('type') in ('direct','socks','http')]
+    if not supported:
+        raise ValueError('服务器没有可管理的出口')
+    for outbound in supported:
+        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', outbound.get('tag','')):
+            raise ValueError('出口 ID 格式无效')
+        if outbound['type'] == 'http':
+            raise ValueError('内置安装探测暂仅支持 direct 与 SOCKS5 出口')
     vmess = next((i for i in config.get('inbounds', []) if i.get('type') == 'vmess'), None)
     if not vmess or vmess.get('tls', {}).get('enabled') or vmess.get('transport', {}).get('type') != 'ws':
         raise ValueError('当前控制服务需要 /root/sing-box 下的非 TLS VMess WS 入口作为验证通道')
@@ -124,9 +129,22 @@ def install(payload):
     before = CONFIG.read_bytes(); config = json.loads(before)
     check_target(config)
     run(['/root/sing-box/sing-box', 'check', '-c', 'config.json'], cwd='/root/sing-box')
-    exits = {'direct': trace(config, False), 'au': trace(config, True)}
-    if exits['direct']['ip'] == exits['au']['ip']:
-        raise ValueError('两个出口地址相同，请先检查住宅代理配置')
+    existing = json.loads((STATE/'exits.json').read_text()) if (STATE/'exits.json').exists() else {}
+    legacy = {'direct':'direct','au':'au-residential-ai','sg':'sg-residential-ai','australia':'australia-residential-ai'}
+    exits = {}
+    for outbound in config['outbounds']:
+        if outbound.get('type') not in ('direct','socks'):
+            continue
+        tag = outbound['tag']
+        ids = [key for key,info in existing.items() if info.get('outbound',legacy.get(key,key)) == tag]
+        key = ids[0] if ids else next((key for key,value in legacy.items() if value == tag),tag)
+        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',key):
+            raise ValueError('出口 ID 格式无效')
+        choice = False if outbound['type'] == 'direct' else True if tag == 'au-residential-ai' else tag
+        info = trace(config,choice)
+        if key in existing:info['label'] = existing[key]['label']
+        if legacy.get(key,key) != tag:info['outbound'] = tag
+        exits[key] = info
     if payload.get('dry_run'):
         return {'dry_run': True, 'installed': False, 'policy_preserved': CONFIG.read_bytes() == before, 'exits': exits}
     import fcntl

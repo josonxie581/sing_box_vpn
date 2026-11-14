@@ -10,6 +10,7 @@ import '../providers/vpn_provider_v2.dart';
 import '../models/vpn_config.dart';
 import '../theme/app_theme.dart';
 import '../services/ping_service.dart';
+import '../services/hysteria2_share.dart';
 import '../services/yaml_parser_service.dart';
 import '../services/outbound_binding_service.dart';
 import 'add_config_page.dart';
@@ -2087,32 +2088,7 @@ class _ConfigManagementPageState extends State<ConfigManagementPage> {
             : '$baseUrl?$queryString#$name';
 
       case 'hysteria2':
-        final password = config.settings['password'] ?? '';
-        final host = config.server;
-        final port = config.port;
-        final params = <String, String>{};
-
-        if (config.settings['sni'] != null) {
-          params['sni'] = config.settings['sni'];
-        }
-
-        if (config.settings['skipCertVerify'] == true) {
-          params['insecure'] = '1';
-        }
-
-        if (config.settings['alpn'] is List) {
-          params['alpn'] = (config.settings['alpn'] as List).join(',');
-        }
-
-        final queryString = params.entries
-            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
-            .join('&');
-
-        final name = Uri.encodeComponent(config.name);
-        final baseUrl = 'hysteria2://$password@$host:$port';
-        return queryString.isEmpty
-            ? '$baseUrl#$name'
-            : '$baseUrl?$queryString#$name';
+        return hysteria2ShareLink(config);
 
       case 'hysteria':
         // Hysteria v1

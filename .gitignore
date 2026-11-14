@@ -8,6 +8,7 @@
 .build/
 .buildlog/
 .history
+.playwright-cli/
 .svn/
 .swiftpm/
 migrate_working_dir/
@@ -42,6 +43,7 @@ shared_preferences.json
 *.log
 
 # Native build artifacts
+windows/libcronet.dll
 windows/runner/Release/
 windows/runner/Debug/
 

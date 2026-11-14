@@ -1,0 +1,13 @@
+[Unit]
+Description=Gsou VPN desktop client
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+Type=simple
+ExecStart=/opt/gsou/gsou --autostart
+Restart=no
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical-session.target

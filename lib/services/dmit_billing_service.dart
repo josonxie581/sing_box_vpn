@@ -32,6 +32,22 @@ class DmitBillingService extends ChangeNotifier {
     return null;
   }
 
+  /// Billing can recover before SSH configuration. Match a unique server by
+  /// its advertised address; never substitute an unrelated account's data.
+  DmitBillingInfo? infoForHost(String? host) {
+    if (host == null || host.trim().isEmpty) return null;
+    String normalize(String value) =>
+        value.trim().toLowerCase().replaceFirst(RegExp(r'\.+$'), '');
+    final matches = servers
+        .where(
+          (server) => server.addresses.any(
+            (address) => normalize(address) == normalize(host),
+          ),
+        )
+        .toList();
+    return matches.length == 1 ? matches.single : null;
+  }
+
   Future<void> initialize() => _initializing ??= _initialize();
 
   Future<void> _initialize() async {

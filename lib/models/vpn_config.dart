@@ -1,3 +1,4 @@
+import 'modern_protocol_options.dart';
 import 'dart:convert';
 import 'proxy_mode.dart';
 import '../services/ruleset_manager.dart';
@@ -114,6 +115,15 @@ class VPNConfig {
   /// 生成指定 tag 的出站配置（用于多出站绑定，如 proxy-a / proxy-b）
   Map<String, dynamic> toSingBoxOutbound({required String tag}) {
     switch (type.toLowerCase()) {
+      case 'naive':
+      case 'snell':
+        return ModernProtocolOptions.outbound(
+          type.toLowerCase(),
+          tag,
+          server,
+          port,
+          settings,
+        );
       case 'hysteria':
         return {
           "type": "hysteria",
@@ -307,13 +317,15 @@ class VPNConfig {
         return {
           "type": "hysteria2",
           "tag": tag,
-          "server": server,
-          "server_port": port,
+          if (settings['realm'] == null) "server": server,
+          if (settings['realm'] == null && settings['server_ports'] == null)
+            "server_port": port,
           "password": settings['password'] ?? "",
           if (_hysteria2Bandwidth('up') != null)
             "up_mbps": _hysteria2Bandwidth('up'),
           if (_hysteria2Bandwidth('down') != null)
             "down_mbps": _hysteria2Bandwidth('down'),
+          ...ModernProtocolOptions.hysteria2(settings),
           "tls": {
             "enabled": true,
             "server_name": settings['sni'] ?? server,
@@ -391,284 +403,7 @@ class VPNConfig {
   }
 
   /// 生成出站配置
-  Map<String, dynamic> _generateOutbound() {
-    switch (type.toLowerCase()) {
-      case 'hysteria':
-        return {
-          "type": "hysteria",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          // Hysteria v1 认证：优先使用明文 auth_str（来自 settings.password）
-          if ((settings['password'] ?? '').toString().isNotEmpty)
-            "auth_str": settings['password'],
-          // 也允许直接传入 base64 的 auth（来自 settings.auth）
-          if ((settings['auth'] ?? '').toString().isNotEmpty)
-            "auth": settings['auth'],
-          // 带宽：优先 up_mbps/down_mbps（数值），否则 up/down（字符串）
-          if (settings['up_mbps'] != null) "up_mbps": settings['up_mbps'],
-          if (settings['down_mbps'] != null) "down_mbps": settings['down_mbps'],
-          if ((settings['up'] ?? '').toString().isNotEmpty)
-            "up": settings['up'],
-          if ((settings['down'] ?? '').toString().isNotEmpty)
-            "down": settings['down'],
-          if ((settings['obfs'] ?? '').toString().isNotEmpty)
-            "obfs": settings['obfs'],
-          if (settings['recv_window_conn'] != null)
-            "recv_window_conn": settings['recv_window_conn'],
-          if (settings['recv_window'] != null)
-            "recv_window": settings['recv_window'],
-          if (settings['disable_mtu_discovery'] != null)
-            "disable_mtu_discovery": settings['disable_mtu_discovery'],
-          // TLS 配置
-          "tls": {
-            "enabled": true,
-            "server_name": (settings['sni'] ?? server),
-            if (settings['skipCertVerify'] == true) "insecure": true,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-      case 'shadowtls':
-        return {
-          "type": "shadowtls",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          if (settings['version'] is int)
-            "version": settings['version']
-          else if ((settings['version'] ?? '').toString().isNotEmpty)
-            "version": int.tryParse(settings['version'].toString()) ?? 1,
-          if ((settings['password'] ?? '').toString().isNotEmpty)
-            "password": settings['password'],
-          "tls": {
-            "enabled": true,
-            // 若未提供 sni，兜底使用服务器域名
-            "server_name": (settings['sni'] ?? server),
-            if (settings['skipCertVerify'] == true) "insecure": true,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-
-      case 'anytls':
-        return {
-          "type": "anytls",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "password": settings['password'] ?? "",
-          // 连接保活/空闲会话可选项
-          if ((settings['idle_session_check_interval'] ?? '')
-              .toString()
-              .isNotEmpty)
-            "idle_session_check_interval":
-                settings['idle_session_check_interval'],
-          if ((settings['idle_session_timeout'] ?? '').toString().isNotEmpty)
-            "idle_session_timeout": settings['idle_session_timeout'],
-          if (settings['min_idle_session'] != null)
-            "min_idle_session": settings['min_idle_session'],
-          // AnyTLS 要求 TLS 出站配置
-          "tls": {
-            "enabled": true,
-            // 若未提供 sni，兜底使用服务器域名
-            "server_name": (settings['sni'] ?? server),
-            if (settings['skipCertVerify'] == true) "insecure": true,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-
-      case 'shadowsocks':
-        return {
-          "type": "shadowsocks",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "method": settings['method'] ?? "aes-256-gcm",
-          "password": settings['password'] ?? "",
-          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
-        };
-
-      case 'shadowsocks-2022':
-        return {
-          "type": "shadowsocks",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "method": settings['method'] ?? "2022-blake3-aes-128-gcm",
-          "password": settings['password'] ?? "",
-          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
-        };
-
-      case 'vmess':
-        final useTls = (settings['tls']?.toString().toLowerCase() == 'tls');
-        final mux = _generateMultiplex();
-        final outbound = <String, dynamic>{
-          "type": "vmess",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "uuid": settings['uuid'] ?? "",
-          "security": settings['security'] ?? "auto",
-          "alter_id": settings['alterId'] ?? 0,
-        };
-        final transport = _generateTransport();
-        if (transport != null) outbound["transport"] = transport;
-        if (useTls) {
-          outbound["tls"] = {
-            "enabled": true,
-            if ((settings['host'] ?? '').toString().isNotEmpty)
-              "server_name": settings['host'],
-          };
-        }
-        if (mux != null) outbound["multiplex"] = mux;
-        return outbound;
-
-      case 'vless':
-        // VLESS + flow (xtls-rprx-vision) 不兼容 multiplex，仅无 flow 时启用
-        final vlessMux = (settings['flow'] ?? '').toString().isEmpty
-            ? _generateMultiplex()
-            : null;
-        return {
-          "type": "vless",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "uuid": settings['uuid'] ?? "",
-          // 注意：sing-box 的 vless 出站不需要也不支持 "encryption" 字段（xray 才需要），
-          // 这里不要写入，否则会报错：json: unknown field "encryption"。
-          if ((settings['flow'] ?? '').toString().isNotEmpty)
-            "flow": settings['flow'],
-          if (_generateTransport() != null) "transport": _generateTransport(),
-          if (vlessMux != null) "multiplex": vlessMux,
-          if (settings['tlsEnabled'] == true)
-            "tls": {
-              "enabled": true,
-              // 若未提供 sni，兜底使用服务器域名
-              "server_name": (settings['sni'] ?? server),
-              if (settings['alpn'] is List) "alpn": settings['alpn'],
-              // 若提供了指纹则开启 uTLS 并设置 fingerprint（需要 with_utls 构建）
-              if ((settings['fingerprint'] ?? '').toString().isNotEmpty)
-                "utls": {
-                  "enabled": true,
-                  "fingerprint": settings['fingerprint'],
-                },
-              if (settings['realityEnabled'] == true)
-                "reality": {
-                  "enabled": true,
-                  if ((settings['realityPublicKey'] ?? '')
-                      .toString()
-                      .isNotEmpty)
-                    "public_key": settings['realityPublicKey'],
-                  if ((settings['realityShortId'] ?? '').toString().isNotEmpty)
-                    "short_id": settings['realityShortId'],
-                },
-            },
-        };
-
-      case 'trojan':
-        return {
-          "type": "trojan",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "password": settings['password'] ?? "",
-          if (_generateMultiplex() != null) "multiplex": _generateMultiplex(),
-          "tls": {
-            "enabled": true,
-            "server_name": settings['sni'] ?? server,
-            "insecure": settings['skipCertVerify'] ?? false,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-
-      case 'hysteria2':
-        // Brutal 拥塞控制带宽参数（可选）：
-        //   有值 → 启用 Brutal CC，适合高丢包但 UDP 不限速的网络
-        //   无值 → 使用默认 BBR CC，适合 ISP 对 UDP 做 QoS 限速的场景
-        return {
-          "type": "hysteria2",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          "password": settings['password'] ?? "",
-          if (_hysteria2Bandwidth('up') != null)
-            "up_mbps": _hysteria2Bandwidth('up'),
-          if (_hysteria2Bandwidth('down') != null)
-            "down_mbps": _hysteria2Bandwidth('down'),
-          "tls": {
-            "enabled": true,
-            "server_name": settings['sni'] ?? server,
-            "insecure": settings['skipCertVerify'] ?? false,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-
-      case 'tuic':
-        return {
-          "type": "tuic",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          if ((settings['uuid'] ?? '').toString().isNotEmpty)
-            "uuid": settings['uuid'],
-          if ((settings['password'] ?? '').toString().isNotEmpty)
-            "password": settings['password'],
-          if ((settings['udpRelayMode'] ?? '').toString().isNotEmpty)
-            "udp_relay_mode": settings['udpRelayMode'],
-          if ((settings['congestion'] ?? '').toString().isNotEmpty)
-            "congestion_control": settings['congestion'],
-          "tls": {
-            "enabled": true,
-            // 若未提供 sni，兜底使用服务器域名
-            "server_name": (settings['sni'] ?? server),
-            // 是否跳过证书校验
-            if (settings['skipCertVerify'] == true) "insecure": true,
-            if (settings['alpn'] is List) "alpn": settings['alpn'],
-          },
-        };
-
-      case 'socks':
-        return {
-          "type": "socks",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          if ((settings['username'] ?? '').toString().isNotEmpty)
-            "username": settings['username'],
-          if ((settings['password'] ?? '').toString().isNotEmpty)
-            "password": settings['password'],
-          if (settings['tlsEnabled'] == true)
-            "tls": {
-              "enabled": true,
-              if ((settings['sni'] ?? '').toString().isNotEmpty)
-                "server_name": settings['sni'],
-            },
-        };
-
-      case 'http':
-        return {
-          "type": "http",
-          "tag": "proxy",
-          "server": server,
-          "server_port": port,
-          if ((settings['username'] ?? '').toString().isNotEmpty)
-            "username": settings['username'],
-          if ((settings['password'] ?? '').toString().isNotEmpty)
-            "password": settings['password'],
-          if (settings['tlsEnabled'] == true)
-            "tls": {
-              "enabled": true,
-              if ((settings['sni'] ?? '').toString().isNotEmpty)
-                "server_name": settings['sni'],
-            },
-        };
-
-      case 'wireguard':
-        return _generateWireGuardEndpoint("proxy");
-
-      default:
-        return {"type": "direct", "tag": "proxy"};
-    }
-  }
+  Map<String, dynamic> _generateOutbound() => toSingBoxOutbound(tag: "proxy");
 
   /// Convert subscription bandwidth strings to the integer Mbps fields of Hysteria2.
   int? _hysteria2Bandwidth(String direction) {
@@ -776,7 +511,23 @@ class VPNConfig {
       final s = link.trim();
       final lower = s.toLowerCase();
       // 解析不同类型的订阅链接（大小写不敏感）
-      if (lower.startsWith('ss://')) {
+      if (lower.startsWith('naive+https://') ||
+          lower.startsWith('naive+quic://') ||
+          lower.startsWith('snell://')) {
+        final uri = Uri.parse(s);
+        final type = uri.scheme == 'snell' ? 'snell' : 'naive';
+        if (uri.host.isEmpty) return null;
+        final settings = ModernProtocolOptions.parseSettings(uri, type);
+        final port = uri.hasPort ? uri.port : 443;
+        ModernProtocolOptions.outbound(type, 'check', uri.host, port, settings);
+        return VPNConfig(
+          name: uri.fragment.isEmpty ? type : Uri.decodeComponent(uri.fragment),
+          type: type,
+          server: uri.host,
+          port: port,
+          settings: settings,
+        );
+      } else if (lower.startsWith('ss://')) {
         return _parseShadowsocks(s);
       } else if (lower.startsWith('vmess://')) {
         return _parseVmess(s);
@@ -967,7 +718,7 @@ class VPNConfig {
           : 'Hysteria2';
 
       String password = '';
-      if (uri.userInfo.isNotEmpty) password = uri.userInfo;
+      if (uri.userInfo.isNotEmpty) password = Uri.decodeComponent(uri.userInfo);
       password = (qp['password'] ?? qp['pwd'] ?? password).trim();
 
       // 带宽配置（Brutal 拥塞控制需要）
@@ -997,6 +748,23 @@ class VPNConfig {
 
       final settings = <String, dynamic>{
         'password': password,
+        if ((qp['obfs'] ?? '').isNotEmpty)
+          'obfs': {
+            'type': qp['obfs'],
+            'password': qp['obfs-password'] ?? '',
+            if (qp['min_packet_size'] != null)
+              'min_packet_size': int.parse(qp['min_packet_size']!),
+            if (qp['max_packet_size'] != null)
+              'max_packet_size': int.parse(qp['max_packet_size']!),
+          },
+        if (qp['mport'] != null || qp['server_ports'] != null)
+          'server_ports': (qp['mport'] ?? qp['server_ports']!).split(','),
+        for (final key in ['hop_interval', 'hop_interval_max', 'bbr_profile'])
+          if (qp[key] != null) key: qp[key],
+        if (qp['disable_chrome_parrot'] != null)
+          'disable_chrome_parrot':
+              qp['disable_chrome_parrot'] == 'true' ||
+              qp['disable_chrome_parrot'] == '1',
         'skipCertVerify': skipCertVerify,
         if (alpn != null && alpn.isNotEmpty) 'alpn': alpn,
         if (sni.isNotEmpty) 'sni': sni,
@@ -1006,6 +774,7 @@ class VPNConfig {
         if (downStr.isNotEmpty) 'down': downStr,
       };
 
+      ModernProtocolOptions.hysteria2(settings);
       return VPNConfig(
         name: name,
         type: 'hysteria2',
@@ -1155,10 +924,14 @@ class VPNConfig {
         // 忽略，尝试未编码形态
       }
 
-      // 未编码形态（B）
+      // SIP002 encodes method:password in userInfo; plain userInfo also works.
       if (uri.userInfo.isNotEmpty && uri.host.isNotEmpty && uri.port > 0) {
-        final auth = uri.userInfo.split(':');
-        if (auth.length == 2) {
+        var userInfo = Uri.decodeComponent(uri.userInfo);
+        if (!userInfo.contains(':')) {
+          userInfo = utf8.decode(base64.decode(base64.normalize(userInfo)));
+        }
+        final separator = userInfo.indexOf(':');
+        if (separator > 0 && separator < userInfo.length - 1) {
           return VPNConfig(
             name: uri.fragment.isNotEmpty
                 ? Uri.decodeComponent(uri.fragment)
@@ -1166,7 +939,10 @@ class VPNConfig {
             type: 'shadowsocks',
             server: uri.host,
             port: uri.port,
-            settings: {'method': auth[0], 'password': auth[1]},
+            settings: {
+              'method': userInfo.substring(0, separator),
+              'password': userInfo.substring(separator + 1),
+            },
           );
         }
       }

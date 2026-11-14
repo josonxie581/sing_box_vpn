@@ -1,12 +1,11 @@
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
-import 'package:path/path.dart' as path;
 
 import '../models/vpn_config.dart';
+import 'native_library_path.dart';
 
 /// Server RTT, not a URL test or proof that proxy authentication succeeds.
 /// The native probe binds its sockets to the physical default interface.
@@ -16,15 +15,7 @@ class NativeNodeDelay {
     required int timeoutMs,
     String? libraryPath,
   }) async {
-    final executableLibrary = path.join(
-      path.dirname(Platform.resolvedExecutable),
-      'singbox.dll',
-    );
-    final dll =
-        libraryPath ??
-        (File(executableLibrary).existsSync()
-            ? executableLibrary
-            : path.absolute('windows', 'singbox.dll'));
+    final dll = libraryPath ?? resolveNativeLibraryPath();
     final outbound = node.toSingBoxOutbound(tag: 'latency');
     // Only transport metadata is needed; never send proxy credentials.
     final request = jsonEncode({

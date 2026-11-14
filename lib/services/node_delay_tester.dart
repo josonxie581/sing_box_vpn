@@ -325,7 +325,8 @@ class NodeDelayTester {
 
   /// 智能延时测试 - 基于分流规则绕过VPN路由
   Future<NodeDelayResult> realTest(VPNConfig node) async {
-    if (Platform.isWindows) return _testWindowsServerRtt(node);
+    if (Platform.isWindows || Platform.isLinux || Platform.isAndroid)
+      return _testNativeServerRtt(node);
     try {
       print('[分流延时测试] 开始测试: ${node.name} (${node.server}:${node.port})');
 
@@ -398,7 +399,8 @@ class NodeDelayTester {
 
   /// 快速测试（TCP连接测试）
   Future<NodeDelayResult> quickTest(VPNConfig node) async {
-    if (Platform.isWindows) return _testWindowsServerRtt(node);
+    if (Platform.isWindows || Platform.isLinux || Platform.isAndroid)
+      return _testNativeServerRtt(node);
     print('⚡ 开始快速测试: ${node.name} (${node.server}:${node.port})');
     try {
       // 统一解析为真实 IPv4，避免 FakeIP/IPv6 带来的抖动
@@ -1019,7 +1021,7 @@ class NodeDelayTester {
     }
   }
 
-  Future<NodeDelayResult> _testWindowsServerRtt(VPNConfig node) async {
+  Future<NodeDelayResult> _testNativeServerRtt(VPNConfig node) async {
     try {
       final delay = await NativeNodeDelay.measure(node, timeoutMs: timeout);
       if (delay < 0) {
@@ -1144,7 +1146,7 @@ class NodeDelayTester {
   /// 创建用于延时测试的最小化直连配置
   Map<String, dynamic> _createDirectTestConfig(VPNConfig node) {
     return {
-      "log": {"level": "error", "timestamp": false},
+      "log": {"disabled": true},
       "dns": {
         "servers": [
           {"tag": "cloudflare", "address": "1.1.1.1", "detour": "direct"},

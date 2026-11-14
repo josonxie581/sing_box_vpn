@@ -1253,6 +1253,8 @@ class SingBoxNativeService {
   }
 
   Future<void> _initReleaseLogSink() async {
+    // 日常运行不写文件日志，避免 release.log 长期追加占用磁盘。
+    if (!LogPolicy.debugEnabled) return;
     if (_releaseLogSink != null) return;
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -1321,7 +1323,7 @@ class SingBoxNativeService {
 
       // 创建最简代理配置 - 仅HTTP代理，无TUN
       final config = {
-        "log": {"level": "warn", "timestamp": true},
+        "log": {"disabled": true},
         "inbounds": [
           {
             "type": "http",
@@ -1383,6 +1385,9 @@ class SingBoxNativeService {
 
   /// 根据VPN节点创建出站配置
   Map<String, dynamic> _createOutboundFromNode(VPNConfig node) {
+    if (['naive', 'snell', 'hysteria2'].contains(node.type.toLowerCase())) {
+      return node.toSingBoxOutbound(tag: node.id);
+    }
     final outbound = <String, dynamic>{
       "tag": node.id,
       "type": node.type.toLowerCase(),

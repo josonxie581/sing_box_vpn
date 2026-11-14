@@ -12,7 +12,8 @@ class ConfigManager {
 
   List<VPNConfig> _configs = [];
   VPNConfig? _currentConfig;
-  final RemoteSubscriptionService _subscriptionService = RemoteSubscriptionService();
+  final RemoteSubscriptionService _subscriptionService =
+      RemoteSubscriptionService();
 
   // 订阅管理
   final Map<String, SubscriptionInfo> _subscriptionInfos = {};
@@ -130,12 +131,29 @@ class ConfigManager {
 
   /// 提取所有链接
   List<String> _extractAllLinks(String text) {
-    final schemes = ['vless://', 'trojan://', 'ss://', 'vmess://',
-                    'hysteria://', 'hysteria2://', 'tuic://'];
+    final schemes = [
+      'vless://',
+      'trojan://',
+      'ss://',
+      'vmess://',
+      'hysteria://',
+      'hysteria2://',
+      'hy2://',
+      'anytls://',
+      'tu5://',
+      'shadowtls://',
+      'naive+https://',
+      'naive+quic://',
+      'snell://',
+      'tuic://',
+    ];
     final List<String> links = [];
 
     for (final scheme in schemes) {
-      final pattern = RegExp('$scheme[^\\s]+');
+      final pattern = RegExp(
+        '${RegExp.escape(scheme)}[^\\s]+',
+        caseSensitive: false,
+      );
       final matches = pattern.allMatches(text);
       for (final match in matches) {
         links.add(match.group(0)!);
@@ -198,7 +216,6 @@ class ConfigManager {
         subscriptionInfo: result.subscriptionInfo,
         message: '成功导入 $imported 个配置',
       );
-
     } catch (e) {
       print('[配置管理] 远程订阅导入失败: $e');
       return SubscriptionImportResult(
@@ -219,7 +236,9 @@ class ConfigManager {
       print('[配置管理] 开始更新订阅: $url');
 
       // 获取该订阅的现有配置
-      final oldConfigs = _configs.where((config) => config.subscriptionUrl == url).toList();
+      final oldConfigs = _configs
+          .where((config) => config.subscriptionUrl == url)
+          .toList();
 
       // 下载新的订阅内容
       final result = await _subscriptionService.updateSubscription(
@@ -248,7 +267,9 @@ class ConfigManager {
       // 更新现有配置
       for (final updatedConfig in result.updatedConfigs) {
         final index = _configs.indexWhere(
-          (config) => config.name == updatedConfig.name && config.server == updatedConfig.server,
+          (config) =>
+              config.name == updatedConfig.name &&
+              config.server == updatedConfig.server,
         );
         if (index != -1) {
           _configs[index] = updatedConfig.copyWithSubscription(
@@ -270,7 +291,9 @@ class ConfigManager {
         await _saveSubscriptionData();
       }
 
-      print('[配置管理] 订阅更新完成，新增: ${result.addedConfigs.length}, 更新: ${result.updatedConfigs.length}, 删除: ${result.removedConfigs.length}');
+      print(
+        '[配置管理] 订阅更新完成，新增: ${result.addedConfigs.length}, 更新: ${result.updatedConfigs.length}, 删除: ${result.removedConfigs.length}',
+      );
 
       return SubscriptionUpdateResult(
         success: true,
@@ -278,9 +301,9 @@ class ConfigManager {
         updatedCount: result.updatedConfigs.length,
         removedCount: result.removedConfigs.length,
         subscriptionInfo: result.subscriptionResult.subscriptionInfo,
-        message: '更新完成：新增${result.addedConfigs.length}，更新${result.updatedConfigs.length}，删除${result.removedConfigs.length}',
+        message:
+            '更新完成：新增${result.addedConfigs.length}，更新${result.updatedConfigs.length}，删除${result.removedConfigs.length}',
       );
-
     } catch (e) {
       print('[配置管理] 更新订阅失败: $e');
       return SubscriptionUpdateResult(
@@ -297,7 +320,9 @@ class ConfigManager {
   Future<bool> deleteSubscription(String url) async {
     try {
       // 删除该订阅的所有配置
-      final removedCount = _configs.where((config) => config.subscriptionUrl == url).length;
+      final removedCount = _configs
+          .where((config) => config.subscriptionUrl == url)
+          .length;
       _configs.removeWhere((config) => config.subscriptionUrl == url);
 
       // 删除订阅信息
@@ -312,7 +337,6 @@ class ConfigManager {
 
       print('[配置管理] 删除订阅完成: $url，删除配置数: $removedCount');
       return true;
-
     } catch (e) {
       print('[配置管理] 删除订阅失败: $e');
       return false;
@@ -343,16 +367,25 @@ class ConfigManager {
     final subscriptionInfoJson = _subscriptionInfos.map(
       (url, info) => MapEntry(url, info.toJson()),
     );
-    await prefs.setString('subscription_infos', json.encode(subscriptionInfoJson));
+    await prefs.setString(
+      'subscription_infos',
+      json.encode(subscriptionInfoJson),
+    );
 
     // 保存更新时间
     final lastUpdatedJson = _subscriptionLastUpdated.map(
       (url, time) => MapEntry(url, time.millisecondsSinceEpoch),
     );
-    await prefs.setString('subscription_last_updated', json.encode(lastUpdatedJson));
+    await prefs.setString(
+      'subscription_last_updated',
+      json.encode(lastUpdatedJson),
+    );
 
     // 保存原始内容
-    await prefs.setString('subscription_raw_content', json.encode(_subscriptionRawContent));
+    await prefs.setString(
+      'subscription_raw_content',
+      json.encode(_subscriptionRawContent),
+    );
   }
 
   /// 加载订阅数据
@@ -380,7 +413,9 @@ class ConfigManager {
         final Map<String, dynamic> decoded = json.decode(lastUpdatedJson);
         _subscriptionLastUpdated.clear();
         decoded.forEach((url, timestamp) {
-          _subscriptionLastUpdated[url] = DateTime.fromMillisecondsSinceEpoch(timestamp);
+          _subscriptionLastUpdated[url] = DateTime.fromMillisecondsSinceEpoch(
+            timestamp,
+          );
         });
       } catch (e) {
         print('[配置管理] 加载订阅更新时间失败: $e');

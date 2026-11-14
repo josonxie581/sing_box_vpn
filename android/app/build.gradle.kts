@@ -31,6 +31,15 @@ android {
     }
 
     buildTypes {
+        configureEach {
+            // Flutter 3.35 keeps other plugin ABIs even with --target-platform.
+            // Match camera libraries to the ARM64 Flutter and sing-box binaries.
+            if (project.findProperty("target-platform") == "android-arm64" &&
+                !splits.abi.isEnable) {
+                ndk.abiFilters.clear()
+                ndk.abiFilters.add("arm64-v8a")
+            }
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.

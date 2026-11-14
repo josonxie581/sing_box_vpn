@@ -1,0 +1,8 @@
+/build_linux.sh text eol=lf
+/native/build_linux.sh text eol=lf
+/tools/install_linux.sh text eol=lf
+/tools/verify_linux.sh text eol=lf
+/tools/test_omarchy.sh text eol=lf
+/tools/linux_core_smoke.py text eol=lf
+/tools/check_linux_tray.py text eol=lf
+/linux/** text eol=lf

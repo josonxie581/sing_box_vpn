@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:path/path.dart' as path;
 import '../utils/log_policy.dart';
+import 'native_library_path.dart';
 // import 'package:win32/win32.dart' as win32; // Not required; use Directory.current instead
 
 // C 原型: typedef void (*LogCallback)(const char* msg);
@@ -93,7 +94,7 @@ class SingBoxFFI {
 
     final isWindows = Platform.isWindows;
     final isAndroid = Platform.isAndroid;
-    if (!isWindows && !isAndroid) {
+    if (!isWindows && !isAndroid && !Platform.isLinux) {
       throw UnsupportedError('暂不支持该平台');
     }
 
@@ -143,41 +144,7 @@ class SingBoxFFI {
   // _preloadWintunIfPresent 已移除
 
   /// 获取库文件路径
-  String _getLibraryPath() {
-    if (Platform.isWindows) {
-      // 优先从应用目录（Flutter Windows 构建输出目录）加载集成版
-      final exeDir = path.dirname(Platform.resolvedExecutable);
-      final exeIntegrated = path.join(exeDir, 'singbox.dll');
-      if (File(exeIntegrated).existsSync()) {
-        return exeIntegrated;
-      }
-
-      // 开发模式下从项目目录加载
-      final devDllPath = path.join(
-        Directory.current.path,
-        'windows',
-        'singbox.dll',
-      );
-      if (File(devDllPath).existsSync()) {
-        return devDllPath;
-      }
-
-      // 不再支持外部 DLL/EXE 回退；明确报错提示缺少集成 DLL
-      throw StateError(
-        '未找到 singbox.dll。\n'
-        '请确保已执行预编译生成 windows/singbox.dll，'
-        '或在发布包中将该 DLL 与可执行文件放在同一目录。',
-      );
-    }
-
-    if (Platform.isAndroid) {
-      // Android: .so 会被系统从标准库搜索路径加载，直接传库名即可。
-      // 需要在项目中放置：android/app/src/main/jniLibs/<abi>/libsingbox.so
-      return 'libsingbox.so';
-    }
-
-    throw UnsupportedError('暂不支持该平台');
-  }
+  String _getLibraryPath() => resolveNativeLibraryPath();
 
   /// 绑定函数
   void _bindFunctions() {

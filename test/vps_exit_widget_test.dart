@@ -11,6 +11,71 @@ import 'vps_exit_fakes.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  testWidgets(
+    'missing exit metadata is an error rather than a reduced editor',
+    (tester) async {
+      final fake = FakeVpsTransport()
+        ..singapore = true
+        ..australia = false
+        ..policy = const VpsExitPolicy(claude: VpsExitTarget.australia);
+      final controller = VpsExitController(fake);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.darkTheme(),
+          home: VpsExitPage(
+            controller: controller,
+            initialProfile: exitProfile,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.error, contains('au'));
+      expect(controller.status, isNull);
+      expect(find.textContaining('规则引用的出口不可用：au'), findsOneWidget);
+      expect(find.text('保存并应用'), findsNothing);
+      expect(fake.calls.map((call) => call['action']), ['status']);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('Singapore server loads, edits and preserves all domain groups', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fake = FakeVpsTransport()
+      ..singapore = true
+      ..policy = const VpsExitPolicy(
+        claude: VpsExitTarget.singapore,
+        openai: VpsExitTarget.singapore,
+        singaporeDomains: ['example.com'],
+      );
+    final controller = VpsExitController(fake);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.darkTheme(),
+        home: VpsExitPage(controller: controller, initialProfile: exitProfile),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('出口类型无效'), findsNothing);
+    expect(find.textContaining('当前生效：Claude → 新加坡'), findsOneWidget);
+    final field = find.widgetWithText(TextField, '走新加坡的域名');
+    await tester.ensureVisible(field);
+    expect(tester.widget<TextField>(field).controller!.text, 'example.com');
+    await tester.enterText(field, 'new.example.com');
+    await tester.ensureVisible(find.text('检查规则'));
+    await tester.tap(find.text('检查规则'));
+    await tester.pumpAndSettle();
+    expect(fake.calls.last['data']['policy']['singapore_domains'], [
+      'new.example.com',
+    ]);
+    expect(fake.calls.last['data']['policy']['claude'], 'sg');
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('restored profile remains editable after automatic read', (
     tester,
   ) async {
@@ -51,6 +116,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('VPS 出口管控'), findsOneWidget);
       expect(find.text('当前管理：192.0.2.1'), findsOneWidget);
+      expect(find.text('走新加坡的域名'), findsNothing);
       expect(fake.calls.map((v) => v['action']), ['status']);
       expect(tester.takeException(), isNull);
       await tester.ensureVisible(find.text('检查规则'));

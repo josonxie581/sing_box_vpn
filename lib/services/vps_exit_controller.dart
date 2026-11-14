@@ -80,7 +80,7 @@ class VpsExitController extends ChangeNotifier {
     _notify();
     try {
       final result = await transport.call(profile!, 'validate', {
-        'policy': normalized.toJson(),
+        'policy': status!.encodePolicy(normalized),
         'expected_revision': status!.revision,
       });
       if (result['valid'] != true) throw const FormatException('规则校验未通过');
@@ -110,7 +110,7 @@ class VpsExitController extends ChangeNotifier {
       final result = await transport
           .call(profile!, rollback ? 'rollback' : 'apply', {
             'expected_revision': status!.revision,
-            if (!rollback) 'policy': normalized.toJson(),
+            if (!rollback) 'policy': status!.encodePolicy(normalized),
           });
       if (result['accepted'] != true || result['job'] is! Map) {
         throw const FormatException('未收到有效任务回执，请刷新服务器状态');

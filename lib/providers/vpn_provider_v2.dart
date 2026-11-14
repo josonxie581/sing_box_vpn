@@ -6,6 +6,7 @@ import 'dart:async';
 import '../models/vpn_config.dart';
 import '../models/proxy_mode.dart';
 import '../services/config_manager.dart';
+import '../services/auto_start_service.dart';
 import '../services/connection_manager.dart';
 import '../services/dns_manager.dart';
 import '../services/improved_traffic_stats_service.dart';
@@ -19,11 +20,13 @@ import '../utils/privilege_manager.dart';
 /// 职责明确：仅作为UI和服务之间的桥梁
 class VPNProviderV2 extends ChangeNotifier {
   // 服务实例
-  final ConfigManager _configManager = ConfigManager();
-  final ConnectionManager _connectionManager = ConnectionManager();
+  final ConfigManager _configManager;
+  final ConnectionManager _connectionManager;
   final ImprovedTrafficStatsService _trafficService =
       ImprovedTrafficStatsService();
-  final SingBoxNativeService _singboxService = SingBoxNativeService();
+  final SingBoxNativeService _singboxService;
+  bool _autoConnectOnStartup = false;
+  late final Future<void> initialized;
 
   // Ping服务
   final Map<String, int> _configPings = {};
@@ -45,12 +48,19 @@ class VPNProviderV2 extends ChangeNotifier {
   ConnectionSource _connectionSource = ConnectionSource.clashAPI;
 
   // 构造函数
-  VPNProviderV2() {
-    _init();
+  VPNProviderV2({
+    bool launchedAtStartup = false,
+    ConfigManager? configManager,
+    ConnectionManager? connectionManager,
+    SingBoxNativeService? singboxService,
+  }) : _configManager = configManager ?? ConfigManager(),
+       _connectionManager = connectionManager ?? ConnectionManager(),
+       _singboxService = singboxService ?? SingBoxNativeService() {
+    initialized = _init(launchedAtStartup);
   }
 
   // 初始化
-  Future<void> _init() async {
+  Future<void> _init(bool launchedAtStartup) async {
     // Android：注册快捷方式回调，使 MainActivity 的快捷方式动作可以控制服务
     if (Platform.isAndroid) {
       try {
@@ -79,8 +89,18 @@ class VPNProviderV2 extends ChangeNotifier {
 
     notifyListeners();
 
-    // 应用启动时自动测试所有配置的延时（未连接状态）
-    _testAllConfigsOnStartup();
+    if (launchedAtStartup && _autoConnectOnStartup) {
+      // 与手动开始使用同一连接入口；配置、偏好和原生库均已加载完成。
+      // 此时不并发运行启动测速，避免测速触发自动选节点并争用启动流程。
+      final config = currentConfig ?? configs.firstOrNull;
+      if (config != null && !isConnected && !isBusy) {
+        _configManager.setCurrentConfig(config);
+        await connect(config);
+      }
+    } else {
+      // 应用启动时自动测试所有配置的延时（未连接状态）
+      _testAllConfigsOnStartup();
+    }
 
     // 如果启用了自动刷新，启动定时器
     if (_autoRefreshEnabled) {
@@ -176,7 +196,7 @@ class VPNProviderV2 extends ChangeNotifier {
   int get activeConnections => _connectionInfos.length; // 返回实际的连接数
 
   // 系统代理相关
-  bool get isSystemProxySupported => true; // Windows 平台支持系统代理
+  bool get isSystemProxySupported => Platform.isWindows;
   bool get isSystemProxyEnabled => autoSystemProxy;
   String get systemProxyServer => '127.0.0.1:$localPort';
 
@@ -411,7 +431,7 @@ class VPNProviderV2 extends ChangeNotifier {
       // 关闭 TUN 时自动开启系统代理（若之前未开启）
       _connectionManager.setUseTun(false);
       await _savePreference('use_tun', false);
-      if (!_connectionManager.autoSystemProxy) {
+      if (isSystemProxySupported && !_connectionManager.autoSystemProxy) {
         _connectionManager.setAutoSystemProxy(true);
         await _savePreference('auto_system_proxy', true);
         // 若已连接则立即启用系统代理
@@ -436,6 +456,7 @@ class VPNProviderV2 extends ChangeNotifier {
   }
 
   Future<void> setAutoSystemProxy(bool enabled) async {
+    if (enabled && !isSystemProxySupported) return;
     // 开启系统代理时互斥关闭 TUN
     if (enabled && _connectionManager.useTun) {
       _connectionManager.setUseTun(false);
@@ -1011,7 +1032,7 @@ class VPNProviderV2 extends ChangeNotifier {
   int _sanitizeLatency(VPNConfig config, int latency) {
     // The Windows probe now verifies the physical transport. Low RTT alone
     // cannot establish an error (nearby servers can legitimately be fast).
-    if (Platform.isWindows) return latency;
+    if (Platform.isWindows || Platform.isLinux) return latency;
     if (latency < 0) {
       return latency;
     }
@@ -1113,6 +1134,8 @@ class VPNProviderV2 extends ChangeNotifier {
     );
 
     _autoSelectBestServer = prefs.getBool('auto_select_best_server') ?? false;
+    _autoConnectOnStartup =
+        prefs.getBool(AutoStartService.autoConnectPreferenceKey) ?? false;
     _autoRefreshEnabled = prefs.getBool('auto_refresh_enabled') ?? true;
     _pingIntervalMinutes = prefs.getInt('ping_interval_minutes') ?? 10;
 

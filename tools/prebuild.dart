@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:path/path.dart' as path;
 
 /// Flutter 预编译脚本：自动处理 sing-box 下载和编译
 ///
@@ -30,14 +31,23 @@ void main(List<String> arguments) async {
   targetRef ??= File(
     '$projectRoot/sing-box-version.txt',
   ).readAsStringSync().trim();
-  // 按约定：源码位于本项目的上层目录 ../sing-box
-  final parentDir = Directory(projectRoot).parent.path;
-  final singboxDir = Directory('$parentDir/sing-box');
+  // Build from an isolated, pinned checkout within this project.
+  final singboxDir = Directory(
+    Platform.environment['SING_BOX_SOURCE'] ??
+        '$projectRoot/build/singbox-core/source-$targetRef',
+  );
   final windowsDir = Directory('$projectRoot/windows');
   final dllPath = '$projectRoot/windows/singbox.dll';
   final versionFile = File('$projectRoot/windows/singbox.version');
 
   try {
+    final cronet = await Process.run('python', [
+      'tools/fetch_cronet.py',
+      '--version',
+      targetRef,
+    ], workingDirectory: projectRoot);
+    if (cronet.exitCode != 0)
+      throw Exception('Cronet runtime staging failed: ${cronet.stderr}');
     // 1. 检查是否已存在编译好的 DLL
     final nativeInputs = Directory('$projectRoot/native')
         .listSync()
@@ -49,6 +59,9 @@ void main(List<String> arguments) async {
         !force &&
         versionFile.existsSync() &&
         versionFile.readAsStringSync().trim() == targetRef &&
+        !File(
+          '$projectRoot/tools/prebuild.dart',
+        ).lastModifiedSync().isAfter(File(dllPath).lastModifiedSync()) &&
         nativeInputs.every(
           (file) => !file.lastModifiedSync().isAfter(
             File(dllPath).lastModifiedSync(),
@@ -68,42 +81,31 @@ void main(List<String> arguments) async {
     print('✅ 使用 Go: $goExe');
     final versionOk = await checkGoVersion(goExe, '$projectRoot/native');
     if (!versionOk) {
-      throw Exception('sing-box v1.14.2 需要 Go 1.25.5 或更新版本');
+      throw Exception('sing-box v1.14.4 需要 Go 1.25.5 或更新版本');
     }
 
-    // 3. 检查 sing-box 源码（位于上层目录）
+    // Use a version-specific checkout; never mutate the sibling source tree.
     if (!singboxDir.existsSync()) {
-      print('sing-box not found in parent, cloning to parent...');
-      await cloneSingBoxToParent(parentDir);
-    } else {
-      print('sing-box directory found in parent: ${singboxDir.path}');
+      await singboxDir.parent.create(recursive: true);
+      final clone = await Process.run('git', [
+        'clone',
+        '--depth',
+        '1',
+        '--branch',
+        targetRef,
+        'https://github.com/SagerNet/sing-box.git',
+        singboxDir.path,
+      ]);
+      if (clone.exitCode != 0) throw Exception('Clone failed: ${clone.stderr}');
     }
-
-    // 3.1 切换到锁定版本（或用户明确指定的 ref）。
-    print('➡️ 切换 sing-box 到指定 ref: $targetRef');
-    final fetchTags = await Process.run('git', [
-      'fetch',
-      '--all',
+    final ref = await Process.run('git', [
+      'describe',
       '--tags',
-    ], workingDirectory: singboxDir.path);
-    if (fetchTags.exitCode != 0) {
-      stderr.writeln('⚠️ fetch tags 失败: ${fetchTags.stderr}');
-    }
-    final checkout = await Process.run('git', [
-      'checkout',
-      targetRef,
-    ], workingDirectory: singboxDir.path);
-    if (checkout.exitCode != 0) {
-      stderr.writeln('❌ git checkout $targetRef 失败: ${checkout.stderr}');
-      exit(1);
-    }
-    final revParse = await Process.run('git', [
-      'rev-parse',
-      '--short',
+      '--exact-match',
       'HEAD',
     ], workingDirectory: singboxDir.path);
-    if (revParse.exitCode == 0) {
-      print('✅ 当前 sing-box 提交: ${revParse.stdout.toString().trim()}');
+    if (ref.exitCode != 0 || ref.stdout.toString().trim() != targetRef) {
+      throw Exception('Core source does not match $targetRef');
     }
 
     // 4. 确保 windows 目录存在
@@ -113,8 +115,8 @@ void main(List<String> arguments) async {
 
     // 5. 编译 sing-box DLL
     print('Building sing-box integrated DLL...');
-    // 在编译前，重写 native/go.mod 为最小依赖，并强制 replace 指向上层 sing-box 的绝对路径
-    await rewriteMinimalGoMod(projectRoot);
+    // Resolve the pinned module against this isolated source checkout.
+    await rewriteMinimalGoMod(projectRoot, singboxDir.path, targetRef);
     await compileSingBox(projectRoot, goExe, targetRef);
 
     // 6. 验证编译结果
@@ -307,9 +309,7 @@ Future<void> compileSingBox(
       final binDir = File(cc).parent.path;
       final currentPath = env['PATH'] ?? '';
       // 将目标工具链 bin 置于最前，避免被 w64devkit 抢占
-      env['PATH'] = currentPath.toLowerCase().contains(binDir.toLowerCase())
-          ? currentPath
-          : "$binDir;${currentPath}";
+      env['PATH'] = "$binDir;$currentPath";
       stdout.writeln('🛠️ 使用 C 编译器: ${env['CC']}');
       if (cc.toLowerCase().contains('w64devkit')) {
         stdout.writeln(
@@ -354,7 +354,7 @@ Future<void> compileSingBox(
   );
   // 统一构建标签（需包含 gVisor 与 Wintun 支持以满足双向回退）
   const buildTags =
-      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_gvisor,with_grpc';
+      'with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_gvisor,with_grpc,with_naive_outbound,with_purego';
   final version = targetRef.replaceFirst(RegExp(r'^v'), '');
   final outputDir = Directory('$projectRoot/build/singbox-core');
   await outputDir.create(recursive: true);
@@ -417,7 +417,7 @@ Future<void> ensureNativeFiles(String projectRoot) async {
 go 1.25.5
 
 require (
-    github.com/sagernet/sing-box v1.14.2
+    github.com/sagernet/sing-box v1.14.4
 )
 ''');
   }
@@ -430,22 +430,30 @@ require (
 }
 
 /// 用一个最小的 go.mod 覆盖 native/go.mod，并指向上层 sing-box
-Future<void> rewriteMinimalGoMod(String projectRoot) async {
+Future<void> rewriteMinimalGoMod(
+  String projectRoot,
+  String sourcePath,
+  String targetRef,
+) async {
   final dir = Directory('$projectRoot/native');
   if (!dir.existsSync()) {
     await dir.create(recursive: true);
   }
   final goMod = File('$projectRoot/native/go.mod');
-  final content = '''module singbox_native
+  final relativeSource = path
+      .relative(sourcePath, from: dir.path)
+      .replaceAll(r'\', '/');
+  final content =
+      '''module singbox_native
 
 go 1.25.5
 
 require (
-    github.com/sagernet/sing-box v1.14.2
+    github.com/sagernet/sing-box $targetRef
 )
 
-// 使用上层目录的 sing-box 源码
-replace github.com/sagernet/sing-box => ../../sing-box
+// Isolated source checkout selected by tools/prebuild.dart.
+replace github.com/sagernet/sing-box => "$relativeSource"
 ''';
 
   await goMod.writeAsString(content);

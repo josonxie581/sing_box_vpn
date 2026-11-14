@@ -124,10 +124,15 @@ class ConnectionManager {
       }
 
       // 检查TUN权限
-      if (_useTun && Platform.isWindows) {
+      if (_useTun && (Platform.isWindows || Platform.isLinux)) {
         final isElevated = PrivilegeManager.instance.isElevated();
         if (!isElevated) {
-          _updateStatus(ConnectionStatus.error, '需要管理员权限以启用 TUN');
+          _updateStatus(
+            ConnectionStatus.error,
+            Platform.isLinux
+                ? '缺少 TUN 网络权限，请运行 Linux 安装脚本后重新启动 Gsou'
+                : '需要管理员权限以启用 TUN',
+          );
           return false;
         }
       }
@@ -340,7 +345,7 @@ class ConnectionManager {
 
   /// 设置自动系统代理
   void setAutoSystemProxy(bool enabled) {
-    _autoSystemProxy = enabled;
+    _autoSystemProxy = enabled && _proxyManager.isSupported;
     if (_autoSystemProxy) {
       // 开启系统代理时关闭 TUN
       _useTun = false;
@@ -432,7 +437,9 @@ class ConnectionManager {
       Duration(seconds: _healthCheckIntervalSeconds),
       (_) => _performHealthCheck(),
     );
-    _addLog('运行时健康监控已启动 (每${_healthCheckIntervalSeconds}s, 连续$_maxConsecutiveFailures次失败触发恢复)');
+    _addLog(
+      '运行时健康监控已启动 (每${_healthCheckIntervalSeconds}s, 连续$_maxConsecutiveFailures次失败触发恢复)',
+    );
   }
 
   void _stopHealthCheck() {
@@ -463,14 +470,18 @@ class ConnectionManager {
         _consecutiveFailures = 0;
       } else {
         _consecutiveFailures++;
-        _addLog('[健康检查] 连通性探测失败 ($_consecutiveFailures/$_maxConsecutiveFailures)');
+        _addLog(
+          '[健康检查] 连通性探测失败 ($_consecutiveFailures/$_maxConsecutiveFailures)',
+        );
         if (_consecutiveFailures >= _maxConsecutiveFailures) {
           _tryAutoRecover();
         }
       }
     } catch (e) {
       _consecutiveFailures++;
-      _addLog('[健康检查] 探测异常: $e ($_consecutiveFailures/$_maxConsecutiveFailures)');
+      _addLog(
+        '[健康检查] 探测异常: $e ($_consecutiveFailures/$_maxConsecutiveFailures)',
+      );
       if (_consecutiveFailures >= _maxConsecutiveFailures) {
         _tryAutoRecover();
       }

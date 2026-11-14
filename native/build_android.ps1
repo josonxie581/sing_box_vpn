@@ -3,6 +3,7 @@ Param(
 )
 
 $ErrorActionPreference = 'Stop'
+$projRoot = (Resolve-Path "$PSScriptRoot\..\").Path
 function Write-Info {
     Param([string]$msg)
     Write-Host "[INFO] $msg" -ForegroundColor Cyan
@@ -37,6 +38,10 @@ if (-not (Test-Path $sdkRoot)) {
 
 $ndkRoot = $env:ANDROID_NDK_ROOT
 if ([string]::IsNullOrEmpty($ndkRoot)) {
+    $projectNdk = Join-Path $projRoot 'build\android-20261115\tools\android-ndk-r29'
+    if (Test-Path $projectNdk) { $ndkRoot = $projectNdk }
+}
+if ([string]::IsNullOrEmpty($ndkRoot)) {
     $ndkDir = Join-Path $sdkRoot 'ndk'
     if (-not (Test-Path $ndkDir)) {
         Write-Fail "NDK directory not found. Please install NDK via Android Studio SDK Manager."
@@ -51,7 +56,6 @@ if (-not (Test-Path $toolBin)) {
 }
 
 # 3) Build targets
-$projRoot = (Resolve-Path "$PSScriptRoot\..\").Path
 $coreVersion = (Get-Content -LiteralPath (Join-Path $projRoot 'sing-box-version.txt') -Raw).Trim().TrimStart('v')
 Set-Location $projRoot
 Write-Info "Project: $projRoot"
@@ -64,7 +68,7 @@ if ([string]::IsNullOrWhiteSpace($GoTags)) {
     # Default to essential features; override via SINGBOX_GO_TAGS to customize.
     # Note: 'with_reality_server' is deprecated/merged into 'with_utls' in sing-box.
     # IMPORTANT: Include with_gvisor so Android can use userspace stack and accept file_descriptor schema
-    $GoTags = 'with_quic,with_utls,with_grpc,with_clash_api,with_gvisor'
+    $GoTags = 'with_quic,with_utls,with_grpc,with_clash_api,with_gvisor,with_wireguard,with_acme,with_naive_outbound'
 } else {
     # Always ensure with_gvisor present
     if ($GoTags -notmatch '(?i)with_gvisor') {
@@ -107,7 +111,10 @@ function BuildAbi {
         $ccNameCmd = [System.IO.Path]::GetFileNameWithoutExtension($ccName) + '.cmd'
         $ccPathCmd = Join-Path $toolBin $ccNameCmd
         if (Test-Path $ccPathCmd) {
-            $ccPath = $ccPathCmd
+            # Avoid cmd.exe's 8191-character limit when linking Cronet.
+            $clangPath = Join-Path $toolBin 'clang.exe'
+            $targetTriple = $ccName -replace '-clang\.exe$', ''
+            $ccPath = '"' + $clangPath + '" --target=' + $targetTriple
         } else {
             Write-Fail "Compiler not found: $ccPathExe or $ccPathCmd"
         }
@@ -115,20 +122,26 @@ function BuildAbi {
     $Env:CC = $ccPath
     Write-Info "Building $abiDir with CC=$ccPath"
     Push-Location $nativeDir
-    & go build -tags $GoTags -ldflags "-X github.com/sagernet/sing-box/constant.Version=$coreVersion" -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') singbox.go
+    # NDK r27 defaults to 4 KB; align ELF segments for Android 16 KB devices too.
+    & go build -p 4 -tags $GoTags -ldflags "-X github.com/sagernet/sing-box/constant.Version=$coreVersion -extldflags=-Wl,-z,max-page-size=16384,--threads=2,--thinlto-jobs=2,--no-undefined" -buildmode=c-shared -o (Join-Path $outDir 'libsingbox.so') .
     $code = $LASTEXITCODE
     Pop-Location
     if ($code -ne 0) {
         Write-Fail "Build failed for $abiDir"
     }
+    # Keep the distributable library below GitHub's file limit, as APK packaging does.
+    & (Join-Path $toolBin 'llvm-strip.exe') --strip-unneeded (Join-Path $outDir 'libsingbox.so')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Stripping failed for $abiDir"
+    }
     Write-Info ("OK -> " + (Join-Path $outDir 'libsingbox.so'))
 }
 
 # Default: build arm64-v8a; with -AllAbis also build armeabi-v7a and x86_64
-BuildAbi 'arm64' 'aarch64-linux-android21-clang.exe' 'arm64-v8a'
+BuildAbi 'arm64' 'aarch64-linux-android24-clang.exe' 'arm64-v8a'
 if ($AllAbis) {
-    BuildAbi 'arm'   'armv7a-linux-androideabi21-clang.exe' 'armeabi-v7a'
-    BuildAbi 'amd64' 'x86_64-linux-android21-clang.exe'     'x86_64'
+    BuildAbi 'arm'   'armv7a-linux-androideabi24-clang.exe' 'armeabi-v7a'
+    BuildAbi 'amd64' 'x86_64-linux-android24-clang.exe'     'x86_64'
 }
 
 Write-Info "All done."

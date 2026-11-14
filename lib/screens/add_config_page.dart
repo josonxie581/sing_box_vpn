@@ -1,3 +1,4 @@
+import '../widgets/modern_protocol_fields.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -10,6 +11,7 @@ import '../services/qr_decoder.dart';
 import '../services/simple_qr_functions.dart';
 import '../services/smart_screenshot_service.dart';
 import '../services/official_screen_capture.dart';
+import 'node_qr_scanner_page.dart';
 
 class AddConfigPage extends StatefulWidget {
   final VPNConfig? config;
@@ -60,6 +62,7 @@ class _AddConfigPageState extends State<AddConfigPage>
   final _wgReservedController = TextEditingController();
   final _wgMtuController = TextEditingController();
 
+  final _protocolValues = <String, dynamic>{};
   String _selectedType = 'shadowsocks';
   String _selectedSecurity = 'auto';
   String _selectedNetwork = 'tcp';
@@ -91,8 +94,33 @@ class _AddConfigPageState extends State<AddConfigPage>
     _portController.text = config.port.toString();
     _passwordController.text = config.settings['password'] ?? '';
 
+    _protocolValues.addAll(config.settings);
+    if (config.type == 'hysteria2') {
+      try {
+        final outbound = config.toSingBoxOutbound(tag: 'edit');
+        for (final key in ['up_mbps', 'down_mbps']) {
+          if (outbound[key] != null) _protocolValues[key] = outbound[key];
+        }
+      } on FormatException {
+        // Keep malformed imported settings editable; saving reports validation errors.
+      }
+    }
+    final obfs = config.settings['obfs'];
+    if (obfs is Map) {
+      _protocolValues['_obfsType'] = obfs['type'];
+      _protocolValues['_obfsPassword'] = obfs['password'];
+      _protocolValues['_minPacketSize'] = obfs['min_packet_size'];
+      _protocolValues['_maxPacketSize'] = obfs['max_packet_size'];
+    }
     final type = config.type;
     switch (type) {
+      case 'naive':
+      case 'snell':
+      case 'anytls':
+      case 'shadowtls':
+        _selectedType = type;
+        _skipCertVerify = config.settings['skipCertVerify'] == true;
+        break;
       case 'ss':
       case 'shadowsocks':
         _selectedType = 'shadowsocks';
@@ -233,7 +261,6 @@ class _AddConfigPageState extends State<AddConfigPage>
         break;
     }
   }
-
 
   @override
   void dispose() {
@@ -384,6 +411,14 @@ class _AddConfigPageState extends State<AddConfigPage>
                                   child: Text('Trojan'),
                                 ),
                                 DropdownMenuItem(
+                                  value: 'naive',
+                                  child: Text('NaiveProxy'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'snell',
+                                  child: Text('Snell v4 / v6'),
+                                ),
+                                DropdownMenuItem(
                                   value: 'anytls',
                                   child: Text('AnyTLS'),
                                 ),
@@ -418,6 +453,7 @@ class _AddConfigPageState extends State<AddConfigPage>
                               ],
                               onChanged: (value) {
                                 setState(() {
+                                  _protocolValues.clear();
                                   _selectedType = value!;
                                 });
                               },
@@ -844,6 +880,16 @@ class _AddConfigPageState extends State<AddConfigPage>
           ),
         ];
 
+      case 'naive':
+      case 'snell':
+        return [
+          ModernProtocolFields(
+            key: ValueKey(_selectedType),
+            type: _selectedType,
+            values: _protocolValues,
+          ),
+        ];
+
       case 'trojan':
       case 'hysteria2':
       case 'anytls':
@@ -865,6 +911,7 @@ class _AddConfigPageState extends State<AddConfigPage>
           ),
           const SizedBox(height: 20),
           if (_selectedType == 'hysteria2') ...[
+            ModernProtocolFields(type: 'hysteria2', values: _protocolValues),
             _buildTextFormField(
               controller: _alpnController,
               label: 'ALPN',
@@ -1067,7 +1114,47 @@ class _AddConfigPageState extends State<AddConfigPage>
 
   void _saveConfig() {
     if (_formKey.currentState!.validate()) {
-      final settings = <String, dynamic>{};
+      _formKey.currentState!.save();
+      final settings = <String, dynamic>{
+        if (widget.config?.type == _selectedType) ...widget.config!.settings,
+      };
+      if (['naive', 'snell', 'hysteria2'].contains(_selectedType)) {
+        settings.clear();
+        settings.addAll(_protocolValues);
+        if (_selectedType == 'snell') {
+          settings['version'] = int.parse('${settings['version'] ?? 6}');
+        }
+        if (_selectedType == 'hysteria2') {
+          final obfsType = settings.remove('_obfsType') ?? 'none';
+          final obfsPassword = settings.remove('_obfsPassword');
+          final minPacket = settings.remove('_minPacketSize');
+          final maxPacket = settings.remove('_maxPacketSize');
+          settings.remove('obfs');
+          if (obfsType != 'none')
+            settings['obfs'] = {
+              'type': obfsType,
+              'password': obfsPassword,
+              if (obfsType == 'gecko' && minPacket != null)
+                'min_packet_size': minPacket,
+              if (obfsType == 'gecko' && maxPacket != null)
+                'max_packet_size': maxPacket,
+            };
+          // Clearing bandwidth inputs must also clear legacy aliases.
+          settings.remove('up');
+          settings.remove('down');
+          for (final key in [
+            'up_mbps',
+            'down_mbps',
+            'server_ports',
+            'hop_interval',
+            'hop_interval_max',
+            'realm',
+          ]) {
+            if (!_protocolValues.containsKey(key)) settings.remove(key);
+          }
+        }
+        settings.removeWhere((key, value) => key.startsWith('_'));
+      }
 
       // 根据协议类型设置参数
       switch (_selectedType) {
@@ -1237,6 +1324,10 @@ class _AddConfigPageState extends State<AddConfigPage>
       }
 
       final config = VPNConfig(
+        id: widget.config?.id,
+        subscriptionUrl: widget.config?.subscriptionUrl,
+        lastUpdated: widget.config?.lastUpdated,
+        enabled: widget.config?.enabled ?? true,
         name: _nameController.text,
         type: _selectedType,
         server: _serverController.text,
@@ -1244,6 +1335,14 @@ class _AddConfigPageState extends State<AddConfigPage>
         settings: settings,
       );
 
+      try {
+        config.toSingBoxOutbound(tag: 'validate');
+      } on FormatException catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+        return;
+      }
       final provider = context.read<VPNProviderV2>();
 
       if (widget.config != null && widget.configIndex != null) {
@@ -1275,6 +1374,17 @@ class _AddConfigPageState extends State<AddConfigPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (Platform.isAndroid) ...[
+          FilledButton.icon(
+            onPressed: () async {
+              final added = await scanAndAddNode(context);
+              if (added && mounted) Navigator.pop(context);
+            },
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('扫码添加节点'),
+          ),
+          const SizedBox(height: 16),
+        ],
         _buildTextFormField(
           controller: _subscribeUrlController,
           label: '订阅/分享链接',
@@ -1311,13 +1421,15 @@ class _AddConfigPageState extends State<AddConfigPage>
             try {
               // 首先尝试作为远程订阅URL下载
               if (link.startsWith('http://') || link.startsWith('https://')) {
-                final success = await provider.importFromRemoteSubscription(link);
+                final success = await provider.importFromRemoteSubscription(
+                  link,
+                );
                 Navigator.pop(context); // 关闭加载对话框
 
                 if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('远程订阅导入成功')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('远程订阅导入成功')));
                   Navigator.pop(context); // 关闭当前页面
                   return;
                 } else {
@@ -1336,14 +1448,14 @@ class _AddConfigPageState extends State<AddConfigPage>
                 // 或按订阅内容解析（多条）
                 final count = await provider.importFromSubscription(link);
                 if (count <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('导入失败，请检查链接内容')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('导入失败，请检查链接内容')));
                   return;
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('成功导入 $count 个配置')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('成功导入 $count 个配置')));
                 }
               } else {
                 ScaffoldMessenger.of(
@@ -1352,9 +1464,9 @@ class _AddConfigPageState extends State<AddConfigPage>
               }
             } catch (e) {
               Navigator.pop(context); // 确保关闭加载对话框
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('导入失败: $e')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
             }
           },
           child: const Text('导入/订阅'),
@@ -1423,7 +1535,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                       final provider = context.read<VPNProviderV2>();
                       final ok = await provider.importFromLink(textLink.trim());
                       if (!ok) {
-                        final count = await provider.importFromSubscription(textLink.trim());
+                        final count = await provider.importFromSubscription(
+                          textLink.trim(),
+                        );
                         if (count <= 0) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('剪贴板链接无法导入')),
@@ -1444,9 +1558,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                       );
                     }
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('剪贴板导入失败: $e')),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('剪贴板导入失败: $e')));
                   }
                 },
                 icon: const Icon(Icons.content_paste),
@@ -1473,18 +1587,22 @@ class _AddConfigPageState extends State<AddConfigPage>
                     );
 
                     // 检查截图权限
-                    final hasAccess = await OfficialScreenCapture.isAccessAllowed();
+                    final hasAccess =
+                        await OfficialScreenCapture.isAccessAllowed();
                     if (!hasAccess) {
                       await OfficialScreenCapture.requestAccess();
                     }
 
                     // 使用screen_capturer进行区域截图
-                    final qrText = await OfficialScreenCapture.captureRegionAndScanQR();
+                    final qrText =
+                        await OfficialScreenCapture.captureRegionAndScanQR();
 
                     if (qrText == null || qrText.trim().isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('未识别到二维码，请确保：\n1. 二维码清晰完整\n2. 选择区域包含整个二维码'),
+                          content: Text(
+                            '未识别到二维码，请确保：\n1. 二维码清晰完整\n2. 选择区域包含整个二维码',
+                          ),
                           duration: Duration(seconds: 4),
                         ),
                       );
@@ -1496,7 +1614,9 @@ class _AddConfigPageState extends State<AddConfigPage>
                     final ok = await provider.importFromLink(qrText.trim());
                     if (!ok) {
                       // 尝试作为订阅链接导入
-                      final count = await provider.importFromSubscription(qrText);
+                      final count = await provider.importFromSubscription(
+                        qrText,
+                      );
                       if (count <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
