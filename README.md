@@ -1,5 +1,8 @@
 # Gsou - Sing-box VPN 客户端
 
+Linux / Omarchy 原生版构建入口：`bash build_linux.sh`。
+环境依赖、安装、TUN 权限及首版范围见 [BUILD_LINUX.md](BUILD_LINUX.md)。
+
 ### 一个免费，没广告的代理客户端 - windows
 ###### 无需安装(运行需要管员权限，为了使用TUN模式)，不需要设置，打开设置好服务节点就能使用
 -    支持ymal节点配置文件导入
@@ -43,6 +46,8 @@ Gsou 是一个简单的客户端应用，基于 sing-box 核心构建。
 - SSH 指标来自 Linux 操作系统，不能推算供应商剩余额度。准确的月度剩余量由已登录 DMIT 客户区的后台扩展通过 Native Messaging 写入本机白名单快照；Cookie、密码、验证码和原始响应不会进入应用。
 - 发布目录仍包含 `GsouDmitBridge.exe` 与 `dmit-extension`。扩展无需在 Gsou 中操作，但浏览器中必须保留已加载扩展及一个已登录的 DMIT 客户区标签页；同步失败时保留并标记上次有效账单数据。
 - 移动发布目录或首次安装时运行 `tools/register_dmit_billing_bridge.ps1 -ReleaseDirectory <Release目录>`，再在 Edge/Chrome 扩展页加载发布目录中的 `dmit-extension`。注册只写入当前用户的 Native Messaging 配置，不要求管理员权限。
+- 若卡片显示“SSH 尚未配置／计费等待同步”，可运行完整 Windows 发布包中的 `restore_dmit.cmd`（需要 PowerShell 7）。它读取已保存的 VPS 管理连接，恢复独立只读监控并重新注册当前目录的计费桥接；缺失的 DMIT 服务编号必须从产品详情核对，不沿用历史默认值。恢复后点击卡片的重新连接按钮即可重新读取配置。
+- 月度流量可独立于 SSH 状态按服务器地址唯一匹配；浏览器仍需启用扩展并登录 DMIT，脚本不会生成计费数据。只读检查可运行 `tools/restore_dmit.ps1 -ReleaseDirectory <Release目录> -CheckOnly`。
 
 ## 系统要求
 
@@ -270,6 +275,17 @@ sing_box_vpn/
 - 查看 `gsou_daemon.log` 了解后台服务状态
 
 ## 贡献指南
+
+### 2026-11-14 协议更新（Windows）
+
+- 正式内核锁定 `v1.14.4`，源码使用工程内独立目录，不切换旁边的 sing-box 工作树。
+- 新增 NaiveProxy（HTTP/2、HTTP/3）及 Snell v4/v6 的手动配置、链接导入和出站生成。
+- Hysteria 2 补充 Salamander/Gecko 混淆、BBR 档位、端口跳跃、Chrome QUIC 指纹开关和 Realm 配置。
+- 批量导入识别 `hy2://`、`anytls://`、`shadowtls://`、`naive+https://`、`naive+quic://`；`snell://` 是本客户端的链接格式，不保证其他客户端通用。
+- Windows 编译：先运行 `dart run tools/prebuild.dart --force`，再运行 `flutter build windows --release --no-pub`。预编译脚本调用 Python 下载并校验同版本官方包中的 `libcronet.dll`，发布时必须与 `singbox.dll` 一起保留。
+- 验证：`flutter test --coverage`；`python tools/protocol_loopback_smoke.py` 使用实际 Windows DLL 验证六条本机代理链路。后者需要 Python `cryptography`，测试密钥仅临时生成在 build 目录。
+- `python tools/protocol_loopback_smoke.py --masque` 单独下载并校验 `1.15.0-alpha.13`，验证 MASQUE HTTP/2、HTTP/3；不替换正式内核，也不修改系统 TUN/路由。
+- 本次交付与运行验证针对 Windows x64。Linux/Android 未重新编译；其 NaiveProxy 编译标签和平台运行库尚需单独接入验证。公网性能、掉线恢复和抗干扰能力不由本机回环测试证明。
 
 欢迎提交 Issue 和 Pull Request 来帮助改进项目。
 

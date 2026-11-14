@@ -11,8 +11,29 @@ import '../models/dmit_ssh_monitor.dart';
 /// Authentication remains in Windows OpenSSH. This service never reads key
 /// bytes and accepts only the strict JSON schema in [DmitRuntimeInfo].
 class DmitSshMonitorService extends ChangeNotifier {
-  DmitSshMonitorService._();
+  DmitSshMonitorService._({
+    String? configPath,
+    bool? windows,
+    Future<Process> Function(List<String>)? startProcess,
+  }) : _configPath = configPath,
+       _windows = windows ?? Platform.isWindows,
+       _startProcess =
+           startProcess ?? ((arguments) => Process.start('ssh.exe', arguments));
   static final DmitSshMonitorService instance = DmitSshMonitorService._();
+
+  @visibleForTesting
+  factory DmitSshMonitorService.forTesting({
+    required String configPath,
+    required Future<Process> Function(List<String>) startProcess,
+  }) => DmitSshMonitorService._(
+    configPath: configPath,
+    windows: true,
+    startProcess: startProcess,
+  );
+
+  final String? _configPath;
+  final bool _windows;
+  final Future<Process> Function(List<String>) _startProcess;
 
   static const Duration _sampleTimeout = Duration(seconds: 20);
   static const Duration _reconnectDelay = Duration(seconds: 10);
@@ -25,6 +46,7 @@ class DmitSshMonitorService extends ChangeNotifier {
 
   DmitSshMonitorConfig? _config;
   Future<void>? _initializing;
+  Future<void>? _reconnecting;
   Process? _process;
   Timer? _reconnectTimer;
   Timer? _staleTimer;
@@ -60,7 +82,7 @@ class DmitSshMonitorService extends ChangeNotifier {
   Future<void> initialize() => _initializing ??= _initialize();
 
   Future<void> _initialize() async {
-    if (!Platform.isWindows) {
+    if (!_windows) {
       initialized = true;
       error = 'SSH 实时监控目前仅支持 Windows。';
       notifyListeners();
@@ -68,10 +90,10 @@ class DmitSshMonitorService extends ChangeNotifier {
     }
     try {
       final local = Platform.environment['LOCALAPPDATA'];
-      if (local == null || local.isEmpty) {
+      if (_configPath == null && (local == null || local.isEmpty)) {
         throw const FormatException('Missing LOCALAPPDATA');
       }
-      final file = File('$local/Gsou/dmit/ssh-monitor.json');
+      final file = File(_configPath ?? '$local/Gsou/dmit/ssh-monitor.json');
       if (!await file.exists()) {
         initialized = true;
         configured = false;
@@ -93,6 +115,7 @@ class DmitSshMonitorService extends ChangeNotifier {
           !await File(config.knownHostsFile).exists()) {
         throw const FormatException('Missing SSH files');
       }
+      if (_disposed) return;
       _config = config;
       configured = true;
       initialized = true;
@@ -110,17 +133,25 @@ class DmitSshMonitorService extends ChangeNotifier {
     }
   }
 
-  Future<void> reconnect() async {
-    await initialize();
-    if (!configured || _disposed) return;
+  Future<void> reconnect() => _reconnecting ??= _reloadConfiguration()
+      .whenComplete(() => _reconnecting = null);
+
+  Future<void> _reloadConfiguration() async {
+    await _initializing;
+    if (_disposed) return;
     _reconnectTimer?.cancel();
+    _staleTimer?.cancel();
     _generation++;
     _process?.kill();
     _process = null;
     info = null;
+    _config = null;
+    configured = false;
+    initialized = false;
+    _initializing = null;
     error = '正在重新连接 SSH 实时监控。';
     notifyListeners();
-    await _connect();
+    await initialize();
   }
 
   Future<void> _connect() async {
@@ -128,7 +159,7 @@ class DmitSshMonitorService extends ChangeNotifier {
     if (_disposed || config == null || _process != null) return;
     final generation = ++_generation;
     try {
-      final process = await Process.start('ssh.exe', [
+      final process = await _startProcess([
         '-T',
         '-o',
         'BatchMode=yes',
@@ -149,7 +180,7 @@ class DmitSshMonitorService extends ChangeNotifier {
         '-p',
         config.port.toString(),
         '${config.user}@${config.host}',
-      ], mode: ProcessStartMode.normal);
+      ]);
       if (_disposed || generation != _generation) {
         process.kill();
         return;

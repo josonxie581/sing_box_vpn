@@ -43,6 +43,22 @@ void main() {
     ...BuiltinProxyRules.domains,
     'API.OPENAI.COM.',
     'CLAUDE.AI.',
+    // Keep these independent of the implementation list to catch omissions.
+    'antigravity.google',
+    'www.antigravity.google',
+    'antigravity.google.com',
+    'antigravity-unleash.goog',
+    'cloudcode-pa.googleapis.com',
+    'daily-cloudcode-pa.googleapis.com',
+    'aicode.googleapis.com',
+    'businessaicode.googleapis.com',
+    'accounts.google.com',
+    'oauth2.googleapis.com',
+    'www.googleapis.com',
+    'play.googleapis.com',
+    'antigravity-cli-auto-updater-974169037036.us-central1.run.app',
+    'antigravity-hub-auto-updater-974169037036.us-central1.run.app',
+    'CLOUDCODE-PA.GOOGLEAPIS.COM.',
     'chatgpt-async-webps-prod-eastus-1.webpubsub.azure.com',
   ];
   final unrelatedHosts = [
@@ -53,6 +69,11 @@ void main() {
     'other.workos.com',
     'other.cloudfront.net',
     'www.baidu.com',
+    'antigravity.google.evil.example',
+    'notantigravity.google',
+    'unrelated.googleapis.com',
+    'unrelated.google.com',
+    'unrelated.run.app',
   ];
   late Directory originalDirectory;
   late Directory fixtureDirectory;

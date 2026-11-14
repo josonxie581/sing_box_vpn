@@ -1,3 +1,4 @@
+import '../widgets/modern_protocol_fields.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -61,6 +62,7 @@ class _AddConfigPageState extends State<AddConfigPage>
   final _wgReservedController = TextEditingController();
   final _wgMtuController = TextEditingController();
 
+  final _protocolValues = <String, dynamic>{};
   String _selectedType = 'shadowsocks';
   String _selectedSecurity = 'auto';
   String _selectedNetwork = 'tcp';
@@ -92,8 +94,33 @@ class _AddConfigPageState extends State<AddConfigPage>
     _portController.text = config.port.toString();
     _passwordController.text = config.settings['password'] ?? '';
 
+    _protocolValues.addAll(config.settings);
+    if (config.type == 'hysteria2') {
+      try {
+        final outbound = config.toSingBoxOutbound(tag: 'edit');
+        for (final key in ['up_mbps', 'down_mbps']) {
+          if (outbound[key] != null) _protocolValues[key] = outbound[key];
+        }
+      } on FormatException {
+        // Keep malformed imported settings editable; saving reports validation errors.
+      }
+    }
+    final obfs = config.settings['obfs'];
+    if (obfs is Map) {
+      _protocolValues['_obfsType'] = obfs['type'];
+      _protocolValues['_obfsPassword'] = obfs['password'];
+      _protocolValues['_minPacketSize'] = obfs['min_packet_size'];
+      _protocolValues['_maxPacketSize'] = obfs['max_packet_size'];
+    }
     final type = config.type;
     switch (type) {
+      case 'naive':
+      case 'snell':
+      case 'anytls':
+      case 'shadowtls':
+        _selectedType = type;
+        _skipCertVerify = config.settings['skipCertVerify'] == true;
+        break;
       case 'ss':
       case 'shadowsocks':
         _selectedType = 'shadowsocks';
@@ -384,6 +411,14 @@ class _AddConfigPageState extends State<AddConfigPage>
                                   child: Text('Trojan'),
                                 ),
                                 DropdownMenuItem(
+                                  value: 'naive',
+                                  child: Text('NaiveProxy'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'snell',
+                                  child: Text('Snell v4 / v6'),
+                                ),
+                                DropdownMenuItem(
                                   value: 'anytls',
                                   child: Text('AnyTLS'),
                                 ),
@@ -418,6 +453,7 @@ class _AddConfigPageState extends State<AddConfigPage>
                               ],
                               onChanged: (value) {
                                 setState(() {
+                                  _protocolValues.clear();
                                   _selectedType = value!;
                                 });
                               },
@@ -844,6 +880,16 @@ class _AddConfigPageState extends State<AddConfigPage>
           ),
         ];
 
+      case 'naive':
+      case 'snell':
+        return [
+          ModernProtocolFields(
+            key: ValueKey(_selectedType),
+            type: _selectedType,
+            values: _protocolValues,
+          ),
+        ];
+
       case 'trojan':
       case 'hysteria2':
       case 'anytls':
@@ -865,6 +911,7 @@ class _AddConfigPageState extends State<AddConfigPage>
           ),
           const SizedBox(height: 20),
           if (_selectedType == 'hysteria2') ...[
+            ModernProtocolFields(type: 'hysteria2', values: _protocolValues),
             _buildTextFormField(
               controller: _alpnController,
               label: 'ALPN',
@@ -1067,7 +1114,47 @@ class _AddConfigPageState extends State<AddConfigPage>
 
   void _saveConfig() {
     if (_formKey.currentState!.validate()) {
-      final settings = <String, dynamic>{};
+      _formKey.currentState!.save();
+      final settings = <String, dynamic>{
+        if (widget.config?.type == _selectedType) ...widget.config!.settings,
+      };
+      if (['naive', 'snell', 'hysteria2'].contains(_selectedType)) {
+        settings.clear();
+        settings.addAll(_protocolValues);
+        if (_selectedType == 'snell') {
+          settings['version'] = int.parse('${settings['version'] ?? 6}');
+        }
+        if (_selectedType == 'hysteria2') {
+          final obfsType = settings.remove('_obfsType') ?? 'none';
+          final obfsPassword = settings.remove('_obfsPassword');
+          final minPacket = settings.remove('_minPacketSize');
+          final maxPacket = settings.remove('_maxPacketSize');
+          settings.remove('obfs');
+          if (obfsType != 'none')
+            settings['obfs'] = {
+              'type': obfsType,
+              'password': obfsPassword,
+              if (obfsType == 'gecko' && minPacket != null)
+                'min_packet_size': minPacket,
+              if (obfsType == 'gecko' && maxPacket != null)
+                'max_packet_size': maxPacket,
+            };
+          // Clearing bandwidth inputs must also clear legacy aliases.
+          settings.remove('up');
+          settings.remove('down');
+          for (final key in [
+            'up_mbps',
+            'down_mbps',
+            'server_ports',
+            'hop_interval',
+            'hop_interval_max',
+            'realm',
+          ]) {
+            if (!_protocolValues.containsKey(key)) settings.remove(key);
+          }
+        }
+        settings.removeWhere((key, value) => key.startsWith('_'));
+      }
 
       // 根据协议类型设置参数
       switch (_selectedType) {
@@ -1237,6 +1324,10 @@ class _AddConfigPageState extends State<AddConfigPage>
       }
 
       final config = VPNConfig(
+        id: widget.config?.id,
+        subscriptionUrl: widget.config?.subscriptionUrl,
+        lastUpdated: widget.config?.lastUpdated,
+        enabled: widget.config?.enabled ?? true,
         name: _nameController.text,
         type: _selectedType,
         server: _serverController.text,
@@ -1244,6 +1335,14 @@ class _AddConfigPageState extends State<AddConfigPage>
         settings: settings,
       );
 
+      try {
+        config.toSingBoxOutbound(tag: 'validate');
+      } on FormatException catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+        return;
+      }
       final provider = context.read<VPNProviderV2>();
 
       if (widget.config != null && widget.configIndex != null) {

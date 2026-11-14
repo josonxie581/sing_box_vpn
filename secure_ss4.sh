@@ -61,8 +61,8 @@ export UPLOAD_URL=${UPLOAD_URL:-''}
 OFFICIAL_REPO="SagerNet/sing-box"
 GITHUB_API="https://api.github.com/repos/$OFFICIAL_REPO"
 GITHUB_RELEASES="https://github.com/$OFFICIAL_REPO/releases/download"
-# 与客户端验证过的稳定版本；GitHub API 不可用时也不回退到旧配置格式。
-FALLBACK_SINGBOX_VERSION="v1.14.2"
+# 默认与客户端保持同一已验证稳定版本。
+FALLBACK_SINGBOX_VERSION="v1.14.4"
 
 
 # 设置路径
@@ -391,7 +391,7 @@ diagnose_connection() {
 
     # 检查端口监听
     purple "\n🔍 检查端口监听状态..."
-    for port in $VMESS_PORT $TUIC_PORT $HY2_PORT; do
+    for port in $VMESS_PORT $TUIC_PORT $HY2_PORT ${SNELL_PORT:-} ${NAIVE_PORT:-}; do
         local listen_result=$(netstat -tulpn 2>/dev/null | grep ":$port ")
         if [[ -n "$listen_result" ]]; then
             green "✅ 端口 $port 正在监听"
@@ -418,7 +418,7 @@ diagnose_connection() {
         local ufw_status=$(ufw status 2>/dev/null | grep "Status:" | awk '{print $2}')
         if [[ "$ufw_status" == "active" ]]; then
             yellow "⚠️ UFW防火墙已启用，检查端口规则..."
-            for port in $VMESS_PORT $TUIC_PORT $HY2_PORT; do
+            for port in $VMESS_PORT $TUIC_PORT $HY2_PORT ${SNELL_PORT:-} ${NAIVE_PORT:-}; do
                 if ufw status | grep -q "$port"; then
                     green "✅ 端口 $port 防火墙规则已设置"
                 else
@@ -519,17 +519,34 @@ detect_os() {
 
 # 获取最新版本
 get_latest_version() {
-    yellow "正在获取官方最新版本..." >&2
-    local version
-    version=$(curl -fsSL --max-time 10 "$GITHUB_API/releases/latest" | grep -o '"tag_name": "[^"]*' | grep -o '[^"]*$') || version=""
-
-    if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        yellow "无法获取最新稳定版，使用已验证版本 $FALLBACK_SINGBOX_VERSION" >&2
-        echo "$FALLBACK_SINGBOX_VERSION"
-    else
-        green "最新版本: $version" >&2
-        echo "$version"
+    # 默认固定到与客户端一起验证的版本；升级需显式设置稳定版本。
+    local requested="${SINGBOX_VERSION:-$FALLBACK_SINGBOX_VERSION}"
+    if [[ ! "$requested" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        red "SINGBOX_VERSION 必须为稳定版本号，例如 v1.14.4" >&2
+        return 1
     fi
+    echo "$requested"
+    return 0
+
+}
+
+verify_release_archive() {
+    python3 - "$1" "$2" <<'PY'
+import hashlib, json, pathlib, re, sys
+archive = pathlib.Path(sys.argv[1])
+release = json.loads(pathlib.Path(sys.argv[2]).read_text())
+assets = [a for a in release['assets'] if a['name'] == archive.name]
+expected = assets[0].get('digest', '') if len(assets) == 1 else ''
+if not re.fullmatch(r'sha256:[0-9a-f]{64}', expected):
+    raise SystemExit('官方 SHA-256 缺失，停止安装')
+digest = hashlib.sha256()
+with archive.open('rb') as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+actual = 'sha256:' + digest.hexdigest()
+if actual != expected:
+    raise SystemExit('官方 SHA-256 不匹配，停止安装')
+PY
 }
 
 # 安全下载官方sing-box
@@ -545,7 +562,6 @@ download_official_singbox() {
 
     local filename="sing-box-${version_clean}-${os}-${arch}.tar.gz"
     local download_url="$GITHUB_RELEASES/$version/$filename"
-    local checksum_url="$GITHUB_RELEASES/$version/sing-box-${version_clean}-checksums.txt"
 
     purple "下载地址: $download_url"
 
@@ -557,19 +573,10 @@ download_official_singbox() {
     purple "正在下载: $filename"
     purple "下载地址: $download_url"
 
-    # 尝试下载
-    if ! curl -L --progress-bar --max-time 300 -o "$filename" "$download_url"; then
-        red "主下载地址失败，尝试使用镜像地址..."
-
-        # 备用下载地址 (使用GitHub镜像)
-        local mirror_url="https://hub.fastgit.xyz/SagerNet/sing-box/releases/download/$version/$filename"
-        purple "镜像地址: $mirror_url"
-
-        if ! curl -L --progress-bar --max-time 300 -o "$filename" "$mirror_url"; then
-            red "所有下载地址都失败，请检查网络连接"
-            rm -rf "$temp_dir"
-            exit 1
-        fi
+    # 仅从官方 HTTPS 下载；失败不回退到第三方镜像。
+    if ! curl -fL --progress-bar --max-time 300 -o "$filename" "$download_url"; then
+        red "官方下载失败，请检查网络连接"
+        return 1
     fi
 
     # 验证下载的文件
@@ -618,16 +625,10 @@ download_official_singbox() {
 
     green "✅ 文件下载成功，格式验证通过"
 
-    # 下载并验证校验和（如果可用）
-    if curl -s --max-time 10 -o checksums.txt "$checksum_url" 2>/dev/null; then
-        if sha256sum -c --ignore-missing checksums.txt 2>/dev/null; then
-            green "✅ 文件完整性验证通过"
-        else
-            yellow "⚠️  校验和验证失败，但文件格式正确，继续安装"
-        fi
-    else
-        yellow "⚠️  无法下载校验和文件，跳过验证"
-    fi
+    # 官方发布 API 提供每个资产的 SHA-256；缺失/不匹配均停止安装。
+    curl -fsSL --max-time 30 "$GITHUB_API/releases/tags/$version" -o release.json || return 1
+    verify_release_archive "$filename" release.json || return 1
+    green "✅ 官方 SHA-256 验证通过"
 
     # 解压文件
     purple "正在解压文件..."
@@ -704,6 +705,8 @@ check_port() {
 validate_port() {
     local port=$1
     local type=$2
+
+    [[ "$port" =~ ^[1-9][0-9]{3,4}$ ]] || return 1
 
     if [[ $port -lt 1024 || $port -gt 65535 ]]; then
         return 1
@@ -824,6 +827,8 @@ cleanup_ports() {
     [[ -n "$VMESS_PORT" ]] && proxy_ports+=($VMESS_PORT)
     [[ -n "$TUIC_PORT" ]] && proxy_ports+=($TUIC_PORT)
     [[ -n "$HY2_PORT" ]] && proxy_ports+=($HY2_PORT)
+    [[ -n "${SNELL_PORT:-}" ]] && proxy_ports+=("$SNELL_PORT")
+    [[ -n "${NAIVE_DOMAIN:-}" ]] && proxy_ports+=("$NAIVE_PORT")
 
     # 获取SSH端口
     local ssh_port=$(ss -tlnp | grep ':22 ' | head -1 | awk '{print $4}' | cut -d':' -f2)
@@ -907,8 +912,9 @@ cleanup_ports() {
 
         # 允许代理端口
         for port in ${proxy_ports[@]}; do
-            if [[ $port == $VMESS_PORT ]]; then
+            if [[ $port == "$VMESS_PORT" || $port == "${SNELL_PORT:-}" || $port == "${NAIVE_PORT:-}" ]]; then
                 ufw allow $port/tcp >/dev/null 2>&1
+                if [[ $port == "${NAIVE_PORT:-}" ]]; then ufw allow "$port/udp" >/dev/null 2>&1; fi
                 echo -e "${green}✅ 允许 TCP 端口 $port (VMESS)${re}"
             else
                 ufw allow $port/udp >/dev/null 2>&1
@@ -932,8 +938,9 @@ cleanup_ports() {
 
         # 允许代理端口
         for port in ${proxy_ports[@]}; do
-            if [[ $port == $VMESS_PORT ]]; then
+            if [[ $port == "$VMESS_PORT" || $port == "${SNELL_PORT:-}" || $port == "${NAIVE_PORT:-}" ]]; then
                 firewall-cmd --permanent --add-port=$port/tcp >/dev/null 2>&1
+                if [[ $port == "${NAIVE_PORT:-}" ]]; then firewall-cmd --permanent --add-port="$port/udp" >/dev/null 2>&1; fi
                 echo -e "${green}✅ 允许 TCP 端口 $port (VMESS)${re}"
             else
                 firewall-cmd --permanent --add-port=$port/udp >/dev/null 2>&1
@@ -1266,6 +1273,128 @@ generate_config() {
   }
 }
 EOF
+    modern_protocol_config configure
+    chmod 600 "$WORKDIR/config.json"
+    (cd "$WORKDIR" && ./sing-box check -c config.json)
+}
+
+# 新协议只在安装时配置；凭据保存在 config.json，链接从同一份配置生成。
+# Naive 使用独立的可信证书，旧协议的自签证书续期不会覆盖它。
+modern_protocol_config() {
+    export WORKDIR SNELL_PORT NAIVE_PORT NAIVE_DOMAIN NAIVE_CERT_FILE NAIVE_KEY_FILE
+    export HY2_OBFS HY2_OBFS_PASSWORD HY2_BBR_PROFILE SNELL_PSK NAIVE_USERNAME NAIVE_PASSWORD
+    python3 - "$1" "${2:-}" <<'PY'
+import json, os, pathlib, secrets, sys
+from urllib.parse import quote, urlencode
+
+env = os.environ
+path = pathlib.Path(env['WORKDIR']) / 'config.json'
+config = json.loads(path.read_text())
+mode = sys.argv[1]
+if mode == 'configure':
+    hy2 = next(x for x in config['inbounds'] if x['type'] == 'hysteria2')
+    profile = env.get('HY2_BBR_PROFILE') or 'standard'
+    if profile not in ('standard', 'conservative', 'aggressive'):
+        raise SystemExit('HY2_BBR_PROFILE 无效')
+    hy2['bbr_profile'] = profile
+    obfs = env.get('HY2_OBFS') or 'none'
+    if obfs not in ('none', 'salamander', 'gecko'):
+        raise SystemExit('HY2_OBFS 必须为 none/salamander/gecko')
+    if obfs != 'none':
+        hy2['obfs'] = dict(type=obfs, password=env.get('HY2_OBFS_PASSWORD') or secrets.token_hex(32))
+    if env.get('SNELL_PORT'):
+        psk = env.get('SNELL_PSK') or secrets.token_hex(32)
+        if not 12 <= len(psk.encode()) <= 255:
+            raise SystemExit('Snell v6 PSK 必须为 12–255 字节')
+        config['inbounds'].append(dict(type='snell', tag='snell-in', listen='0.0.0.0',
+            listen_port=int(env['SNELL_PORT']), version=6, psk=psk, mode='default'))
+    if env.get('NAIVE_DOMAIN'):
+        config['inbounds'].append(dict(type='naive', tag='naive-in', listen='0.0.0.0',
+            listen_port=int(env['NAIVE_PORT']),
+            users=[dict(username=env.get('NAIVE_USERNAME') or 'gsou',
+                        password=env.get('NAIVE_PASSWORD') or secrets.token_hex(32))],
+            tls=dict(enabled=True, server_name=env['NAIVE_DOMAIN'],
+                certificate_path=env['NAIVE_CERT_FILE'], key_path=env['NAIVE_KEY_FILE'])))
+    ports = [x['listen_port'] for x in config['inbounds']]
+    if any(not 1024 <= p <= 65535 for p in ports) or len(set(ports)) != len(ports):
+        raise SystemExit('代理端口必须为 1024–65535 且不能重复')
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
+elif mode == 'links':
+    host = sys.argv[2]
+    host = '[' + host + ']' if ':' in host and not host.startswith('[') else host
+    for inbound in config['inbounds']:
+        kind, port = inbound['type'], inbound['listen_port']
+        if kind == 'snell':
+            print(f"snell://{quote(inbound['psk'], safe='')}@{host}:{port}?version=6&mode=default#Snell-v6")
+        elif kind == 'naive':
+            user = inbound['users'][0]
+            auth = quote(user['username'], safe='') + ':' + quote(user['password'], safe='')
+            for scheme in ('https', 'quic'):
+                query = urlencode({'sni': inbound['tls']['server_name']})
+                print(f"naive+{scheme}://{auth}@{host}:{port}?{query}#Naive-{scheme}")
+        elif kind == 'hysteria2':
+            params = dict(sni='www.bing.com', alpn='h3', insecure='1',
+                          bbr_profile=inbound.get('bbr_profile', 'standard'))
+            if 'obfs' in inbound:
+                params.update({'obfs': inbound['obfs']['type'], 'obfs-password': inbound['obfs']['password']})
+            password = quote(inbound['users'][0]['password'], safe='')
+            print(f'hysteria2://{password}@{host}:{port}/?{urlencode(params)}#Hysteria2')
+else:
+    raise SystemExit('未知操作')
+PY
+}
+
+prepare_modern_protocols() {
+    if [[ "${ENABLE_SNELL:-1}" == 1 ]]; then
+        SNELL_PORT="${SNELL_PORT:-$(generate_secure_port tcp "$VMESS_PORT $TUIC_PORT $HY2_PORT ${NAIVE_PORT:-10443}")}"
+        validate_port "$SNELL_PORT" tcp || { red "Snell 端口不可用"; return 1; }
+        purple "Snell v6: TCP $SNELL_PORT"
+    else
+        SNELL_PORT=""
+    fi
+    if [[ -n "${NAIVE_DOMAIN:-}" ]]; then
+        NAIVE_PORT="${NAIVE_PORT:-10443}"
+        validate_port "$NAIVE_PORT" tcp || { red "Naive 端口不可用"; return 1; }
+        purple "Naive HTTP/2 + HTTP/3: TCP/UDP $NAIVE_PORT"
+    else
+        NAIVE_PORT=""
+    fi
+}
+
+# 必须在重装确认/删除之前完成依赖和证书检查。
+modern_protocol_preflight() {
+    command -v python3 >/dev/null || { red "请先安装 python3，再运行脚本"; return 1; }
+    get_latest_version >/dev/null || return 1
+    case "${HY2_OBFS:-none}" in none|salamander|gecko) ;; *) red "HY2_OBFS 无效"; return 1 ;; esac
+    case "${HY2_BBR_PROFILE:-standard}" in standard|conservative|aggressive) ;; *) red "HY2_BBR_PROFILE 无效"; return 1 ;; esac
+    case "${ENABLE_SNELL:-1}" in 0|1) ;; *) red "ENABLE_SNELL 必须为 0/1"; return 1 ;; esac
+    if [[ -n "${SNELL_PSK:-}" ]]; then
+        local psk_length
+        psk_length=$(printf %s "$SNELL_PSK" | wc -c)
+        (( psk_length >= 12 && psk_length <= 255 )) || { red "Snell PSK 必须为 12–255 字节"; return 1; }
+    fi
+    local port
+    for port in "${SNELL_PORT:-10000}" "${NAIVE_PORT:-10443}"; do
+        [[ "$port" =~ ^[1-9][0-9]{3,4}$ ]] && (( port >= 1024 && port <= 65535 )) || { red "新协议端口无效"; return 1; }
+    done
+    if [[ -n "${NAIVE_DOMAIN:-}" ]]; then
+        [[ "$NAIVE_DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { red "Naive 域名无效"; return 1; }
+        [[ -r "${NAIVE_CERT_FILE:-}" && -r "${NAIVE_KEY_FILE:-}" ]] || { red "Naive 需要可读的证书链和私钥绝对路径"; return 1; }
+        [[ "$NAIVE_CERT_FILE" == /* && "$NAIVE_KEY_FILE" == /* && "$NAIVE_CERT_FILE" != "$WORKDIR/"* && "$NAIVE_KEY_FILE" != "$WORKDIR/"* ]] || {
+            red "Naive 证书必须在安装目录外，并使用绝对路径"; return 1;
+        }
+        openssl x509 -in "$NAIVE_CERT_FILE" -noout -checkend 0 >/dev/null || return 1
+        openssl x509 -in "$NAIVE_CERT_FILE" -noout -checkhost "$NAIVE_DOMAIN" | grep -q 'does match certificate' || {
+            red "Naive 证书域名不匹配"; return 1;
+        }
+        openssl verify -purpose sslserver -verify_hostname "$NAIVE_DOMAIN" -untrusted "$NAIVE_CERT_FILE" "$NAIVE_CERT_FILE" >/dev/null || {
+            red "Naive 证书链未通过系统信任验证，请使用可信 CA 的完整证书链"; return 1;
+        }
+        local cert_public key_public
+        cert_public=$(openssl x509 -in "$NAIVE_CERT_FILE" -noout -pubkey) || return 1
+        key_public=$(openssl pkey -in "$NAIVE_KEY_FILE" -passin pass: -pubout) || return 1
+        [[ "$cert_public" == "$key_public" ]] || { red "Naive 证书与私钥不匹配"; return 1; }
+    fi
 }
 
 # 增强SSL证书生成功能
@@ -1635,13 +1764,13 @@ generate_links() {
     echo -e "\n${green}=== 连接信息 ===${re}"
     echo -e "${purple}服务器IP: ${available_ip}${re}"
     echo -e "${purple}Argo域名: ${argodomain}${re}"
-    echo -e "${purple}端口配置: TCP:${VMESS_PORT} UDP:${TUIC_PORT},${HY2_PORT}${re}"
+    echo -e "${purple}端口配置: TCP:${VMESS_PORT},${SNELL_PORT:-未启用},${NAIVE_PORT:-未启用} UDP:${TUIC_PORT},${HY2_PORT},${NAIVE_PORT:-未启用}${re}"
 
     local ISP=$(curl -s --max-time 2 https://speed.cloudflare.com/meta | awk -F\" '{print $26}' | sed -e 's/ /_/g' || echo "Unknown")
     local SERVER_NAME=$(echo "$HOSTNAME" | cut -d '.' -f 1)
     local NAME="$ISP-$SERVER_NAME"
 
-    yellow "注意：客户端的跳过证书验证需设置为true\n"
+    yellow "旧版 HY2/TUIC 使用自签证书；Naive 必须验证可信域名证书。\n"
 
     # 生成VMESS链接（标准格式）
     local vmess_json=$(cat <<JSON
@@ -1699,10 +1828,11 @@ JSON
         fi
 
         echo ""
-        echo "hysteria2://$UUID@$available_ip:$HY2_PORT/?sni=www.bing.com&alpn=h3&insecure=1#$NAME-hy2"
+        modern_protocol_config links "$available_ip"
         echo ""
         echo "tuic://$UUID:$UUID@$available_ip:$TUIC_PORT?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=www.bing.com&allow_insecure=1&insecure=1#$NAME-tuic"
     } > "${FILE_PATH}/list.txt"
+    chmod 600 "${FILE_PATH}/list.txt"
 
     echo -e "\n${green}节点配置信息:${re}"
     echo "=================================================="
@@ -1721,6 +1851,7 @@ JSON
 
     # 生成base64订阅文件（仅供本地使用）
     base64 -w0 "${FILE_PATH}/list.txt" > "${FILE_PATH}/v2.log"
+    chmod 600 "${FILE_PATH}/v2.log"
 
     echo -e "\n${blue}本地文件信息:${re}"
     echo -e "  节点配置: ${FILE_PATH}/list.txt"
@@ -2239,7 +2370,7 @@ case "\$1" in
             echo -e "${blue}=== 服务器连接信息 ===${re}"
             echo -e "${purple}服务器IP: ${available_ip}${re}"
             echo -e "${purple}Argo域名: ${argodomain}${re}"
-            echo -e "${purple}端口配置: TCP:${VMESS_PORT} UDP:${TUIC_PORT},${HY2_PORT}${re}"
+            echo -e "${purple}端口配置: TCP:${VMESS_PORT},${SNELL_PORT:-未启用},${NAIVE_PORT:-未启用} UDP:${TUIC_PORT},${HY2_PORT},${NAIVE_PORT:-未启用}${re}"
 
             echo -e "\n${blue}本地文件信息:${re}"
             echo -e "  节点配置文件: ${FILE_PATH}/list.txt"
@@ -2692,6 +2823,8 @@ install_singbox() {
     echo -e "${blue}    默认解锁: ChatGPT/Netflix/YouTube等流媒体${re}"
     echo -e "${blue}================================================${re}\n"
 
+    modern_protocol_preflight
+
     # 安全初始化
     secure_init
 
@@ -2703,6 +2836,7 @@ install_singbox() {
 
     # 检查端口
     check_port
+    prepare_modern_protocols
 
     # 创建目录结构
     setup_directories
@@ -2774,14 +2908,12 @@ install_singbox() {
 
 # 错误处理
 handle_error() {
-    red "安装过程中发生错误，正在清理..."
-    pkill -f "sing-box\|cloudflared" 2>/dev/null || true
-    cd "$HOME"
+    red "安装失败；保留文件用于诊断，不终止其他目录的代理进程。"
     exit 1
 }
 
 # 设置错误处理
-trap handle_error ERR
+# 仅直接执行时设置 trap，允许隔离测试加载函数。
 
 # 主程序入口
 main() {
@@ -2796,4 +2928,8 @@ main() {
 }
 
 # 脚本入口
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    umask 077
+    trap handle_error ERR
+    main "$@"
+fi

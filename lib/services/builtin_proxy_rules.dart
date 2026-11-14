@@ -1,8 +1,9 @@
-/// 无需用户配置的 OpenAI / Anthropic 代理规则。
-/// 域名清单核对日期：2026-09-30。
+/// 无需用户配置的 OpenAI / Anthropic / Google Antigravity 代理规则。
+/// OpenAI / Anthropic 清单核对日期：2026-09-30；Antigravity：2026-10-29。
 /// https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps
 /// https://code.claude.com/docs/en/network-config
 /// https://github.com/v2fly/domain-list-community/tree/master/data
+/// https://docs.cloud.google.com/docs/security/compliance/deploy-antigravity-us-public-sector
 class BuiltinProxyRules {
   // 后缀同时匹配根域名和所有子域名。
   static const domainSuffixes = <String>[
@@ -22,6 +23,9 @@ class BuiltinProxyRules {
     'claudeusercontent.com',
     'claudemcpclient.com',
     'claudemcpcontent.com',
+    'antigravity.google',
+    'antigravity.google.com',
+    'antigravity-unleash.goog',
     'chatgpt.livekit.cloud',
     'host.livekit.cloud',
     'turn.livekit.cloud',
@@ -32,6 +36,17 @@ class BuiltinProxyRules {
 
   // 共享 CDN、登录、支付及遥测只匹配服务使用的主机，避免代理整个云平台。
   static const domains = <String>[
+    // Antigravity API、Google 登录及更新；避免代理整个 googleapis.com/run.app。
+    'cloudcode-pa.googleapis.com',
+    'daily-cloudcode-pa.googleapis.com',
+    'aicode.googleapis.com',
+    'businessaicode.googleapis.com',
+    'accounts.google.com',
+    'oauth2.googleapis.com',
+    'www.googleapis.com',
+    'play.googleapis.com',
+    'antigravity-cli-auto-updater-974169037036.us-central1.run.app',
+    'antigravity-hub-auto-updater-974169037036.us-central1.run.app',
     'challenges.cloudflare.com',
     'cdn.workos.com',
     'forwarder.workos.com',

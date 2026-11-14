@@ -1,15 +1,22 @@
 """Root-only runtime operations. Candidate configs stay in memory, never in backups."""
 import copy,hashlib,json,os,pathlib,signal,socket,struct,subprocess,tempfile,time,urllib.parse
-from vpn_policy import select,AU_TAG
+from vpn_policy import select,target_tags,infer
 ROOT=pathlib.Path('/root/sing-box')
 EXE=str(ROOT/'sing-box')
 LIVE=ROOT/'config.json'
-TAG=AU_TAG
-def exit_metadata():
- data=json.loads(pathlib.Path('/var/lib/shaowei-vpn/exits.json').read_text())
- for key in ('direct','au'):
-  __import__('ipaddress').ip_address(data[key]['ip'])
- return data
+def exit_metadata(config=None):
+ if config is None:config=json.loads(LIVE.read_bytes())
+ path=pathlib.Path('/var/lib/shaowei-vpn/exits.json')
+ data=json.loads(path.read_text()) if path.exists() else {}
+ result={}
+ for key,tag in target_tags(config).items():
+  if key not in data:continue
+  item=data[key]
+  __import__('ipaddress').ip_address(item['ip'])
+  label=item['label']
+  if not isinstance(label,str) or not label or len(label)>100:raise ValueError('出口名称无效')
+  result[key]={'label':label,'ip':item['ip']}
+ return result
 def validate(config):
  r=subprocess.run([EXE,'check','-c','/dev/stdin'],input=json.dumps(config).encode(),capture_output=True,cwd=str(ROOT),timeout=10)
  if r.returncode:raise ValueError('VPS 配置校验失败，尚未应用')
@@ -57,7 +64,10 @@ def udp_test(port,expected):
    if typ==0x20 and n>=8 and v[1]==1:mapped=socket.inet_ntoa(bytes(v[4+k]^cookie[k] for k in range(4)))
   return {'name':'non_claude_udp_stun','valid_stun':body[8:20]==token,'exit_ip':mapped,'passed':body[8:20]==token and mapped==expected}
 def probe(config,live=False,emit=False,policy=None):
- exits=exit_metadata()
+ exits=exit_metadata(config)
+ if policy is None:policy=infer(config)[0]
+ targets=target_tags(config)
+ types={o.get('tag'):o.get('type') for o in config.get('outbounds',[])}
  server=None;client=None;tests=[];server_logs=tempfile.TemporaryFile(mode='w+t');client_logs=tempfile.TemporaryFile(mode='w+t')
  try:
   vm=copy.deepcopy(next(x for x in config['inbounds'] if x['type']=='vmess'))
@@ -73,19 +83,18 @@ def probe(config,live=False,emit=False,policy=None):
   cc={'log':{'level':'warn'},'inbounds':[{'type':'mixed','tag':'validation','listen':'127.0.0.1','listen_port':port}],'outbounds':[outbound],'route':{'final':'tunnel'}}
   client=run_config(cc,client_logs);ready(client,port)
   plans=[
-   ('claude_web_exit','https://claude.ai/cdn-cgi/trace','socks5h',TAG,200,exits['au']['ip']),
-   ('anthropic_api','https://api.anthropic.com/v1/models','socks5h',TAG,401,None),
-   ('claude_literal_ip_sni','https://claude.ai/cdn-cgi/trace','socks5',TAG,200,exits['au']['ip']),
-   ('openai_api','https://api.openai.com/v1/models','socks5h','direct',401,None),
-   ('openai_exit','https://api.openai.com/cdn-cgi/trace','socks5h','direct',200,exits['direct']['ip']),
-   ('ordinary_site_exit','https://www.cloudflare.com/cdn-cgi/trace','socks5h','direct',200,exits['direct']['ip']),
-   ('google_direct','https://www.google.com/generate_204','socks5h','direct',204,None),
-   ('ping0_direct','https://ping0.cc/env','socks5h','direct',200,None)]
-  for name,url,scheme,wanted,status,expected_ip in plans:
-   if policy:
-    choice=select(policy,urllib.parse.urlsplit(url).hostname)
-    wanted=TAG if choice=='au' else 'direct'
-    if expected_ip:expected_ip=exits['au']['ip'] if choice=='au' else exits['direct']['ip']
+   ('claude_web_exit','https://claude.ai/cdn-cgi/trace','socks5h',200),
+   ('anthropic_api','https://api.anthropic.com/v1/models','socks5h',401),
+   ('claude_literal_ip_sni','https://claude.ai/cdn-cgi/trace','socks5',200),
+   ('openai_api','https://api.openai.com/v1/models','socks5h',401),
+   ('openai_exit','https://api.openai.com/cdn-cgi/trace','socks5h',200),
+   ('ordinary_site_exit','https://www.cloudflare.com/cdn-cgi/trace','socks5h',200),
+   ('google_direct','https://www.google.com/generate_204','socks5h',204),
+   ('ping0_direct','https://ping0.cc/env','socks5h',200)]
+  for name,url,scheme,status in plans:
+   choice=select(policy,urllib.parse.urlsplit(url).hostname)
+   wanted=targets[choice]
+   expected_ip=exits[choice]['ip'] if name in ('claude_web_exit','claude_literal_ip_sni','openai_exit','ordinary_site_exit') else None
    server_logs.seek(0,2);start=server_logs.tell();t=time.monotonic()
    r=subprocess.run(['curl','-q','-4','--noproxy','','--proxy',f'{scheme}://127.0.0.1:{port}','--silent','--show-error','--connect-timeout','6','--max-time','12','--max-filesize','500000','--write-out','\nCHECK_HTTP=%{http_code}',url],capture_output=True,text=True,timeout=15)
    body,sep,code=r.stdout.rpartition('\nCHECK_HTTP=');time.sleep(.05)
@@ -93,13 +102,13 @@ def probe(config,live=False,emit=False,policy=None):
    item={'name':name,'expected_outbound':wanted,'http':int(code) if sep and code.isdigit() else None,'seconds':round(time.monotonic()-t,3),'curl_exit':r.returncode}
    if expected_ip:item.update(exit_ip=fields.get('ip'),country=fields.get('loc'))
    if not live:
-    server_logs.seek(start);lines=server_logs.read();marker='outbound/socks['+TAG+']' if wanted==TAG else 'outbound/direct[direct]'
+    server_logs.seek(start);lines=server_logs.read();marker='outbound/'+types[wanted]+'['+wanted+']'
     evidence=[line for line in lines.splitlines() if marker in line and ('outbound connection' in line or 'outbound packet' in line)]
     item['outbound_confirmed']=bool(evidence);item['route_evidence']=evidence[:1]
    item['passed']=r.returncode==0 and item['http']==status and (not expected_ip or fields.get('ip')==expected_ip) and (live or item.get('outbound_confirmed',False))
    tests.append(item)
    if emit:print('LIVE_TEST' if live else 'STAGE_TEST',json.dumps(item),flush=True)
-  try:item=udp_test(port,exits['au']['ip'] if policy and policy['default']=='au' else exits['direct']['ip'])
+  try:item=udp_test(port,exits[policy['default'] if policy else 'direct']['ip'])
   except Exception as e:item={'name':'non_claude_udp_stun','passed':False,'error':type(e).__name__}
   tests.append(item)
   if emit:print('LIVE_TEST' if live else 'STAGE_TEST',json.dumps(item),flush=True)

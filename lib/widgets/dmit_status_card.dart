@@ -76,7 +76,9 @@ class _DmitStatusCardState extends State<DmitStatusCard> {
       builder: (context, _) {
         if (!_isCurrentServer) return const SizedBox.shrink();
         final runtime = _service.currentInfo;
-        final billing = _billingService.infoFor(_service.serviceId);
+        final billing = _service.serviceId == null
+            ? _billingService.infoForHost(widget.serverHost)
+            : _billingService.infoFor(_service.serviceId);
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),

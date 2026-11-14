@@ -40,6 +40,10 @@ class BundleTests(unittest.TestCase):
     def test_requires_supported_preconfigured_exits_and_validation_channel(self):
         for config in [{'outbounds': [], 'inbounds': []}, {**CONFIG, 'inbounds': []}]:
             with self.assertRaises(ValueError): installer.check_target(config)
+    def test_accepts_singapore_and_future_ids_without_fixed_inventory(self):
+        config = copy.deepcopy(CONFIG)
+        config['outbounds'].extend([{'type':'socks','tag':'sg-residential-ai'}, {'type':'socks','tag':'edge_ca_2027'}])
+        installer.check_target(config)
     def test_proxy_credentials_only_use_curl_stdin_and_never_response(self):
         with patch.object(installer, 'run', return_value=SimpleNamespace(stdout='ip=8.8.8.8\nloc=AU\n')) as call:
             result = installer.trace(CONFIG, True)
@@ -77,6 +81,23 @@ class InstallerTests(unittest.TestCase):
         commands = [call.args[0] for call in self.mocks[5].call_args_list]
         self.assertFalse(any('kill' in str(args) or ('restart' in args and args[-1] != 'shaowei-vpn-routes.service') for args in commands))
         self.assertNotIn('test-only-secret', ''.join(p.read_text() for p in self.state.rglob('*') if p.is_file()))
+    def test_upgrade_preserves_future_exit_metadata(self):
+        config = copy.deepcopy(CONFIG)
+        config['outbounds'].append({'type':'socks','tag':'edge_ca_2027'})
+        self.config.write_text(json.dumps(config))
+        self.state.mkdir()
+        registry = {'edge_ca_2027':{'ip':'203.0.113.44','label':'Canada custom'}}
+        (self.state/'exits.json').write_text(json.dumps(registry))
+        def probe(config, choice):
+            if choice == 'edge_ca_2027':return {'ip':'203.0.113.45','label':'Residential CA'}
+            return dict(EXITS['au' if choice else 'direct'])
+        with patch.object(installer,'trace',side_effect=probe), patch.object(installer,'service_status',return_value={'exits':{**EXITS,**registry}}):
+            installer.install(bundle())
+        result = json.loads((self.state/'exits.json').read_text())
+        self.assertEqual(result['edge_ca_2027'],{'ip':'203.0.113.45','label':'Canada custom'})
+        self.assertEqual(set(result),{'direct','au','edge_ca_2027'})
+        self.assertEqual(json.loads(self.config.read_bytes()),config)
+
     def test_upgrade_failure_restores_previous_helper_files(self):
         self.lib.mkdir(); (self.lib/'vpn_policy.py').write_text('old policy')
         self.unit.write_text('[Service]\nKillMode=process\n')

@@ -9,7 +9,8 @@ import '../models/subscription_info.dart';
 /// 远程订阅服务
 /// 负责从远程URL下载和解析订阅内容
 class RemoteSubscriptionService {
-  static final RemoteSubscriptionService _instance = RemoteSubscriptionService._internal();
+  static final RemoteSubscriptionService _instance =
+      RemoteSubscriptionService._internal();
   factory RemoteSubscriptionService() => _instance;
   RemoteSubscriptionService._internal();
 
@@ -34,7 +35,9 @@ class RemoteSubscriptionService {
     try {
       final client = http.Client();
       final headers = {
-        'User-Agent': userAgent ?? 'clash-verge-rev/1.7.7',  // 使用clash-verge-rev的User-Agent
+        'User-Agent':
+            userAgent ??
+            'clash-verge-rev/1.7.7', // 使用clash-verge-rev的User-Agent
         'Accept': '*/*',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept-Encoding': 'identity', // 不使用压缩，避免解析问题
@@ -55,13 +58,19 @@ class RemoteSubscriptionService {
       client.close();
 
       if (response.statusCode != 200) {
-        throw HttpException('HTTP错误: ${response.statusCode} ${response.reasonPhrase}');
+        throw HttpException(
+          'HTTP错误: ${response.statusCode} ${response.reasonPhrase}',
+        );
       }
 
-      print('[远程订阅] 下载完成，状态码: ${response.statusCode}，内容长度: ${response.body.length}');
+      print(
+        '[远程订阅] 下载完成，状态码: ${response.statusCode}，内容长度: ${response.body.length}',
+      );
 
       // 检查响应体开头（可能是JSON格式包含订阅信息）
-      final bodyStart = response.body.length > 500 ? response.body.substring(0, 500) : response.body;
+      final bodyStart = response.body.length > 500
+          ? response.body.substring(0, 500)
+          : response.body;
       print('[远程订阅] 响应体开头: $bodyStart');
 
       // 解析订阅信息（从响应头获取）
@@ -73,7 +82,8 @@ class RemoteSubscriptionService {
       print('[远程订阅] 从头部解析到的订阅信息: $subscriptionInfo');
 
       // 如果头部没有信息，尝试从响应体解析
-      final bodySubscriptionInfo = subscriptionInfo ?? _parseSubscriptionInfoFromBody(response.body);
+      final bodySubscriptionInfo =
+          subscriptionInfo ?? _parseSubscriptionInfoFromBody(response.body);
       print('[远程订阅] 最终订阅信息: $bodySubscriptionInfo');
 
       // 解析订阅内容
@@ -87,7 +97,6 @@ class RemoteSubscriptionService {
         originalUrl: url,
         rawContent: response.body,
       );
-
     } on TimeoutException {
       throw TimeoutException('请求超时，请检查网络连接', Duration(milliseconds: timeout));
     } on SocketException {
@@ -110,7 +119,11 @@ class RemoteSubscriptionService {
 
     for (final url in urls) {
       try {
-        final result = await fetchSubscription(url, userAgent: userAgent, timeout: timeout);
+        final result = await fetchSubscription(
+          url,
+          userAgent: userAgent,
+          timeout: timeout,
+        );
         results.add(result);
       } catch (e) {
         print('[远程订阅] 批量获取失败 $url: $e');
@@ -145,7 +158,8 @@ class RemoteSubscriptionService {
         if (lowerKey == 'subscription-userinfo' ||
             lowerKey == 'subscription-userInfo' ||
             lowerKey == 'x-subscription-userinfo' ||
-            key == 'Subscription-Userinfo') {  // clash-verge-rev使用的确切格式
+            key == 'Subscription-Userinfo') {
+          // clash-verge-rev使用的确切格式
           subscriptionUserinfo = headers[key];
           print('[远程订阅] 找到订阅信息头: $key = $subscriptionUserinfo');
           break;
@@ -196,7 +210,10 @@ class RemoteSubscriptionService {
   }
 
   /// 解析订阅内容
-  Future<List<VPNConfig>> _parseSubscriptionContent(String content, String sourceUrl) async {
+  Future<List<VPNConfig>> _parseSubscriptionContent(
+    String content,
+    String sourceUrl,
+  ) async {
     final configs = <VPNConfig>[];
 
     try {
@@ -229,7 +246,9 @@ class RemoteSubscriptionService {
         for (int i = 0; i < lines.length && i < 5; i++) {
           final line = lines[i].trim();
           if (line.isNotEmpty) {
-            print('[远程订阅] 行${i + 1}: ${line.length > 100 ? line.substring(0, 100) + '...' : line}');
+            print(
+              '[远程订阅] 行${i + 1}: ${line.length > 100 ? line.substring(0, 100) + '...' : line}',
+            );
           }
         }
 
@@ -259,7 +278,6 @@ class RemoteSubscriptionService {
         final lines = decodedContent.split('\n');
         print('[远程订阅] 处理完成，总行数: ${lines.length}，成功解析: $processed');
       }
-
     } catch (e) {
       print('[远程订阅] 解析订阅内容失败: $e');
       throw FormatException('订阅内容解析失败: $e');
@@ -299,7 +317,11 @@ class RemoteSubscriptionService {
   }) async {
     try {
       // 下载新的订阅内容
-      final result = await fetchSubscription(url, userAgent: userAgent, timeout: timeout);
+      final result = await fetchSubscription(
+        url,
+        userAgent: userAgent,
+        timeout: timeout,
+      );
 
       // 比较新旧配置
       final addedConfigs = <VPNConfig>[];
@@ -324,7 +346,9 @@ class RemoteSubscriptionService {
       for (final oldConfig in oldConfigs) {
         if (oldConfig.subscriptionUrl == url) {
           final stillExists = result.configs.any(
-            (newConfig) => newConfig.name == oldConfig.name && newConfig.server == oldConfig.server,
+            (newConfig) =>
+                newConfig.name == oldConfig.name &&
+                newConfig.server == oldConfig.server,
           );
           if (!stillExists) {
             removedConfigs.add(oldConfig);
@@ -338,7 +362,6 @@ class RemoteSubscriptionService {
         updatedConfigs: updatedConfigs,
         removedConfigs: removedConfigs,
       );
-
     } catch (e) {
       print('[远程订阅] 更新订阅失败: $e');
       rethrow;
@@ -379,13 +402,35 @@ class RemoteSubscriptionService {
           int? upload, download, total, expire;
 
           // 尝试不同的字段名称组合
-          upload = _extractNumericValue(jsonData, ['upload', 'uploadBytes', 'used_upload']);
-          download = _extractNumericValue(jsonData, ['download', 'downloadBytes', 'used_download']);
-          total = _extractNumericValue(jsonData, ['total', 'totalBytes', 'total_bandwidth']);
-          expire = _extractNumericValue(jsonData, ['expire', 'expiry', 'expire_time', 'expired_at']);
+          upload = _extractNumericValue(jsonData, [
+            'upload',
+            'uploadBytes',
+            'used_upload',
+          ]);
+          download = _extractNumericValue(jsonData, [
+            'download',
+            'downloadBytes',
+            'used_download',
+          ]);
+          total = _extractNumericValue(jsonData, [
+            'total',
+            'totalBytes',
+            'total_bandwidth',
+          ]);
+          expire = _extractNumericValue(jsonData, [
+            'expire',
+            'expiry',
+            'expire_time',
+            'expired_at',
+          ]);
 
-          if (upload != null || download != null || total != null || expire != null) {
-            print('[远程订阅] 从响应体解析订阅信息: upload=$upload, download=$download, total=$total, expire=$expire');
+          if (upload != null ||
+              download != null ||
+              total != null ||
+              expire != null) {
+            print(
+              '[远程订阅] 从响应体解析订阅信息: upload=$upload, download=$download, total=$total, expire=$expire',
+            );
             return SubscriptionInfo(
               upload: upload ?? 0,
               download: download ?? 0,
@@ -404,7 +449,10 @@ class RemoteSubscriptionService {
   }
 
   /// 从JSON对象中提取数值（尝试多个可能的字段名）
-  int? _extractNumericValue(Map<String, dynamic> json, List<String> possibleKeys) {
+  int? _extractNumericValue(
+    Map<String, dynamic> json,
+    List<String> possibleKeys,
+  ) {
     for (final key in possibleKeys) {
       final value = json[key];
       if (value != null) {
@@ -423,15 +471,19 @@ class RemoteSubscriptionService {
   bool _isClashYamlFormat(String content) {
     // 检查典型的 Clash 配置字段
     return content.contains('mixed-port:') ||
-           content.contains('allow-lan:') ||
-           content.contains('mode:') ||
-           content.contains('proxies:') ||
-           content.contains('proxy-groups:') ||
-           content.contains('rules:');
+        content.contains('allow-lan:') ||
+        content.contains('mode:') ||
+        content.contains('proxies:') ||
+        content.contains('proxy-groups:') ||
+        content.contains('rules:');
   }
 
   /// 解析 Clash YAML 格式订阅
-  Future<int> _parseClashYaml(String yamlContent, List<VPNConfig> configs, String sourceUrl) async {
+  Future<int> _parseClashYaml(
+    String yamlContent,
+    List<VPNConfig> configs,
+    String sourceUrl,
+  ) async {
     int processed = 0;
 
     try {
@@ -470,8 +522,13 @@ class RemoteSubscriptionService {
             continue;
           }
 
-          final Map<String, dynamic> proxy = Map<String, dynamic>.from(proxyData);
-          final VPNConfig? config = _convertClashProxyToVPNConfig(proxy, sourceUrl);
+          final Map<String, dynamic> proxy = Map<String, dynamic>.from(
+            proxyData,
+          );
+          final VPNConfig? config = _convertClashProxyToVPNConfig(
+            proxy,
+            sourceUrl,
+          );
 
           if (config != null) {
             configs.add(config);
@@ -483,7 +540,6 @@ class RemoteSubscriptionService {
       }
 
       print('[远程订阅] Clash YAML 解析完成，成功解析: $processed/${proxies.length}');
-
     } catch (e) {
       print('[远程订阅] 解析 Clash YAML 失败: $e');
     }
@@ -492,7 +548,10 @@ class RemoteSubscriptionService {
   }
 
   /// 将 Clash 代理配置转换为 VPNConfig
-  VPNConfig? _convertClashProxyToVPNConfig(Map<String, dynamic> proxy, String sourceUrl) {
+  VPNConfig? _convertClashProxyToVPNConfig(
+    Map<String, dynamic> proxy,
+    String sourceUrl,
+  ) {
     try {
       final String? type = proxy['type']?.toString().toLowerCase();
       final String? name = proxy['name']?.toString();
@@ -500,11 +559,15 @@ class RemoteSubscriptionService {
       final dynamic portValue = proxy['port'];
 
       if (type == null || name == null || server == null || portValue == null) {
-        print('[远程订阅] 代理配置缺少必要字段: type=$type, name=$name, server=$server, port=$portValue');
+        print(
+          '[远程订阅] 代理配置缺少必要字段: type=$type, name=$name, server=$server, port=$portValue',
+        );
         return null;
       }
 
-      final int port = portValue is int ? portValue : int.tryParse(portValue.toString()) ?? 0;
+      final int port = portValue is int
+          ? portValue
+          : int.tryParse(portValue.toString()) ?? 0;
       if (port <= 0) {
         print('[远程订阅] 无效端口: $portValue');
         return null;
@@ -512,6 +575,30 @@ class RemoteSubscriptionService {
 
       // 根据不同类型转换
       switch (type) {
+        case 'naive':
+        case 'snell':
+        case 'anytls':
+          final settings = <String, dynamic>{
+            ...proxy,
+            'skipCertVerify': proxy['skip-cert-verify'] == true,
+            if (proxy['servername'] != null) 'sni': proxy['servername'],
+          };
+          if (type == 'snell' && proxy['obfs-opts'] is Map) {
+            final obfs = proxy['obfs-opts'] as Map;
+            settings['obfs_mode'] = obfs['mode'];
+            settings['obfs_host'] = obfs['host'];
+          }
+          final config = VPNConfig(
+            name: name,
+            type: type,
+            server: server,
+            port: port,
+            settings: settings,
+            subscriptionUrl: sourceUrl,
+            lastUpdated: DateTime.now(),
+          );
+          config.toSingBoxOutbound(tag: 'validate');
+          return config;
         case 'ss':
           return _convertShadowsocks(proxy, name, server, port, sourceUrl);
         case 'vmess':
@@ -535,7 +622,13 @@ class RemoteSubscriptionService {
   }
 
   /// 转换 Shadowsocks 配置
-  VPNConfig? _convertShadowsocks(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
+  VPNConfig? _convertShadowsocks(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
     final String? password = proxy['password']?.toString();
     final String? cipher = proxy['cipher']?.toString();
 
@@ -549,17 +642,20 @@ class RemoteSubscriptionService {
       type: 'shadowsocks',
       server: server,
       port: port,
-      settings: {
-        'password': password,
-        'method': cipher,
-      },
+      settings: {'password': password, 'method': cipher},
       subscriptionUrl: sourceUrl,
       lastUpdated: DateTime.now(),
     );
   }
 
   /// 转换 VMess 配置
-  VPNConfig? _convertVmess(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
+  VPNConfig? _convertVmess(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
     final String? uuid = proxy['uuid']?.toString();
     final int? alterId = proxy['alterId'] ?? proxy['aid'];
     final String? cipher = proxy['cipher']?.toString() ?? 'auto';
@@ -582,16 +678,21 @@ class RemoteSubscriptionService {
 
       // WebSocket 设置
       if (network == 'ws') {
-        final Map<String, dynamic>? wsOpts = proxy['ws-opts'] is Map ? Map<String, dynamic>.from(proxy['ws-opts']) : null;
+        final Map<String, dynamic>? wsOpts = proxy['ws-opts'] is Map
+            ? Map<String, dynamic>.from(proxy['ws-opts'])
+            : null;
         if (wsOpts != null) {
           if (wsOpts['path'] != null) settings['path'] = wsOpts['path'];
-          if (wsOpts['headers'] != null) settings['headers'] = wsOpts['headers'];
+          if (wsOpts['headers'] != null)
+            settings['headers'] = wsOpts['headers'];
         }
       }
 
       // gRPC 设置
       if (network == 'grpc') {
-        final Map<String, dynamic>? grpcOpts = proxy['grpc-opts'] is Map ? Map<String, dynamic>.from(proxy['grpc-opts']) : null;
+        final Map<String, dynamic>? grpcOpts = proxy['grpc-opts'] is Map
+            ? Map<String, dynamic>.from(proxy['grpc-opts'])
+            : null;
         if (grpcOpts != null && grpcOpts['grpc-service-name'] != null) {
           settings['serviceName'] = grpcOpts['grpc-service-name'];
         }
@@ -618,7 +719,13 @@ class RemoteSubscriptionService {
   }
 
   /// 转换 VLESS 配置
-  VPNConfig? _convertVless(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
+  VPNConfig? _convertVless(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
     final String? uuid = proxy['uuid']?.toString();
 
     if (uuid == null) {
@@ -637,10 +744,13 @@ class RemoteSubscriptionService {
       settings['network'] = network;
 
       if (network == 'ws') {
-        final Map<String, dynamic>? wsOpts = proxy['ws-opts'] is Map ? Map<String, dynamic>.from(proxy['ws-opts']) : null;
+        final Map<String, dynamic>? wsOpts = proxy['ws-opts'] is Map
+            ? Map<String, dynamic>.from(proxy['ws-opts'])
+            : null;
         if (wsOpts != null) {
           if (wsOpts['path'] != null) settings['path'] = wsOpts['path'];
-          if (wsOpts['headers'] != null) settings['headers'] = wsOpts['headers'];
+          if (wsOpts['headers'] != null)
+            settings['headers'] = wsOpts['headers'];
         }
       }
     }
@@ -665,7 +775,13 @@ class RemoteSubscriptionService {
   }
 
   /// 转换 Trojan 配置
-  VPNConfig? _convertTrojan(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
+  VPNConfig? _convertTrojan(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
     final String? password = proxy['password']?.toString();
 
     if (password == null) {
@@ -673,9 +789,7 @@ class RemoteSubscriptionService {
       return null;
     }
 
-    final settings = <String, dynamic>{
-      'password': password,
-    };
+    final settings = <String, dynamic>{'password': password};
 
     // SNI 设置
     final String? sni = proxy['sni']?.toString();
@@ -697,8 +811,15 @@ class RemoteSubscriptionService {
   }
 
   /// 转换 Hysteria 配置
-  VPNConfig? _convertHysteria(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
-    final String? auth = proxy['auth_str']?.toString() ?? proxy['auth']?.toString();
+  VPNConfig? _convertHysteria(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
+    final String? auth =
+        proxy['auth_str']?.toString() ?? proxy['auth']?.toString();
 
     if (auth == null) {
       print('[远程订阅] Hysteria 配置缺少认证信息');
@@ -707,8 +828,32 @@ class RemoteSubscriptionService {
 
     final settings = <String, dynamic>{
       'auth': auth,
-      'up_mbps': proxy['up']?.toString() ?? '10',
-      'down_mbps': proxy['down']?.toString() ?? '50',
+      if (proxy['up'] != null) 'up': proxy['up'].toString(),
+      if (proxy['down'] != null) 'down': proxy['down'].toString(),
+      'skipCertVerify': proxy['skip-cert-verify'] == true,
+      if (proxy['obfs'] is String)
+        'obfs': {
+          'type': proxy['obfs'],
+          'password': proxy['obfs-password'] ?? '',
+        },
+      if (proxy['obfs'] is Map)
+        'obfs': Map<String, dynamic>.from(proxy['obfs']),
+      for (final key in [
+        'server_ports',
+        'hop_interval',
+        'hop_interval_max',
+        'bbr_profile',
+        'realm',
+        'disable_chrome_parrot',
+      ])
+        if (proxy[key] != null) key: proxy[key],
+      if (proxy['ports'] != null)
+        'server_ports': proxy['ports']
+            .toString()
+            .replaceAll('-', ':')
+            .split(','),
+      if (proxy['hop-interval'] != null)
+        'hop_interval': '${proxy['hop-interval']}s',
     };
 
     // SNI 设置
@@ -737,7 +882,13 @@ class RemoteSubscriptionService {
   }
 
   /// 转换 Hysteria2 配置
-  VPNConfig? _convertHysteria2(Map<String, dynamic> proxy, String name, String server, int port, String sourceUrl) {
+  VPNConfig? _convertHysteria2(
+    Map<String, dynamic> proxy,
+    String name,
+    String server,
+    int port,
+    String sourceUrl,
+  ) {
     final String? password = proxy['password']?.toString();
 
     if (password == null) {
@@ -747,8 +898,32 @@ class RemoteSubscriptionService {
 
     final settings = <String, dynamic>{
       'password': password,
-      'up_mbps': proxy['up']?.toString() ?? '10',
-      'down_mbps': proxy['down']?.toString() ?? '50',
+      if (proxy['up'] != null) 'up': proxy['up'].toString(),
+      if (proxy['down'] != null) 'down': proxy['down'].toString(),
+      'skipCertVerify': proxy['skip-cert-verify'] == true,
+      if (proxy['obfs'] is String)
+        'obfs': {
+          'type': proxy['obfs'],
+          'password': proxy['obfs-password'] ?? '',
+        },
+      if (proxy['obfs'] is Map)
+        'obfs': Map<String, dynamic>.from(proxy['obfs']),
+      for (final key in [
+        'server_ports',
+        'hop_interval',
+        'hop_interval_max',
+        'bbr_profile',
+        'realm',
+        'disable_chrome_parrot',
+      ])
+        if (proxy[key] != null) key: proxy[key],
+      if (proxy['ports'] != null)
+        'server_ports': proxy['ports']
+            .toString()
+            .replaceAll('-', ':')
+            .split(','),
+      if (proxy['hop-interval'] != null)
+        'hop_interval': '${proxy['hop-interval']}s',
     };
 
     // SNI 设置
@@ -796,5 +971,8 @@ class SubscriptionUpdateResult {
     required this.removedConfigs,
   });
 
-  bool get hasChanges => addedConfigs.isNotEmpty || updatedConfigs.isNotEmpty || removedConfigs.isNotEmpty;
+  bool get hasChanges =>
+      addedConfigs.isNotEmpty ||
+      updatedConfigs.isNotEmpty ||
+      removedConfigs.isNotEmpty;
 }

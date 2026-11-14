@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -7,20 +8,61 @@ import 'package:provider/provider.dart';
 import '../models/vpn_config.dart';
 import '../providers/vpn_provider_v2.dart';
 
-/// Only import a node URI. Scanning a website never opens or downloads it.
+/// Import a node URI or the JSON payload emitted by our node sharing screen.
+/// Scanning a website never opens or downloads it.
 VPNConfig? parseNodeQr(String? value) {
   final text = value?.trim() ?? '';
-  if (text.isEmpty ||
-      text.length > 16384 ||
-      text.contains('\n') ||
-      text.contains('\r')) {
+  if (text.isEmpty || text.length > 16384) {
     return null;
   }
   // Legacy parsers log exception input; scanned credentials stay out of logs.
-  final config = runZoned(
-    () => VPNConfig.fromSubscriptionLink(text),
-    zoneSpecification: ZoneSpecification(print: (_, _, _, _) {}),
-  );
+  final config = runZoned(() {
+    try {
+      if (text.startsWith('{') || text.startsWith('wg://')) {
+        final jsonText = text.startsWith('wg://')
+            ? utf8.decode(base64.decode(base64.normalize(text.substring(5))))
+            : text;
+        final data = jsonDecode(jsonText);
+        const types = {
+          'shadowsocks',
+          'vmess',
+          'vless',
+          'trojan',
+          'hysteria',
+          'hysteria2',
+          'tuic',
+          'anytls',
+          'shadowtls',
+          'naive',
+          'snell',
+          'wireguard',
+          'socks',
+          'http',
+        };
+        if (data is! Map<String, dynamic> ||
+            !types.contains(data['type']) ||
+            data['server'] is! String ||
+            data['port'] is! int ||
+            data['settings'] is! Map<String, dynamic> ||
+            (data['name'] != null && data['name'] is! String) ||
+            (text.startsWith('wg://') && data['type'] != 'wireguard')) {
+          return null;
+        }
+        // A shared node is a new local node, not a subscription or existing ID.
+        return VPNConfig(
+          name: data['name'] ?? data['type'],
+          type: data['type'],
+          server: data['server'],
+          port: data['port'],
+          settings: data['settings'],
+        );
+      }
+      if (text.contains('\n') || text.contains('\r')) return null;
+      return VPNConfig.fromSubscriptionLink(text);
+    } on Object {
+      return null;
+    }
+  }, zoneSpecification: ZoneSpecification(print: (_, _, _, _) {}));
   if (config == null ||
       config.server.trim().isEmpty ||
       config.port < 1 ||

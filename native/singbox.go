@@ -41,6 +41,7 @@ import (
 
 	// 使用 sagernet fork 的 quic-go
 	quic "github.com/sagernet/quic-go"
+	hy2 "github.com/sagernet/sing-quic/hysteria2"
 )
 
 type nodeDelayRequest struct {
@@ -124,8 +125,13 @@ func probeNodeDelay(request nodeDelayRequest, timeout time.Duration) (int, error
 }
 
 func physicalProbeControl() (control.Func, error) {
-	if runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("physical RTT probe requires Windows")
+	if runtime.GOOS == "android" {
+		// CoreVpnService excludes this app's UID from its VPN. Android routes
+		// these sockets outside our TUN without privileged SO_BINDTODEVICE.
+		return nil, nil
+	}
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("physical RTT probe requires Windows or Linux")
 	}
 	finder := control.NewDefaultInterfaceFinder()
 	monitor, err := tun.NewNetworkUpdateMonitor(slogger.NOP())
@@ -145,13 +151,23 @@ func physicalProbeControl() (control.Func, error) {
 	if physical == nil {
 		return nil, fmt.Errorf("no physical default interface")
 	}
-	// Windows uses IP_UNICAST_IF/IPV6_UNICAST_IF, not merely a source address.
+	// Windows uses IP_UNICAST_IF/IPV6_UNICAST_IF; Linux uses SO_BINDTODEVICE.
 	return control.BindToInterface(finder, physical.Name, physical.Index), nil
 }
 
 func probeQUICRTT(ctx context.Context, request nodeDelayRequest, address netip.Addr, target string, bind control.Func) (int, error) {
+	var obfs *option.Hysteria2Obfs
 	if len(request.Obfs) > 0 && string(request.Obfs) != "null" && string(request.Obfs) != `""` {
-		return -1, fmt.Errorf("obfuscated QUIC RTT probe unsupported")
+		protocol := strings.ToLower(request.Type)
+		if protocol != "hysteria2" && protocol != "hy2" {
+			return -1, fmt.Errorf("obfuscation unsupported for protocol")
+		}
+		if err := json.Unmarshal(request.Obfs, &obfs); err != nil {
+			return -1, err
+		}
+		if obfs == nil || obfs.Password == "" {
+			return -1, fmt.Errorf("missing obfuscation password")
+		}
 	}
 	alpn := request.TLS.ALPN
 	if len(alpn) == 0 {
@@ -176,6 +192,19 @@ func probeQUICRTT(ctx context.Context, request nodeDelayRequest, address netip.A
 		return -1, err
 	}
 	defer packetConn.Close()
+	if obfs != nil {
+		// Keep the portable PacketConn path: the Windows vectorised writer
+		// cannot send QUIC's mapped IPv4 addresses on an udp4 socket.
+		packetConn = struct{ net.PacketConn }{packetConn}
+		switch obfs.Type {
+		case "salamander":
+			packetConn = hy2.NewSalamanderConn(packetConn, []byte(obfs.Password))
+		case "gecko":
+			packetConn = hy2.NewGeckoConn(packetConn, []byte(obfs.Password), obfs.GeckoOptions.MinPacketSize, obfs.GeckoOptions.MaxPacketSize)
+		default:
+			return -1, fmt.Errorf("unknown obfuscation type")
+		}
+	}
 	remote, err := net.ResolveUDPAddr(network, target)
 	if err != nil {
 		return -1, err

@@ -12,7 +12,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = (ROOT / "secure_ss4.sh").read_text(encoding="utf-8")
+SOURCE = (ROOT / os.environ.get("SINGBOX_INSTALLER_TEST_SOURCE", "secure_ss4.sh")).read_text(encoding="utf-8")
 BASH = (r"C:\Program Files\Git\bin\bash.exe" if os.name == "nt"
         else shutil.which("bash"))
 

@@ -2,7 +2,7 @@
 
 ## ARM64 内核与手机扫码
 
-当前手机测试包使用 ARM64 原生内核。先安装 Go、Android SDK、NDK r27 和 JDK 17，并在 `PATH` 中配置 Flutter、Go；`ANDROID_NDK_ROOT` 可指定 NDK 路径。`native/go.mod` 依赖相邻目录的 `../sing-box` 源码，需与 `sing-box-version.txt` 保持一致。
+当前手机测试包使用 ARM64 原生内核。先安装 Go、Android SDK、NDK r29 和 JDK 17，并在 `PATH` 中配置 Flutter、Go；`ANDROID_NDK_ROOT` 可指定 NDK 路径。`native/go.mod` 使用 `build/singbox-core/source-v1.14.4` 内的官方源码，需与 `sing-box-version.txt` 保持一致。Naive 的 Cronet 静态库需要较新的链接器，旧 NDK r27 会出现 `unknown relocation (315)`。
 
 ```powershell
 # 重新编译 ARM64 内核（包含 16 KB ELF 段对齐）

@@ -14,6 +14,7 @@ import 'providers/vpn_provider_v2.dart';
 import 'services/improved_traffic_stats_service.dart';
 import 'services/singbox_ffi.dart';
 import 'services/singbox_native_service.dart';
+import 'services/auto_start_service.dart';
 import 'screens/simple_modern_home.dart';
 import 'theme/app_theme.dart';
 import 'widgets/speed_overlay.dart';
@@ -22,7 +23,7 @@ import 'utils/simple_single_instance.dart';
 import 'utils/log_policy.dart';
 import 'package:flutter/services.dart';
 
-void main() async {
+void main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _CrashLogger.init();
 
@@ -48,7 +49,10 @@ void main() async {
 
   await runZonedGuarded(
     () async {
-      await _bootstrap();
+      final launchedAtStartup = await AutoStartService().isAutoStartLaunch(
+        arguments,
+      );
+      await _bootstrap(launchedAtStartup);
     },
     (error, stack) {
       _CrashLogger.log('zone', error, stack);
@@ -57,7 +61,14 @@ void main() async {
   );
 }
 
-Future<void> _bootstrap() async {
+Future<void> _bootstrap(bool launchedAtStartup) async {
+  if (Platform.isLinux) {
+    // Desktop launchers and systemd may start in a read-only directory.
+    // Keep relative core cache files in the user's application data directory.
+    final dataDirectory = await getApplicationSupportDirectory();
+    await dataDirectory.create(recursive: true);
+    Directory.current = dataDirectory.path;
+  }
   // Android：在 runApp 之前尽早注册快捷方式处理器并通知原生就绪，避免事件丢失/延迟
   if (Platform.isAndroid) {
     try {
@@ -81,7 +92,7 @@ Future<void> _bootstrap() async {
   }
 
   // 提前预加载 sing-box FFI 库（异步执行，不阻塞启动流程）
-  if (Platform.isWindows) {
+  if (Platform.isWindows || Platform.isLinux) {
     // 异步预加载，不等待完成，这样不会阻塞应用启动
     SingBoxFFI.preloadLibrary();
   }
@@ -97,6 +108,7 @@ Future<void> _bootstrap() async {
         // 直接请求UAC提权
         final bool elevated = await PrivilegeManager.instance.requestElevation(
           reason: '应用启动需要管理员权限以支持TUN模式和系统代理功能',
+          autoStart: launchedAtStartup,
         );
 
         if (!elevated) {
@@ -118,8 +130,9 @@ Future<void> _bootstrap() async {
     }
   }
 
-  // 仅桌面平台执行单实例检查；移动端允许系统多实例调度（避免快捷方式前台化被误判退出）
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+  // Linux uses GtkApplication/D-Bus for activation and single-instance handling.
+  // This also avoids stale lock files preventing startup after a crash.
+  if (Platform.isWindows || Platform.isMacOS) {
     bool isUniqueInstance = true;
     try {
       print('开始单实例检查...');
@@ -165,7 +178,8 @@ Future<void> _bootstrap() async {
 
       // 设置窗口图标
       try {
-        await windowManager.setIcon('assets/app_icon.ico');
+        if (Platform.isWindows)
+          await windowManager.setIcon('assets/app_icon.ico');
       } catch (e) {
         print('设置窗口图标失败: $e');
       }
@@ -174,7 +188,11 @@ Future<void> _bootstrap() async {
 
   runApp(
     MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => VPNProviderV2())],
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => VPNProviderV2(launchedAtStartup: launchedAtStartup),
+        ),
+      ],
       child: const MyApp(),
     ),
   );
@@ -244,13 +262,26 @@ class _MyAppState extends State<MyApp> with WindowListener {
   String _lastTrayTip = '';
   String _lastTitle = '';
   bool _isExiting = false;
+  bool _trayReady = false;
+  final List<StreamSubscription<ProcessSignal>> _exitSignals = [];
 
   @override
   void initState() {
     super.initState();
+    if (Platform.isLinux) {
+      for (final signal in [ProcessSignal.sigterm, ProcessSignal.sigint]) {
+        _exitSignals.add(
+          signal.watch().listen((_) async {
+            await _exitApplication();
+          }),
+        );
+      }
+    }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       windowManager.addListener(this);
-      _initSystemTray();
+      _initSystemTray().catchError((Object error) {
+        debugPrint('系统托盘初始化失败: $error');
+      });
       _taskbarTimer?.cancel();
       _taskbarTimer = Timer.periodic(
         const Duration(seconds: 1),
@@ -262,11 +293,26 @@ class _MyAppState extends State<MyApp> with WindowListener {
   @override
   void dispose() {
     _taskbarTimer?.cancel();
+    for (final subscription in _exitSignals) {
+      subscription.cancel();
+    }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       windowManager.removeListener(this);
     }
     _cleanupAndExit();
     super.dispose();
+  }
+
+  Future<void> _exitApplication() async {
+    if (_isExiting) return;
+    await _cleanupAndExit();
+    if (Platform.isLinux) {
+      // Flutter 3.35's X11 view teardown can raise GLX BadAccess while the
+      // renderer still owns its context. VPN cleanup has completed; let the
+      // process release the display instead of destroying that live GL view.
+      exit(0);
+    }
+    await windowManager.destroy();
   }
 
   /// 清理资源并退出
@@ -275,6 +321,10 @@ class _MyAppState extends State<MyApp> with WindowListener {
     _isExiting = true;
 
     try {
+      if (Platform.isLinux) {
+        final vpn = Provider.of<VPNProviderV2>(context, listen: false);
+        if (vpn.isConnected || vpn.isConnecting) await vpn.disconnect();
+      }
       // 释放单实例锁
       await SimpleSingleInstance.releaseInstance();
     } catch (e) {
@@ -283,6 +333,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
   }
 
   String _resolveTrayIconPath() {
+    final iconName = Platform.isLinux ? 'app_icon.png' : 'app_icon.ico';
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       final assetsIcon = [
@@ -290,12 +341,12 @@ class _MyAppState extends State<MyApp> with WindowListener {
         'data',
         'flutter_assets',
         'assets',
-        'app_icon.ico',
+        iconName,
       ].join(Platform.pathSeparator);
       if (File(assetsIcon).existsSync()) return assetsIcon;
     } catch (_) {}
 
-    const devIcon = 'assets/app_icon.ico';
+    final devIcon = 'assets/$iconName';
     if (File(devIcon).existsSync()) return devIcon;
 
     const runnerIcon = 'windows/runner/resources/app_icon.ico';
@@ -310,11 +361,14 @@ class _MyAppState extends State<MyApp> with WindowListener {
     }
     final String path = _resolveTrayIconPath();
 
-    await _systemTray.initSystemTray(
+    final trayInitialized = await _systemTray.initSystemTray(
       title: 'Gsou VPN',
       iconPath: path,
       toolTip: 'Gsou VPN Client',
     );
+    if (!trayInitialized) {
+      throw StateError('System tray initialization failed');
+    }
 
     final menu = Menu();
     await menu.buildFrom([
@@ -335,25 +389,26 @@ class _MyAppState extends State<MyApp> with WindowListener {
           await windowManager.hide();
         },
       ),
-      MenuItemLabel(
-        label: 'Overlay Mode',
-        onClicked: (item) async {
-          if (!_isMinimized) {
-            await _enterOverlayMode();
-          }
-        },
-      ),
+      if (!Platform.isLinux)
+        MenuItemLabel(
+          label: 'Overlay Mode',
+          onClicked: (item) async {
+            if (!_isMinimized) {
+              await _enterOverlayMode();
+            }
+          },
+        ),
       MenuSeparator(),
       MenuItemLabel(
         label: 'Exit',
         onClicked: (item) async {
-          await _cleanupAndExit();
-          await windowManager.destroy();
+          await _exitApplication();
         },
       ),
     ]);
 
     await _systemTray.setContextMenu(menu);
+    _trayReady = true;
 
     _systemTray.registerSystemTrayEventHandler((eventName) async {
       if (eventName == kSystemTrayEventClick) {
@@ -559,7 +614,7 @@ class _MyAppState extends State<MyApp> with WindowListener {
     if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       return;
     }
-    if (eventName == 'minimize') {
+    if (eventName == 'minimize' && !Platform.isLinux) {
       // 拦截最小化事件，改为进入悬浮窗模式
       if (!_isMinimized && !_isEnteringOverlay && !_isRestoringWindow) {
         // 确保在主线程中执行，并添加延迟以确保状态稳定
@@ -577,6 +632,10 @@ class _MyAppState extends State<MyApp> with WindowListener {
 
   @override
   void onWindowClose() {
+    if (Platform.isLinux && !_trayReady) {
+      _exitApplication();
+      return;
+    }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       // 拦截关闭事件，改为隐藏到托盘
       windowManager.hide();

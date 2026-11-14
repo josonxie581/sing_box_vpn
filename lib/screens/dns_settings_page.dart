@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import '../widgets/auto_start_card.dart';
 import '../utils/navigation.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider_v2.dart';
@@ -52,6 +55,10 @@ class _DnsSettingsPageState extends State<DnsSettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (Platform.isWindows || Platform.isLinux) ...[
+                  const AutoStartCard(),
+                  const SizedBox(height: 12),
+                ],
                 // TUN HijackDNS
                 _buildSwitchCard(
                   'TUN HijackDNS',

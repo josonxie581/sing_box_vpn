@@ -425,6 +425,7 @@ class RulesetManager {
           "type": "tun",
           // 使用稳定的接口名称
           if (Platform.isWindows) "interface_name": "sing-box",
+          if (Platform.isLinux) "interface_name": "gsou-tun",
           // IPv4地址配置，仅在明确启用IPv6且VPS支持时才添加IPv6
           "address": enableIpv6
               ? ["172.19.0.1/30", "2001:db8::1/128"]
@@ -433,6 +434,7 @@ class RulesetManager {
           // MTU：VPN 封装有额外开销，默认 1400 避免分片
           "mtu": tunMtu ?? 1400,
           "auto_route": true,
+          if (Platform.isLinux) "auto_redirect": true,
           "strict_route": tunStrictRoute,
 
           // mixed：TCP 走 system（高效），UDP 走 gVisor（兼容性好）
@@ -559,7 +561,7 @@ class RulesetManager {
     final sanitizedRules = _sanitizeRules(mergedRules);
 
     final config = <String, dynamic>{
-      "log": {"level": "fatal", "timestamp": true},
+      "log": {"disabled": true},
       "dns": getDnsConfig(mode, useTun: useTun),
       "inbounds": inbounds,
       "outbounds": baseOutbounds,

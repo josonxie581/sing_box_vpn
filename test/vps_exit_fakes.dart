@@ -15,10 +15,14 @@ Map<String, dynamic> exitStatus({
   String? jobState,
   bool rollback = false,
   bool external = false,
+  bool singapore = false,
   String? revision,
 }) => {
   'revision': revision ?? repeat('a', 64),
-  'policy': policy.toJson(),
+  'policy': {
+    ...policy.toJson(),
+    if (singapore) 'singapore_domains': policy.singaporeDomains,
+  },
   'external_rules': external,
   'can_rollback': rollback,
   'job': jobState == null
@@ -36,6 +40,7 @@ Map<String, dynamic> exitStatus({
   'exits': {
     'direct': {'label': '日本 DMIT', 'ip': '192.0.2.1'},
     'au': {'label': '澳洲住宅 IP', 'ip': '198.51.100.1'},
+    if (singapore) 'sg': {'label': '新加坡', 'ip': '203.0.113.1'},
   },
 };
 
@@ -47,6 +52,8 @@ class FakeVpsTransport implements VpsExitTransport {
       failJob = false,
       canRollback = true,
       external = false;
+  bool singapore = false;
+  bool australia = true;
   bool submitted = false;
   int polls = 0, transientFailures = 0;
   Future<void>? statusGate;
@@ -70,10 +77,11 @@ class FakeVpsTransport implements VpsExitTransport {
         }
         polls++;
       }
-      return exitStatus(
+      final status = exitStatus(
         policy: policy,
         rollback: canRollback,
         external: external,
+        singapore: singapore,
         jobState: submitted
             ? (polls == 1
                   ? 'running'
@@ -82,6 +90,8 @@ class FakeVpsTransport implements VpsExitTransport {
                   : 'succeeded')
             : null,
       );
+      if (!australia) (status['exits'] as Map).remove('au');
+      return status;
     }
     if (action == 'validate') {
       if (validateThrows) throw const FormatException('配置已更新，请刷新');

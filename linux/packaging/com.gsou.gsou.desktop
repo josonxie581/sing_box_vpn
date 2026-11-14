@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Gsou
+Comment=Sing-box VPN client
+Exec=/opt/gsou/gsou
+Icon=/opt/gsou/data/flutter_assets/assets/app_icon.png
+Terminal=false
+Categories=Network;
+StartupNotify=true
+StartupWMClass=com.gsou.gsou

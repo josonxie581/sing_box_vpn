@@ -27,8 +27,7 @@ class _VpsExitPageState extends State<VpsExitPage> {
       _port = TextEditingController(text: '22');
   final _user = TextEditingController(text: 'root');
   final _key = TextEditingController(), _knownHosts = TextEditingController();
-  final _auDomains = TextEditingController(),
-      _directDomains = TextEditingController();
+  final _domainEditors = <String, TextEditingController>{};
   VpsExitTarget _claude = VpsExitTarget.australia,
       _openai = VpsExitTarget.direct,
       _default = VpsExitTarget.direct;
@@ -66,8 +65,10 @@ class _VpsExitPageState extends State<VpsExitPage> {
     _claude = policy.claude;
     _openai = policy.openai;
     _default = policy.defaultTarget;
-    _auDomains.text = policy.australiaDomains.join('\n');
-    _directDomains.text = policy.directDomains.join('\n');
+    for (final id in _controller.status!.exits.keys) {
+      (_domainEditors[id] ??= TextEditingController()).text =
+          (policy.allDomains[id] ?? []).join('\n');
+    }
     _dirty = false;
   }
 
@@ -76,7 +77,21 @@ class _VpsExitPageState extends State<VpsExitPage> {
     setState(() {
       final current = _controller.status;
       if (current != null && current != _seen) {
-        if (!_dirty) _fill(current.policy);
+        final previous = _seen;
+        final inventoryChanged =
+            previous != null &&
+            (previous.exits.keys
+                    .toSet()
+                    .difference(current.exits.keys.toSet())
+                    .isNotEmpty ||
+                current.exits.keys
+                    .toSet()
+                    .difference(previous.exits.keys.toSet())
+                    .isNotEmpty);
+        if (!_dirty || inventoryChanged) _fill(current.policy);
+        for (final id in current.exits.keys) {
+          _domainEditors.putIfAbsent(id, TextEditingController.new);
+        }
         if (_seen == null) _connectionOpen = false;
         _seen = current;
       }
@@ -87,8 +102,10 @@ class _VpsExitPageState extends State<VpsExitPage> {
     defaultTarget: _default,
     claude: _claude,
     openai: _openai,
-    australiaDomains: _lines(_auDomains.text),
-    directDomains: _lines(_directDomains.text),
+    domainRules: {
+      for (final id in _controller.status!.exits.keys)
+        id: _lines(_domainEditors[id]?.text ?? ''),
+    },
   ).normalized();
   List<String> _lines(String text) => text
       .split(RegExp(r'\r?\n'))
@@ -327,7 +344,7 @@ class _VpsExitPageState extends State<VpsExitPage> {
     key: ValueKey('$title-${value.value}'),
     isExpanded: true,
     decoration: InputDecoration(labelText: title),
-    items: VpsExitTarget.values
+    items: _controller.status!.availableTargets
         .map(
           (target) => DropdownMenuItem(
             value: target,
@@ -397,31 +414,23 @@ class _VpsExitPageState extends State<VpsExitPage> {
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
         const SizedBox(height: 14),
-        TextField(
-          controller: _auDomains,
-          enabled: !_blocked,
-          minLines: 3,
-          maxLines: 6,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: '走住宅代理的域名',
-            hintText: 'example.com',
+        for (final target in status.availableTargets) ...[
+          const SizedBox(height: 16),
+          TextField(
+            key: ValueKey('domains-${target.value}'),
+            controller: _domainEditors[target.value],
+            enabled: !_blocked,
+            minLines: 3,
+            maxLines: 6,
+            autocorrect: false,
+            decoration: InputDecoration(
+              labelText: '走${status.label(target)}的域名',
+              hintText: 'example.com',
+              helperText: status.address(target),
+            ),
+            onChanged: (_) => setState(() => _dirty = true),
           ),
-          onChanged: (_) => setState(() => _dirty = true),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _directDomains,
-          enabled: !_blocked,
-          minLines: 3,
-          maxLines: 6,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: '走 VPS 直连的域名',
-            hintText: 'example.org',
-          ),
-          onChanged: (_) => setState(() => _dirty = true),
-        ),
+        ],
         if (_dirty)
           const Padding(
             padding: EdgeInsets.only(top: 12),
@@ -445,15 +454,19 @@ class _VpsExitPageState extends State<VpsExitPage> {
                   : () => _run(() => _controller.validate(_policy())),
               child: const Text('检查规则'),
             ),
-            OutlinedButton(
-              onPressed: _blocked
-                  ? null
-                  : () => setState(() {
-                      _fill(const VpsExitPolicy());
-                      _dirty = true;
-                    }),
-              child: const Text('仅 Claude 走澳洲'),
-            ),
+            if (status.exits.containsKey('au') &&
+                status.exits.containsKey('direct'))
+              OutlinedButton(
+                onPressed: _blocked
+                    ? null
+                    : () => setState(() {
+                        _fill(const VpsExitPolicy());
+                        _dirty = true;
+                      }),
+                child: Text(
+                  '仅 Claude 走${status.label(VpsExitTarget.australia)}',
+                ),
+              ),
             OutlinedButton(
               onPressed: _blocked || !status.canRollback
                   ? null
@@ -556,8 +569,7 @@ class _VpsExitPageState extends State<VpsExitPage> {
       _user,
       _key,
       _knownHosts,
-      _auDomains,
-      _directDomains,
+      ..._domainEditors.values,
     ]) {
       field.dispose();
     }

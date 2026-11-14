@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'lib/services/remote_subscription_service.dart';
-import 'lib/models/vpn_config.dart';
+import 'package:gsou/services/remote_subscription_service.dart';
+import 'package:gsou/models/vpn_config.dart';
 
 /// 测试远程订阅功能
 Future<void> main() async {

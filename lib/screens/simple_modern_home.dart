@@ -938,7 +938,7 @@ class SimpleModernHome extends StatelessWidget {
           ),
           Switch(
             value: provider.autoSystemProxy,
-            onChanged: provider.useTun
+            onChanged: provider.useTun || !provider.isSystemProxySupported
                 ? null
                 : (v) => provider.setAutoSystemProxy(v),
             thumbColor: WidgetStateProperty.resolveWith<Color?>(
@@ -1244,7 +1244,7 @@ class SimpleModernHome extends StatelessWidget {
     } else {
       final tunStatus = provider.tunAvailability;
       if (tunStatus.needsElevation) {
-        return '需要管理员权限启用 TUN 模式';
+        return tunStatus.description;
       } else if (provider.autoSystemProxy && provider.isSystemProxySupported) {
         return '仅代理模式，系统代理将自动配置';
       } else {
@@ -1278,9 +1278,13 @@ class SimpleModernHome extends StatelessWidget {
         // 需要管理员权限，提示用户重启应用
         _showError(
           context,
-          '需要管理员权限',
-          'TUN 模式需要管理员权限才能运行。\n'
-              '请关闭应用后，右键选择"以管理员身份运行"重新启动。',
+          defaultTargetPlatform == TargetPlatform.linux
+              ? '需要安装网络权限'
+              : '需要管理员权限',
+          defaultTargetPlatform == TargetPlatform.linux
+              ? '请运行程序包中的 Linux 安装脚本，然后重新打开 Gsou。\n无需以 root 身份运行桌面程序。'
+              : 'TUN 模式需要管理员权限才能运行。\n'
+                    '请关闭应用后，右键选择"以管理员身份运行"重新启动。',
         );
         break;
 

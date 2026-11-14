@@ -32,7 +32,8 @@ class SimpleQRFunctions {
       final imagePath = '${tempDir.path}\\clipboard_$timestamp.png';
 
       // 改进的PowerShell 脚本，增强兼容性
-      final script = '''
+      final script =
+          '''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -72,11 +73,12 @@ try {
 ''';
 
       // 执行PowerShell
-      final result = await Process.run(
-        'powershell',
-        ['-ExecutionPolicy', 'Bypass', '-Command', script],
-        runInShell: true,
-      );
+      final result = await Process.run('powershell', [
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        script,
+      ], runInShell: true);
 
       print('剪贴板脚本输出: ${result.stdout}');
       if (result.stderr.toString().isNotEmpty) {
@@ -131,6 +133,13 @@ try {
       'tuic://',
       'hysteria://',
       'hysteria2://',
+      'hy2://',
+      'anytls://',
+      'tu5://',
+      'shadowtls://',
+      'naive+https://',
+      'naive+quic://',
+      'snell://',
       'wireguard://',
       'http://',
       'https://',
